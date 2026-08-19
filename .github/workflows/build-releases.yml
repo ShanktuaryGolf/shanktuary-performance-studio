@@ -16,8 +16,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            asset_name: Shanktuary-Studio-Linux-x64.tar.gz
+          - os: ubuntu-22.04
+            asset_name: Shanktuary-Studio-x86_64.AppImage
           - os: windows-latest
             asset_name: Shanktuary-Studio-Windows-x64.zip
           - os: macos-latest
@@ -46,14 +46,34 @@ jobs:
         run: |
           pyinstaller --noconfirm --onedir --windowed --add-data "assets;assets" shanktuary_performance_studio.py
 
+      - name: Package Universal AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -r dist/shanktuary_performance_studio/* AppDir/usr/bin/
+          cp shanktuary_performance_studio.desktop AppDir/
+          cp assets/iron_face.png AppDir/shanktuary_performance_studio.png
+          cp assets/iron_face.png AppDir/usr/share/icons/hicolor/256x256/apps/shanktuary_performance_studio.png
+          
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "$HERE/usr/bin/shanktuary_performance_studio" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          wget https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir Shanktuary-Studio-x86_64.AppImage
+
       - name: Compress Artifacts (Windows)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           Compress-Archive -Path dist/shanktuary_performance_studio/* -DestinationPath ${{ matrix.asset_name }}
 
-      - name: Compress Artifacts (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Compress Artifacts (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           tar -czf ${{ matrix.asset_name }} -C dist/shanktuary_performance_studio .
