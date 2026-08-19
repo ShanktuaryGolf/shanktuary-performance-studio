@@ -3,7 +3,7 @@
 Shanktuary Performance Studio
 ------------------------------
 Connects to OpenLaunch Nova (via official mDNS _openlaunch-ws._tcp.local. discovery) and provides:
-  1. Mode 1: 4-Quadrant TrackMan/Quad Studio Dashboard (matching 2.webp)
+  1. Mode 1: 4-Quadrant Quad Studio Dashboard (matching 2.webp)
   2. Mode 2: Floor Divot Projector View (Hitting Mat Projection)
   3. Mode 3: Performance Suite & Trajectory Comparison Dashboard (matching 3.webp)
      - Zero-Config Official mDNS Auto-Discovery (_openlaunch-ws._tcp.local.)

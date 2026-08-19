@@ -11,7 +11,7 @@ A professional, open-source **Launch Monitor Dashboard & Performance Analytics S
 ## 🌟 Key Features
 
 * **Zero-Config mDNS Auto-Discovery:** Automatically discovers any OpenLaunch Nova hardware on your local network using official `_openlaunch-ws._tcp.local.` mDNS zeroconf broadcasting. No IP address setup required!
-* **Mode 1 — 4-Quadrant TrackMan/Quad Studio Dashboard:**
+* **Mode 1 — 4-Quadrant Quad Studio Dashboard:**
   * **Top-Left (Overhead View):** Real clubhead address view (`iron_overhead.png`) with dynamic face angle rotation and Cyan swing path vector arrow.
   * **Bottom-Left (Side Elevation View):** Profile side view (`iron_side.png`) showing dynamic launch angle vector, peak height, and backspin.
   * **Top-Right (3D Spin Axis):** 3D golf ball with tilted red spin axis vector, sidespin, and shot grade badge (`Rank A–D`).
