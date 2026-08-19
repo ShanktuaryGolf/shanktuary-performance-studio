@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Shanktuary Performance Studio
+Comment=OpenLaunch Nova Launch Monitor Dashboard & Performance Suite
+Exec=shanktuary_performance_studio
+Icon=shanktuary_performance_studio
+Categories=Sports;Utility;
+Terminal=false
