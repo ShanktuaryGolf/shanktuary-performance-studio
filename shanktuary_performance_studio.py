@@ -29,8 +29,10 @@ import time
 import math
 import threading
 import queue
+import webbrowser
 import tkinter as tk
 from PIL import Image, ImageTk, ImageDraw, ImageOps
+import obs_server
 
 # Configuration & Logging
 FALLBACK_NOVA_HOST = "192.168.40.249"
@@ -290,6 +292,13 @@ class ShanktuaryApp:
                 self.selected_shot_index = len(self.session_shots) - 1
                 self.current_shot = msg
                 self.save_session_to_file()
+                
+                # Push shot to OBS Stream Overlay Server
+                try:
+                    obs_server.obs_state.push_shot(msg)
+                except Exception as e:
+                    print(f"[!] OBS push note: {e}")
+
                 self.draw_screen()
         except queue.Empty:
             pass
@@ -857,8 +866,11 @@ class ShanktuaryApp:
         self.canvas.create_text(cx, 55, text=f"DIVOT PROJECTOR  •  {shot_name.upper()}", fill="#00FF66", font=("Helvetica", 14, "bold"))
 
 def main():
-    t = threading.Thread(target=websocket_worker, daemon=True)
-    t.start()
+    t_ws = threading.Thread(target=websocket_worker, daemon=True)
+    t_ws.start()
+
+    # Start OBS Studio Browser Source Overlay Server on port 9321
+    obs_server.launch_obs_server_thread()
 
     root = tk.Tk()
     root.geometry("1150x780")

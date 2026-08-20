@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shanktuary Performance Studio - OBS Stream Overlay</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100vw;
+      height: 100vh;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      color: #FFFFFF;
+    }
+
+    /* Fullscreen Overlay Canvas Container */
+    #overlay-root {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 30px;
+      pointer-events: none;
+    }
+
+    /* Top/Middle Visuals Area */
+    .visuals-container {
+      display: flex;
+      justify-content: flex-start;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .visual-card {
+      background: rgba(18, 20, 26, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .visual-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #00E5FF;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    /* Lower-Third Metric Cards Grid */
+    .metrics-hud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .metric-card {
+      background: rgba(20, 22, 30, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 3px solid #00E5FF;
+      border-radius: 8px;
+      padding: 10px 16px;
+      min-width: 130px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(6px);
+      transition: transform 0.2s ease, opacity 0.3s ease;
+    }
+
+    .metric-card.accent-green { border-top-color: #00FF66; }
+    .metric-card.accent-yellow { border-top-color: #FFEA00; }
+    .metric-card.accent-pink { border-top-color: #FF4081; }
+
+    .metric-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #8E94A5;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .metric-val {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: #FFFFFF;
+    }
+
+    .metric-unit {
+      font-size: 10px;
+      color: #6C7284;
+      margin-left: 4px;
+      font-weight: normal;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="overlay-root">
+    <!-- Top/Middle Visual Widgets (Virtual Divot Projector, Face Impact, Overhead) -->
+    <div class="visuals-container">
+      <div class="visual-card" id="card-divot">
+        <div class="visual-title">VIRTUAL DIVOT PROJECTOR</div>
+        <canvas id="divotCanvas" width="220" height="220"></canvas>
+      </div>
+
+      <div class="visual-card" id="card-face">
+        <div class="visual-title">FACE IMPACT LOCATION</div>
+        <canvas id="faceCanvas" width="220" height="150"></canvas>
+      </div>
+    </div>
+
+    <!-- Lower-Third Stream HUD Cards -->
+    <div class="metrics-hud" id="metrics-hud">
+      <!-- Dynamic Metric Cards Inserted Here -->
+    </div>
+  </div>
+
+  <script>
+    let layoutConfig = {
+      visuals: { divot: true, face_impact: true, overhead: true },
+      metrics: { ball_speed: true, club_speed: true, carry: true, smash: true, launch_angle: true, total_spin: true, club_path: true, face_angle: true, offline: true },
+      styling: { theme: 'dark', font_scale: 1.0, auto_fade_sec: 0 }
+    };
+
+    let latestShot = null;
+
+    // Load assets
+    const faceImg = new Image();
+    faceImg.src = '/assets/iron_face.png';
+    faceImg.onload = () => drawFaceImpact();
+
+    function initWebSocket() {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'init' || msg.type === 'layout_update') {
+            if (msg.layout) {
+              layoutConfig = msg.layout;
+              applyLayoutConfig();
+            }
+            if (msg.data) {
+              latestShot = msg.data;
+              renderShotData();
+            }
+          } else if (msg.type === 'shot') {
+            latestShot = msg.data;
+            renderShotData();
+          }
+        } catch (e) {
+          console.error('Error handling WebSocket message:', e);
+        }
+      };
+
+      ws.onclose = () => setTimeout(initWebSocket, 2000);
+    }
+
+    function applyLayoutConfig() {
+      document.getElementById('card-divot').style.display = layoutConfig.visuals.divot ? 'flex' : 'none';
+      document.getElementById('card-face').style.display = layoutConfig.visuals.face_impact ? 'flex' : 'none';
+      renderShotData();
+    }
+
+    function renderShotData() {
+      if (!latestShot) return;
+
+      const ogc = latestShot.open_golf_coach || {};
+      const us = ogc.us_customary_units || {};
+
+      const metricsMap = [
+        { key: 'ball_speed', label: 'BALL SPEED', val: (us.ball_speed_mph || 0).toFixed(1), unit: 'MPH', accent: 'accent-green' },
+        { key: 'club_speed', label: 'CLUB SPEED', val: (us.club_speed_mph || 0).toFixed(1), unit: 'MPH', accent: '' },
+        { key: 'smash', label: 'SMASH FACTOR', val: (ogc.smash_factor || 1.23).toFixed(2), unit: '', accent: '' },
+        { key: 'carry', label: 'CARRY', val: (us.carry_distance_yards || 0).toFixed(1), unit: 'YDS', accent: 'accent-yellow' },
+        { key: 'total', label: 'TOTAL', val: (us.total_distance_yards || 0).toFixed(1), unit: 'YDS', accent: '' },
+        { key: 'launch_angle', label: 'LAUNCH ANGLE', val: (latestShot.vertical_launch_angle_degrees || 0).toFixed(1) + '°', unit: '', accent: '' },
+        { key: 'total_spin', label: 'TOTAL SPIN', val: Math.round(ogc.total_spin_rpm || 0), unit: 'RPM', accent: '' },
+        { key: 'club_path', label: 'CLUB PATH', val: Math.abs(ogc.club_path_degrees?.right_handed || 0).toFixed(1) + '° ' + ((ogc.club_path_degrees?.right_handed || 0) > 0 ? 'R' : 'L'), unit: '', accent: 'accent-pink' },
+        { key: 'face_angle', label: 'FACE ANGLE', val: Math.abs(ogc.club_face_to_target_degrees?.right_handed || 0).toFixed(1) + '° ' + ((ogc.club_face_to_target_degrees?.right_handed || 0) > 0 ? 'Open' : 'Closed'), unit: '', accent: 'accent-yellow' },
+        { key: 'offline', label: 'OFFLINE', val: Math.abs(us.offline_distance_yards || 0).toFixed(1) + ' ' + ((us.offline_distance_yards || 0) < 0 ? 'L' : 'R'), unit: 'YDS', accent: '' }
+      ];
+
+      const hud = document.getElementById('metrics-hud');
+      hud.innerHTML = '';
+
+      metricsMap.forEach(m => {
+        if (layoutConfig.metrics[m.key]) {
+          const card = document.createElement('div');
+          card.className = `metric-card ${m.accent}`;
+          card.innerHTML = `
+            <div class="metric-label">${m.label}</div>
+            <div class="metric-val">${m.val}<span class="metric-unit">${m.unit}</span></div>
+          `;
+          hud.appendChild(card);
+        }
+      });
+
+      drawDivot();
+      drawFaceImpact();
+    }
+
+    function drawDivot() {
+      const canvas = document.getElementById('divotCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      const ogc = latestShot?.open_golf_coach || {};
+      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+      const rad = pathDeg * Math.PI / 180;
+
+      // Target centerline grid
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#222530';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - 90, cy); ctx.lineTo(cx + 90, cy);
+      ctx.moveTo(cx, cy - 90); ctx.lineTo(cx, cy + 90);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw Rotated Divot Polygon
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rad);
+
+      const w = 36, h = 120;
+      ctx.beginPath();
+      ctx.moveTo(-w/2, 15);
+      ctx.lineTo(-w/2 - 4, -h/2);
+      ctx.lineTo(0, -h/2 - 20);
+      ctx.lineTo(w/2 + 4, -h/2);
+      ctx.lineTo(w/2, 15);
+      ctx.lineTo(0, 35);
+      ctx.closePath();
+
+      ctx.fillStyle = '#1B3B1B';
+      ctx.strokeStyle = '#00FF66';
+      ctx.lineWidth = 2.5;
+      ctx.fill();
+      ctx.stroke();
+
+      // Swing Path Arrow
+      ctx.beginPath();
+      ctx.moveTo(0, 70);
+      ctx.lineTo(0, -70);
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Arrow head
+      ctx.beginPath();
+      ctx.moveTo(0, -70);
+      ctx.lineTo(-6, -60);
+      ctx.lineTo(6, -60);
+      ctx.fillStyle = '#00E5FF';
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawFaceImpact() {
+      const canvas = document.getElementById('faceCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      if (faceImg.complete && faceImg.naturalWidth > 0) {
+        ctx.drawImage(faceImg, cx - 90, cy - 50, 180, 100);
+      } else {
+        ctx.fillStyle = '#222530';
+        ctx.fillRect(cx - 80, cy - 40, 160, 80);
+      }
+
+      if (latestShot) {
+        const ogc = latestShot.open_golf_coach || {};
+        const faceToPath = ogc.club_face_to_path_degrees?.right_handed || 0;
+        const vertLaunch = latestShot.vertical_launch_angle_degrees || 20.0;
+
+        const hImpactMm = Math.round(faceToPath * 0.75);
+        const vImpactMm = Math.round((vertLaunch - 22.0) * 0.85);
+
+        const pxShiftH = Math.max(-35, Math.min(30, Math.round(hImpactMm * 1.5)));
+        const pxShiftV = Math.max(-18, Math.min(18, Math.round(vImpactMm * 1.5)));
+
+        const impactX = cx - 15 + pxShiftH;
+        const impactY = cy - pxShiftV;
+
+        ctx.beginPath();
+        ctx.arc(impactX, impactY, 9, 0, Math.PI * 2);
+        ctx.strokeStyle = '#FF1744';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(impactX, impactY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#FF1744';
+        ctx.fill();
+      }
+    }
+
+    // Initialize
+    initWebSocket();
+    fetch('/api/layout').then(r => r.json()).then(data => {
+      layoutConfig = data;
+      applyLayoutConfig();
+    }).catch(() => {});
+    fetch('/api/shot').then(r => r.json()).then(data => {
+      latestShot = data;
+      renderShotData();
+    }).catch(() => {});
+  </script>
+</body>
+</html>

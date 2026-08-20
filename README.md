@@ -26,9 +26,9 @@ A professional, open-source **Launch Monitor Dashboard & Performance Analytics S
   * **Click-to-Inspect Quad View:** Click `[🔍 INSPECT QUAD VIEW]` to view full 4-Quadrant clubface impact & path analysis for any past shot!
   * **Draggable Sidebar Divider:** Click and drag the cyan divider line to dynamically resize the session stats sidebar.
 
----
-
-## 🚀 Quickstart Guide
+* **Built-in OBS Studio Browser Source Overlay Server:**
+  * **OBS Browser Source URL:** `http://localhost:9321` (1920x1080 transparent HUD overlay for live streaming / video capture).
+  * **Interactive Web Configurator (`http://localhost:9321/config`):** Toggle switches to check/uncheck every metric, Virtual Divot Projector canvas, clubface impact ring, and theme styles with instant live sync!
 
 ### 1. Installation
 

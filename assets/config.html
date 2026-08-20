@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OBS Overlay Configurator - Shanktuary Performance Studio</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      background-color: #101116;
+      color: #E2E8F0;
+      padding: 30px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #181A22;
+      border: 1px solid #282C3A;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    h1 {
+      font-size: 22px;
+      color: #00E5FF;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #7E8496;
+      margin-bottom: 25px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #00FF66;
+      border-bottom: 1px solid #282C3A;
+      padding-bottom: 6px;
+      margin-top: 25px;
+      margin-bottom: 15px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .toggle-card {
+      background: #1F222D;
+      border: 1px solid #2E3344;
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .toggle-card:hover {
+      border-color: #00E5FF;
+      background: #252936;
+    }
+    .toggle-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #D0D5DD;
+    }
+    /* Toggle Switch Component */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #383E50;
+      transition: .3s;
+      border-radius: 22px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px; width: 16px;
+      left: 3px; bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #00E5FF;
+    }
+    input:checked + .slider:before {
+      transform: translateX(18px);
+    }
+    .btn-save {
+      background: #00E5FF;
+      color: #101116;
+      font-size: 14px;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      padding: 14px 28px;
+      width: 100%;
+      margin-top: 30px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .btn-save:hover {
+      background: #33EBFF;
+    }
+    .status-banner {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      text-align: center;
+      display: none;
+    }
+    .status-success {
+      background: rgba(0, 255, 102, 0.15);
+      border: 1px solid #00FF66;
+      color: #00FF66;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>⚙️ OBS Overlay Layout Configurator</h1>
+    <p class="subtitle">Customize which metrics, divot projectors, and clubface visuals appear in your OBS Studio Browser Source (http://localhost:9321)</p>
+
+    <!-- Visual Widgets Section -->
+    <div class="section-title">🌿 Visual Widgets & Projectors</div>
+    <div class="grid">
+      <label class="toggle-card">
+        <span class="toggle-label">Virtual Divot Projector</span>
+        <span class="switch">
+          <input type="checkbox" id="v_divot">
+          <span class="slider"></span>
+        </span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Clubface Impact Ring</span>
+        <span class="switch">
+          <input type="checkbox" id="v_face">
+          <span class="slider"></span>
+        </span>
+      </label>
+    </div>
+
+    <!-- Ball Telemetry Metrics Section -->
+    <div class="section-title">🏎️ Ball Telemetry Metrics</div>
+    <div class="grid">
+      <label class="toggle-card"><span class="toggle-label">Ball Speed</span><span class="switch"><input type="checkbox" id="m_ball_speed"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Carry Distance</span><span class="switch"><input type="checkbox" id="m_carry"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Total Distance</span><span class="switch"><input type="checkbox" id="m_total"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Launch Angle</span><span class="switch"><input type="checkbox" id="m_launch_angle"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Push / Pull Angle</span><span class="switch"><input type="checkbox" id="m_push_pull"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Total Spin</span><span class="switch"><input type="checkbox" id="m_total_spin"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Sidespin</span><span class="switch"><input type="checkbox" id="m_sidespin"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Spin Axis</span><span class="switch"><input type="checkbox" id="m_spin_axis"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Offline Distance</span><span class="switch"><input type="checkbox" id="m_offline"><span class="slider"></span></span></label>
+    </div>
+
+    <!-- Club Telemetry Metrics Section -->
+    <div class="section-title">🏌️ Club Telemetry Metrics</div>
+    <div class="grid">
+      <label class="toggle-card"><span class="toggle-label">Club Speed</span><span class="switch"><input type="checkbox" id="m_club_speed"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Smash Factor</span><span class="switch"><input type="checkbox" id="m_smash"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Club Path</span><span class="switch"><input type="checkbox" id="m_club_path"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Face Angle</span><span class="switch"><input type="checkbox" id="m_face_angle"><span class="slider"></span></span></label>
+    </div>
+
+    <button class="btn-save" onclick="saveLayout()">💾 SAVE LAYOUT & UPDATE OBS LIVE</button>
+    <div class="status-banner status-success" id="statusMsg">✓ Layout saved! OBS Browser Source updated instantly in real-time.</div>
+  </div>
+
+  <script>
+    const visualsList = ['divot', 'face_impact'];
+    const metricsList = ['ball_speed', 'carry', 'total', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'offline', 'club_speed', 'smash', 'club_path', 'face_angle'];
+
+    function loadSavedLayout() {
+      fetch('/api/layout')
+        .then(r => r.json())
+        .then(layout => {
+          visualsList.forEach(v => {
+            const el = document.getElementById(`v_${v}`);
+            if (el) el.checked = layout.visuals ? layout.visuals[v] !== false : true;
+          });
+          metricsList.forEach(m => {
+            const el = document.getElementById(`m_${m}`);
+            if (el) el.checked = layout.metrics ? layout.metrics[m] !== false : true;
+          });
+        })
+        .catch(e => console.error('Error loading layout:', e));
+    }
+
+    function saveLayout() {
+      const payload = {
+        visuals: {},
+        metrics: {},
+        styling: { theme: 'dark', font_scale: 1.0, auto_fade_sec: 0 }
+      };
+
+      visualsList.forEach(v => {
+        const el = document.getElementById(`v_${v}`);
+        payload.visuals[v] = el ? el.checked : true;
+      });
+
+      metricsList.forEach(m => {
+        const el = document.getElementById(`m_${m}`);
+        payload.metrics[m] = el ? el.checked : true;
+      });
+
+      fetch('/api/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === 'ok') {
+          const banner = document.getElementById('statusMsg');
+          banner.style.display = 'block';
+          setTimeout(() => banner.style.display = 'none', 4000);
+        }
+      })
+      .catch(e => alert('Error saving layout: ' + e));
+    }
+
+    loadSavedLayout();
+  </script>
+</body>
+</html>
