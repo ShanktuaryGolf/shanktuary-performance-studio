@@ -70,9 +70,10 @@ python3 shanktuary_performance_studio.py
 
 ### OBS & Browser Source URLs
 - 🎥 **Clean OBS Browser Source:** `http://localhost:9321`
-- ✏️ **Drag & Drop Canvas Editor:** `http://localhost:9321/?edit=true`
 - 🎥 **Floor Projector Fullscreen Mode:** `http://localhost:9321/?mode=projector`
-- ⚙️ **Web Configurator UI:** `http://localhost:9321/config`
+- ⚙️ **Web Configurator UI:** `http://localhost:9321/config` (open in your browser outside of OBS)
+- ✏️ **Drag & Drop Canvas Editor:** `http://localhost:9321/?edit=true` (open in your browser outside of OBS)
+
 
 ---
 
