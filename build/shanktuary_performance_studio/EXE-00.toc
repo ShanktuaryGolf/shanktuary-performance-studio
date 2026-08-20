@@ -56,7 +56,7 @@
  [],
  False,
  False,
- 1787196198,
+ 1787196436,
  [('run',
    '/home/sean/.local/lib/python3.14/site-packages/PyInstaller/bootloader/Linux-64bit-intel/run',
    'EXECUTABLE')],

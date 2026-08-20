@@ -20,11 +20,30 @@ import time
 import socket
 import base64
 import struct
+import sys
 from pathlib import Path
 
 OBS_PORT = 9321
 SCRIPT_DIR = Path(__file__).parent.resolve()
-ASSETS_DIR = SCRIPT_DIR / "assets"
+
+def get_assets_dir():
+    if hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+        if (base / "assets").exists():
+            return base / "assets"
+        return base
+    
+    script_assets = SCRIPT_DIR / "assets"
+    if script_assets.exists():
+        return script_assets
+        
+    cwd_assets = Path.cwd() / "assets"
+    if cwd_assets.exists():
+        return cwd_assets
+        
+    return script_assets
+
+ASSETS_DIR = get_assets_dir()
 CONFIG_DIR = Path.home() / ".config" / "shanktuary"
 LAYOUT_FILE = CONFIG_DIR / "overlay_layout.json"
 
@@ -130,7 +149,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        parsed_path = self.path.split("?")[0]
+        parsed_path = self.path.split("?")[0].rstrip("/")
+        if not parsed_path:
+            parsed_path = "/"
+
+        assets_dir = get_assets_dir()
 
         # Handle WebSocket Handshake
         if self.headers.get("Upgrade", "").lower() == "websocket":
@@ -138,9 +161,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if parsed_path == "/" or parsed_path == "/overlay":
-            self.serve_file(ASSETS_DIR / "overlay.html", "text/html; charset=utf-8")
+            self.serve_file(assets_dir / "overlay.html", "text/html; charset=utf-8")
         elif parsed_path == "/config":
-            self.serve_file(ASSETS_DIR / "config.html", "text/html; charset=utf-8")
+            self.serve_file(assets_dir / "config.html", "text/html; charset=utf-8")
         elif parsed_path == "/api/layout":
             self.send_json(obs_state.load_layout())
         elif parsed_path == "/api/shot":
@@ -149,11 +172,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(shot)
         elif parsed_path.startswith("/assets/"):
             asset_filename = parsed_path.replace("/assets/", "")
-            file_path = ASSETS_DIR / asset_filename
+            file_path = assets_dir / asset_filename
             mime = "image/png" if file_path.suffix == ".png" else "text/plain"
             self.serve_file(file_path, mime)
         else:
-            self.send_error(404, "File Not Found")
+            self.send_error(404, f"File Not Found: {parsed_path}")
 
     def do_POST(self):
         parsed_path = self.path.split("?")[0]
