@@ -17,7 +17,7 @@
       line-height: 1.5;
     }
     .container {
-      max-width: 760px;
+      max-width: 820px;
       margin: 0 auto;
       background: #181A22;
       border: 1px solid #282C3A;
@@ -51,7 +51,7 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
       gap: 12px;
     }
     .toggle-card {
@@ -145,24 +145,32 @@
 
   <div class="container">
     <h1>⚙️ OBS Overlay Layout Configurator</h1>
-    <p class="subtitle">Customize which metrics, divot projectors, and clubface visuals appear in your OBS Studio Browser Source (http://localhost:9321)</p>
+    <p class="subtitle">Customize which metrics, divot projectors, and Quad Studio visual widgets appear in your OBS Studio Browser Source (http://localhost:9321)</p>
+    
+    <a href="/?edit=true" target="_blank" style="display: block; text-align: center; background: rgba(0, 229, 255, 0.15); border: 1px solid #00E5FF; color: #00E5FF; padding: 12px; border-radius: 8px; font-weight: 700; text-decoration: none; margin-bottom: 25px;">✏️ LAUNCH INTERACTIVE DRAG & DROP CANVAS EDITOR</a>
 
-    <!-- Visual Widgets Section -->
-    <div class="section-title">🌿 Visual Widgets & Projectors</div>
+    <!-- 4 Quad Studio Visual Widgets Section -->
+    <div class="section-title">🎯 Quad Studio Visual Widgets</div>
     <div class="grid">
       <label class="toggle-card">
-        <span class="toggle-label">Virtual Divot Projector</span>
-        <span class="switch">
-          <input type="checkbox" id="v_divot">
-          <span class="slider"></span>
-        </span>
+        <span class="toggle-label">Quad 1: Face Impact Location</span>
+        <span class="switch"><input type="checkbox" id="v_face_impact"><span class="slider"></span></span>
       </label>
       <label class="toggle-card">
-        <span class="toggle-label">Clubface Impact Ring</span>
-        <span class="switch">
-          <input type="checkbox" id="v_face">
-          <span class="slider"></span>
-        </span>
+        <span class="toggle-label">Quad 2: Overhead Address & Path</span>
+        <span class="switch"><input type="checkbox" id="v_overhead_path"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Quad 3: Side Launch Arc</span>
+        <span class="switch"><input type="checkbox" id="v_side_launch"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Quad 4: 3D Spin Axis & Rating</span>
+        <span class="switch"><input type="checkbox" id="v_spin_axis_3d"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Virtual Divot Projector</span>
+        <span class="switch"><input type="checkbox" id="v_divot"><span class="slider"></span></span>
       </label>
     </div>
 
@@ -194,46 +202,53 @@
   </div>
 
   <script>
-    const visualsList = ['divot', 'face_impact'];
+    const visualsList = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d'];
     const metricsList = ['ball_speed', 'carry', 'total', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'offline', 'club_speed', 'smash', 'club_path', 'face_angle'];
+
+    let currentLayout = null;
 
     function loadSavedLayout() {
       fetch('/api/layout')
         .then(r => r.json())
         .then(layout => {
+          currentLayout = layout;
+          const widgets = layout.widgets || {};
+          
           visualsList.forEach(v => {
             const el = document.getElementById(`v_${v}`);
-            if (el) el.checked = layout.visuals ? layout.visuals[v] !== false : true;
+            const cfg = widgets[v] || (layout.visuals ? layout.visuals[v] : null);
+            if (el) el.checked = cfg ? cfg.visible !== false : true;
           });
+
           metricsList.forEach(m => {
             const el = document.getElementById(`m_${m}`);
-            if (el) el.checked = layout.metrics ? layout.metrics[m] !== false : true;
+            const cfg = widgets[m] || (layout.metrics ? layout.metrics[m] : null);
+            if (el) el.checked = cfg ? cfg.visible !== false : true;
           });
         })
         .catch(e => console.error('Error loading layout:', e));
     }
 
     function saveLayout() {
-      const payload = {
-        visuals: {},
-        metrics: {},
-        styling: { theme: 'dark', font_scale: 1.0, auto_fade_sec: 0 }
-      };
+      if (!currentLayout) currentLayout = { widgets: {}, styling: {} };
+      if (!currentLayout.widgets) currentLayout.widgets = {};
 
       visualsList.forEach(v => {
         const el = document.getElementById(`v_${v}`);
-        payload.visuals[v] = el ? el.checked : true;
+        if (!currentLayout.widgets[v]) currentLayout.widgets[v] = { x: 30, y: 30 };
+        currentLayout.widgets[v].visible = el ? el.checked : true;
       });
 
       metricsList.forEach(m => {
         const el = document.getElementById(`m_${m}`);
-        payload.metrics[m] = el ? el.checked : true;
+        if (!currentLayout.widgets[m]) currentLayout.widgets[m] = { x: 30, y: 970 };
+        currentLayout.widgets[m].visible = el ? el.checked : true;
       });
 
       fetch('/api/layout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(currentLayout)
       })
       .then(r => r.json())
       .then(res => {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Shanktuary Performance Studio - OBS Stream Overlay</title>
+  <title>Shanktuary Performance Studio - OBS Stream Overlay & Divot Projector</title>
   <style>
     * {
       box-sizing: border-box;
@@ -10,46 +10,134 @@
       padding: 0;
     }
     body, html {
-      width: 100vw;
-      height: 100vh;
+      width: 1920px;
+      height: 1080px;
       background: transparent !important;
       overflow: hidden;
       font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
       color: #FFFFFF;
+      position: relative;
     }
 
-    /* Fullscreen Overlay Canvas Container */
-    #overlay-root {
+    /* Floor Projector Fullscreen Mode */
+    body.mode-projector {
+      background: #000000 !important;
+    }
+    body.mode-projector .widget:not(#w_divot) {
+      display: none !important;
+    }
+    body.mode-projector #w_divot {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+    }
+    body.mode-projector #w_divot .visual-title, body.mode-projector #w_divot .widget-edit-header {
+      display: none !important;
+    }
+
+    /* Edit Mode Canvas Grid Background */
+    body.edit-mode {
+      background: rgba(16, 17, 22, 0.95) !important;
+      background-image:
+        linear-gradient(rgba(0, 229, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 229, 255, 0.08) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* Absolute Positioned Widget Containers */
+    .widget {
+      position: absolute;
+      background: rgba(20, 22, 30, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 3px solid #00E5FF;
+      border-radius: 8px;
+      padding: 10px 16px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(6px);
+      user-select: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
+    }
+
+    .widget.visual-card {
+      padding: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .widget.accent-green { border-top-color: #00FF66; }
+    .widget.accent-yellow { border-top-color: #FFEA00; }
+    .widget.accent-pink { border-top-color: #FF4081; }
+
+    body.edit-mode .widget {
+      border: 2px dashed #00E5FF !important;
+      cursor: grab !important;
+    }
+    body.edit-mode .widget.hidden-in-edit {
+      opacity: 0.35;
+      border-color: #FF1744 !important;
+    }
+    body.edit-mode .widget:hover {
+      border-color: #00FF66 !important;
+      box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+    }
+    body.edit-mode .widget.dragging {
+      cursor: grabbing !important;
+      opacity: 0.85;
+      box-shadow: 0 0 25px rgba(0, 255, 102, 0.6);
+      z-index: 1000;
+    }
+
+    .resize-handle {
+      display: none;
+      position: absolute;
+      bottom: 2px;
+      right: 4px;
+      font-size: 14px;
+      color: #00E5FF;
+      cursor: se-resize !important;
+      user-select: none;
+      z-index: 10;
+    }
+    body.edit-mode .resize-handle { display: block; }
+    body.edit-mode .resize-handle:hover { color: #00FF66; }
+
+    .widget-edit-header {
+      display: none;
       justify-content: space-between;
-      padding: 30px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    body.edit-mode .widget-edit-header { display: flex; }
+
+    .edit-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: #00E5FF;
+      letter-spacing: 1px;
+      text-transform: uppercase;
       pointer-events: none;
     }
 
-    /* Top/Middle Visuals Area */
-    .visuals-container {
-      display: flex;
-      justify-content: flex-start;
-      gap: 20px;
-      align-items: center;
-    }
-
-    .visual-card {
-      background: rgba(18, 20, 26, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      padding: 15px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(8px);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    .widget-close-btn {
+      background: #FF1744;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      font-size: 10px;
+      font-weight: bold;
+      line-height: 16px;
+      text-align: center;
+      cursor: pointer;
     }
 
     .visual-title {
@@ -57,37 +145,9 @@
       font-weight: 700;
       letter-spacing: 1px;
       color: #00E5FF;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       text-transform: uppercase;
     }
-
-    canvas {
-      display: block;
-    }
-
-    /* Lower-Third Metric Cards Grid */
-    .metrics-hud {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: flex-end;
-    }
-
-    .metric-card {
-      background: rgba(20, 22, 30, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-top: 3px solid #00E5FF;
-      border-radius: 8px;
-      padding: 10px 16px;
-      min-width: 130px;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(6px);
-      transition: transform 0.2s ease, opacity 0.3s ease;
-    }
-
-    .metric-card.accent-green { border-top-color: #00FF66; }
-    .metric-card.accent-yellow { border-top-color: #FFEA00; }
-    .metric-card.accent-pink { border-top-color: #FF4081; }
 
     .metric-label {
       font-size: 10px;
@@ -111,43 +171,478 @@
       margin-left: 4px;
       font-weight: normal;
     }
+
+    .canvas-wrapper {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Edit Mode Top Toolbar */
+    .edit-toolbar {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background: rgba(16, 17, 22, 0.95);
+      border-bottom: 1px solid #00E5FF;
+      z-index: 9999;
+      align-items: center;
+      padding: 0 20px;
+      gap: 12px;
+    }
+    body.edit-mode .edit-toolbar { display: flex; }
+
+    .edit-toolbar-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #00E5FF;
+      margin-right: 6px;
+    }
+
+    .calib-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 229, 255, 0.1);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #00E5FF;
+    }
+
+    .calib-controls input[type=number], .calib-controls input[type=range] {
+      background: #101116;
+      border: 1px solid #00E5FF;
+      color: #FFF;
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+
+    .edit-toolbar button, .edit-toolbar select {
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      background: rgba(255,255,255,0.1);
+      color: #FFF;
+    }
+    .btn-save-layout { background: #00FF66 !important; color: #101116 !important; border: none !important; }
+    .btn-config-page { background: #00E5FF !important; color: #101116 !important; border: none !important; }
   </style>
 </head>
 <body>
 
-  <div id="overlay-root">
-    <!-- Top/Middle Visual Widgets (Virtual Divot Projector, Face Impact, Overhead) -->
-    <div class="visuals-container">
-      <div class="visual-card" id="card-divot">
-        <div class="visual-title">VIRTUAL DIVOT PROJECTOR</div>
-        <canvas id="divotCanvas" width="220" height="220"></canvas>
-      </div>
+  <!-- Edit Mode Top Toolbar -->
+  <div class="edit-toolbar">
+    <div class="edit-toolbar-title">✏️ CANVAS EDITOR</div>
 
-      <div class="visual-card" id="card-face">
-        <div class="visual-title">FACE IMPACT LOCATION</div>
-        <canvas id="faceCanvas" width="220" height="150"></canvas>
-      </div>
+    <!-- Divot Physical Alignment Calibration Controls -->
+    <div class="calib-controls">
+      <span>🎯 Physical Ball Offset:</span>
+      <label>X: <input type="number" id="calib_x" value="0" style="width: 50px;" onchange="updateCalibration()"></label>
+      <label>Y: <input type="number" id="calib_y" value="0" style="width: 50px;" onchange="updateCalibration()"></label>
+      <label>Tilt: <input type="range" id="calib_tilt" min="-45" max="45" value="0" style="width: 70px;" oninput="updateCalibration()"><span id="calib_tilt_val">0°</span></label>
     </div>
 
-    <!-- Lower-Third Stream HUD Cards -->
-    <div class="metrics-hud" id="metrics-hud">
-      <!-- Dynamic Metric Cards Inserted Here -->
+    <select id="widgetToggleSelect" onchange="toggleWidgetVisibilityFromDropdown(this)">
+      <option value="">➕ Toggle Visibility...</option>
+      <option value="divot">Divot Projector</option>
+      <option value="face_impact">Quad 1: Face Impact Location</option>
+      <option value="overhead_path">Quad 2: Overhead Address & Path</option>
+      <option value="side_launch">Quad 3: Side Launch Arc</option>
+      <option value="spin_axis_3d">Quad 4: 3D Spin Axis & Rating</option>
+      <option value="ball_speed">Ball Speed</option>
+      <option value="club_speed">Club Speed</option>
+      <option value="carry">Carry Distance</option>
+      <option value="total">Total Distance</option>
+      <option value="smash">Smash Factor</option>
+      <option value="launch_angle">Launch Angle</option>
+      <option value="push_pull">Push/Pull</option>
+      <option value="total_spin">Total Spin</option>
+      <option value="sidespin">Sidespin</option>
+      <option value="spin_axis">Spin Axis</option>
+      <option value="club_path">Club Path</option>
+      <option value="face_angle">Face Angle</option>
+      <option value="offline">Offline Distance</option>
+    </select>
+
+    <a href="/config" target="_blank" style="text-decoration: none;"><button class="btn-config-page">⚙️ CONFIG</button></a>
+    <button class="btn-save-layout" onclick="saveLayoutPositions()">💾 SAVE LAYOUT</button>
+    <button onclick="resetDefaultPositions()">🔄 RESET</button>
+    <button onclick="toggleEditMode()">❌ DONE</button>
+  </div>
+
+  <!-- All 5 Visual Widgets -->
+  <div class="widget visual-card" id="w_divot" style="left: 30px; top: 30px; width: 250px; height: 250px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Virtual Divot</span>
+      <button class="widget-close-btn" onclick="hideWidget('divot')" title="Hide Widget">✕</button>
     </div>
+    <div class="visual-title">VIRTUAL DIVOT PROJECTOR</div>
+    <div class="canvas-wrapper"><canvas id="divotCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget visual-card" id="w_face_impact" style="left: 290px; top: 30px; width: 250px; height: 180px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Quad: Face Impact</span>
+      <button class="widget-close-btn" onclick="hideWidget('face_impact')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">FACE IMPACT LOCATION</div>
+    <div class="canvas-wrapper"><canvas id="faceCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget visual-card" id="w_overhead_path" style="left: 550px; top: 30px; width: 250px; height: 200px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Quad: Overhead Path</span>
+      <button class="widget-close-btn" onclick="hideWidget('overhead_path')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">OVERHEAD ADDRESS & PATH</div>
+    <div class="canvas-wrapper"><canvas id="overheadCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget visual-card" id="w_side_launch" style="left: 810px; top: 30px; width: 250px; height: 180px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Quad: Launch Arc</span>
+      <button class="widget-close-btn" onclick="hideWidget('side_launch')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">TRAJECTORY LAUNCH ARC</div>
+    <div class="canvas-wrapper"><canvas id="sideCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget visual-card" id="w_spin_axis_3d" style="left: 1070px; top: 30px; width: 250px; height: 180px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Quad: 3D Spin Axis</span>
+      <button class="widget-close-btn" onclick="hideWidget('spin_axis_3d')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">3D SPIN AXIS & RATING</div>
+    <div class="canvas-wrapper"><canvas id="spinCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <!-- Telemetry Metric Cards -->
+  <div class="widget accent-green" id="w_ball_speed" style="left: 30px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Ball Speed</span><button class="widget-close-btn" onclick="hideWidget('ball_speed')">✕</button></div>
+    <div class="metric-label">BALL SPEED</div><div class="metric-val" id="v_ball_speed">--<span class="metric-unit">MPH</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_club_speed" style="left: 180px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Club Speed</span><button class="widget-close-btn" onclick="hideWidget('club_speed')">✕</button></div>
+    <div class="metric-label">CLUB SPEED</div><div class="metric-val" id="v_club_speed">--<span class="metric-unit">MPH</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget accent-yellow" id="w_carry" style="left: 330px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Carry</span><button class="widget-close-btn" onclick="hideWidget('carry')">✕</button></div>
+    <div class="metric-label">CARRY</div><div class="metric-val" id="v_carry">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_total" style="left: 480px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Total</span><button class="widget-close-btn" onclick="hideWidget('total')">✕</button></div>
+    <div class="metric-label">TOTAL</div><div class="metric-val" id="v_total">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_smash" style="left: 630px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Smash</span><button class="widget-close-btn" onclick="hideWidget('smash')">✕</button></div>
+    <div class="metric-label">SMASH FACTOR</div><div class="metric-val" id="v_smash">--</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_launch_angle" style="left: 780px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Launch Angle</span><button class="widget-close-btn" onclick="hideWidget('launch_angle')">✕</button></div>
+    <div class="metric-label">LAUNCH ANGLE</div><div class="metric-val" id="v_launch_angle">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_push_pull" style="left: 930px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Push/Pull</span><button class="widget-close-btn" onclick="hideWidget('push_pull')">✕</button></div>
+    <div class="metric-label">PUSH / PULL</div><div class="metric-val" id="v_push_pull">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_total_spin" style="left: 1080px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Total Spin</span><button class="widget-close-btn" onclick="hideWidget('total_spin')">✕</button></div>
+    <div class="metric-label">TOTAL SPIN</div><div class="metric-val" id="v_total_spin">--<span class="metric-unit">RPM</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_sidespin" style="left: 1230px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Sidespin</span><button class="widget-close-btn" onclick="hideWidget('sidespin')">✕</button></div>
+    <div class="metric-label">SIDESPIN</div><div class="metric-val" id="v_sidespin">--<span class="metric-unit">RPM</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_spin_axis" style="left: 1380px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Spin Axis</span><button class="widget-close-btn" onclick="hideWidget('spin_axis')">✕</button></div>
+    <div class="metric-label">SPIN AXIS</div><div class="metric-val" id="v_spin_axis">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget accent-pink" id="w_club_path" style="left: 1530px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Club Path</span><button class="widget-close-btn" onclick="hideWidget('club_path')">✕</button></div>
+    <div class="metric-label">CLUB PATH</div><div class="metric-val" id="v_club_path">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget accent-yellow" id="w_face_angle" style="left: 1680px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Face Angle</span><button class="widget-close-btn" onclick="hideWidget('face_angle')">✕</button></div>
+    <div class="metric-label">FACE ANGLE</div><div class="metric-val" id="v_face_angle">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_offline" style="left: 1780px; top: 970px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Offline</span><button class="widget-close-btn" onclick="hideWidget('offline')">✕</button></div>
+    <div class="metric-label">OFFLINE</div><div class="metric-val" id="v_offline">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
   </div>
 
   <script>
-    let layoutConfig = {
-      visuals: { divot: true, face_impact: true, overhead: true },
-      metrics: { ball_speed: true, club_speed: true, carry: true, smash: true, launch_angle: true, total_spin: true, club_path: true, face_angle: true, offline: true },
-      styling: { theme: 'dark', font_scale: 1.0, auto_fade_sec: 0 }
-    };
-
+    let layoutConfig = null;
     let latestShot = null;
+    let isEditMode = false;
+    let draggedWidget = null;
+    let resizingWidget = null;
+    let dragOffsetX = 0, dragOffsetY = 0;
+    let startWidth = 0, startHeight = 0, startMouseX = 0, startMouseY = 0;
 
-    // Load assets
-    const faceImg = new Image();
-    faceImg.src = '/assets/iron_face.png';
-    faceImg.onload = () => drawFaceImpact();
+    let calibOffsetX = 0;
+    let calibOffsetY = 0;
+    let calibTiltDeg = 0;
+
+    const ALL_WIDGET_IDS = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d', 'ball_speed', 'club_speed', 'carry', 'total', 'smash', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'club_path', 'face_angle', 'offline'];
+
+    const faceImg = new Image(); faceImg.src = '/assets/iron_face.png'; faceImg.onload = () => drawFaceImpact();
+    const overheadImg = new Image(); overheadImg.src = '/assets/iron_overhead.png'; overheadImg.onload = () => drawOverheadPath();
+    const sideImg = new Image(); sideImg.src = '/assets/iron_side.png'; sideImg.onload = () => drawSideLaunch();
+
+    if (window.location.search.includes('mode=projector')) {
+      document.body.classList.add('mode-projector');
+    }
+
+    if (window.location.search.includes('edit=true')) {
+      toggleEditMode(true);
+    }
+
+    function toggleEditMode(enable) {
+      isEditMode = enable !== undefined ? enable : !isEditMode;
+      document.body.classList.toggle('edit-mode', isEditMode);
+
+      ALL_WIDGET_IDS.forEach(id => {
+        const el = document.getElementById(`w_${id}`);
+        if (el) {
+          const isVisible = el.getAttribute('data-visible') !== 'false';
+          if (isEditMode) {
+            el.style.display = 'flex';
+            el.classList.toggle('hidden-in-edit', !isVisible);
+          } else {
+            el.style.display = isVisible ? 'flex' : 'none';
+            el.classList.remove('hidden-in-edit');
+          }
+        }
+      });
+      renderShotData();
+    }
+
+    function updateCalibration() {
+      calibOffsetX = parseInt(document.getElementById('calib_x').value, 10) || 0;
+      calibOffsetY = parseInt(document.getElementById('calib_y').value, 10) || 0;
+      calibTiltDeg = parseFloat(document.getElementById('calib_tilt').value) || 0;
+      document.getElementById('calib_tilt_val').innerText = `${calibTiltDeg}°`;
+      renderShotData();
+    }
+
+    function hideWidget(id) {
+      const el = document.getElementById(`w_${id}`);
+      if (el) {
+        el.setAttribute('data-visible', 'false');
+        if (isEditMode) {
+          el.classList.add('hidden-in-edit');
+        } else {
+          el.style.display = 'none';
+        }
+      }
+    }
+
+    function toggleWidgetVisibilityFromDropdown(selectEl) {
+      const id = selectEl.value;
+      if (!id) return;
+      const el = document.getElementById(`w_${id}`);
+      if (el) {
+        const isHidden = el.getAttribute('data-visible') === 'false';
+        const newVis = isHidden;
+        el.setAttribute('data-visible', newVis ? 'true' : 'false');
+        if (isEditMode) {
+          el.style.display = 'flex';
+          el.classList.toggle('hidden-in-edit', !newVis);
+        } else {
+          el.style.display = newVis ? 'flex' : 'none';
+        }
+      }
+      selectEl.value = '';
+    }
+
+    // 1-Click Ball Origin Positioning on Divot Canvas
+    document.getElementById('divotCanvas').addEventListener('click', e => {
+      if (!isEditMode) return;
+      const rect = e.target.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      calibOffsetX = Math.round(clickX - (e.target.offsetWidth / 2));
+      calibOffsetY = Math.round(clickY - (e.target.offsetHeight / 2));
+
+      document.getElementById('calib_x').value = calibOffsetX;
+      document.getElementById('calib_y').value = calibOffsetY;
+      renderShotData();
+    });
+
+    document.querySelectorAll('.widget').forEach(w => {
+      w.addEventListener('mousedown', e => {
+        if (!isEditMode || e.target.classList.contains('widget-close-btn') || e.target.tagName === 'INPUT') return;
+        
+        if (e.target.classList.contains('resize-handle')) {
+          resizingWidget = w;
+          startWidth = w.offsetWidth;
+          startHeight = w.offsetHeight;
+          startMouseX = e.clientX;
+          startMouseY = e.clientY;
+          e.stopPropagation();
+          return;
+        }
+
+        draggedWidget = w;
+        w.classList.add('dragging');
+        const rect = w.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+        dragOffsetY = e.clientY - rect.top;
+      });
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (resizingWidget && isEditMode) {
+        let newW = startWidth + (e.clientX - startMouseX);
+        let newH = startHeight + (e.clientY - startMouseY);
+
+        newW = Math.max(100, Math.round(newW / 10) * 10);
+        newH = Math.max(50, Math.round(newH / 10) * 10);
+
+        resizingWidget.style.width = `${newW}px`;
+        resizingWidget.style.height = `${newH}px`;
+        renderShotData();
+        return;
+      }
+
+      if (draggedWidget && isEditMode) {
+        let newX = e.clientX - dragOffsetX;
+        let newY = e.clientY - dragOffsetY;
+
+        newX = Math.round(newX / 10) * 10;
+        newY = Math.round(newY / 10) * 10;
+
+        newX = Math.max(0, Math.min(1920 - draggedWidget.offsetWidth, newX));
+        newY = Math.max(0, Math.min(1080 - draggedWidget.offsetHeight, newY));
+
+        draggedWidget.style.left = `${newX}px`;
+        draggedWidget.style.top = `${newY}px`;
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (draggedWidget) {
+        draggedWidget.classList.remove('dragging');
+        draggedWidget = null;
+      }
+      if (resizingWidget) {
+        resizingWidget = null;
+      }
+    });
+
+    function saveLayoutPositions() {
+      if (!layoutConfig) layoutConfig = { widgets: {}, divot_calibration: {}, styling: {} };
+      if (!layoutConfig.widgets) layoutConfig.widgets = {};
+
+      ALL_WIDGET_IDS.forEach(id => {
+        const el = document.getElementById(`w_${id}`);
+        if (el) {
+          const x = parseInt(el.style.left, 10) || 0;
+          const y = parseInt(el.style.top, 10) || 0;
+          const w = parseInt(el.style.width, 10) || el.offsetWidth;
+          const h = parseInt(el.style.height, 10) || el.offsetHeight;
+          const vis = el.getAttribute('data-visible') !== 'false';
+          layoutConfig.widgets[id] = { x, y, w, h, visible: vis };
+        }
+      });
+
+      layoutConfig.divot_calibration = {
+        offset_x: calibOffsetX,
+        offset_y: calibOffsetY,
+        tilt_deg: calibTiltDeg
+      };
+
+      fetch('/api/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(layoutConfig)
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === 'ok') alert('✓ Layout positions, sizes, and physical ball calibration saved successfully!');
+      });
+    }
+
+    function resetDefaultPositions() {
+      calibOffsetX = 0; calibOffsetY = 0; calibTiltDeg = 0;
+      document.getElementById('calib_x').value = 0;
+      document.getElementById('calib_y').value = 0;
+      document.getElementById('calib_tilt').value = 0;
+      document.getElementById('calib_tilt_val').innerText = '0°';
+
+      const defaults = {
+        divot: {x: 30, y: 30, w: 250, h: 250, visible: true},
+        face_impact: {x: 290, y: 30, w: 250, h: 180, visible: true},
+        overhead_path: {x: 550, y: 30, w: 250, h: 200, visible: true},
+        side_launch: {x: 810, y: 30, w: 250, h: 180, visible: true},
+        spin_axis_3d: {x: 1070, y: 30, w: 250, h: 180, visible: true},
+        ball_speed: {x: 30, y: 970, w: 140, h: 70, visible: true},
+        club_speed: {x: 180, y: 970, w: 140, h: 70, visible: true},
+        carry: {x: 330, y: 970, w: 140, h: 70, visible: true},
+        total: {x: 480, y: 970, w: 140, h: 70, visible: false},
+        smash: {x: 630, y: 970, w: 140, h: 70, visible: true},
+        launch_angle: {x: 780, y: 970, w: 140, h: 70, visible: true},
+        push_pull: {x: 930, y: 970, w: 140, h: 70, visible: false},
+        total_spin: {x: 1080, y: 970, w: 140, h: 70, visible: true},
+        sidespin: {x: 1230, y: 970, w: 140, h: 70, visible: false},
+        spin_axis: {x: 1380, y: 970, w: 140, h: 70, visible: true},
+        club_path: {x: 1530, y: 970, w: 140, h: 70, visible: true},
+        face_angle: {x: 1680, y: 970, w: 140, h: 70, visible: true},
+        offline: {x: 1780, y: 970, w: 140, h: 70, visible: false}
+      };
+
+      ALL_WIDGET_IDS.forEach(id => {
+        const el = document.getElementById(`w_${id}`);
+        const def = defaults[id];
+        if (el && def) {
+          el.style.left = `${def.x}px`;
+          el.style.top = `${def.y}px`;
+          el.style.width = `${def.w}px`;
+          el.style.height = `${def.h}px`;
+          el.setAttribute('data-visible', def.visible ? 'true' : 'false');
+          if (isEditMode) {
+            el.style.display = 'flex';
+            el.classList.toggle('hidden-in-edit', !def.visible);
+          } else {
+            el.style.display = def.visible ? 'flex' : 'none';
+          }
+        }
+      });
+      renderShotData();
+    }
 
     function initWebSocket() {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -170,7 +665,7 @@
             renderShotData();
           }
         } catch (e) {
-          console.error('Error handling WebSocket message:', e);
+          console.error(e);
         }
       };
 
@@ -178,75 +673,129 @@
     }
 
     function applyLayoutConfig() {
-      document.getElementById('card-divot').style.display = layoutConfig.visuals.divot ? 'flex' : 'none';
-      document.getElementById('card-face').style.display = layoutConfig.visuals.face_impact ? 'flex' : 'none';
+      if (!layoutConfig) return;
+      const widgets = layoutConfig.widgets || layoutConfig;
+
+      if (layoutConfig.divot_calibration) {
+        calibOffsetX = layoutConfig.divot_calibration.offset_x || 0;
+        calibOffsetY = layoutConfig.divot_calibration.offset_y || 0;
+        calibTiltDeg = layoutConfig.divot_calibration.tilt_deg || 0;
+        document.getElementById('calib_x').value = calibOffsetX;
+        document.getElementById('calib_y').value = calibOffsetY;
+        document.getElementById('calib_tilt').value = calibTiltDeg;
+        document.getElementById('calib_tilt_val').innerText = `${calibTiltDeg}°`;
+      }
+
+      ALL_WIDGET_IDS.forEach(id => {
+        const el = document.getElementById(`w_${id}`);
+        const cfg = widgets[id];
+        if (el && cfg) {
+          if (cfg.x !== undefined) el.style.left = `${cfg.x}px`;
+          if (cfg.y !== undefined) el.style.top = `${cfg.y}px`;
+          if (cfg.w !== undefined) el.style.width = `${cfg.w}px`;
+          if (cfg.h !== undefined) el.style.height = `${cfg.h}px`;
+          const isVis = cfg.visible !== false;
+          el.setAttribute('data-visible', isVis ? 'true' : 'false');
+          if (isEditMode) {
+            el.style.display = 'flex';
+            el.classList.toggle('hidden-in-edit', !isVis);
+          } else {
+            el.style.display = isVis ? 'flex' : 'none';
+          }
+        }
+      });
+
       renderShotData();
     }
 
     function renderShotData() {
-      if (!latestShot) return;
+      // Fallback sample shot telemetry so widgets render immediately on launch
+      const sampleShot = {
+        vertical_launch_angle_degrees: 20.9,
+        horizontal_launch_angle_degrees: -4.5,
+        shot_name: 'Pure Draw',
+        shot_rank: 'A',
+        open_golf_coach: {
+          smash_factor: 1.24,
+          total_spin_rpm: 2990,
+          sidespin_rpm: -299,
+          spin_axis_degrees: 5.8,
+          club_path_degrees: { right_handed: -4.5 },
+          club_face_to_target_degrees: { right_handed: -7.9 },
+          club_face_to_path_degrees: { right_handed: -3.4 },
+          us_customary_units: {
+            ball_speed_mph: 62.0,
+            club_speed_mph: 50.1,
+            carry_distance_yards: 53.8,
+            total_distance_yards: 59.4,
+            offline_distance_yards: -7.2
+          }
+        }
+      };
 
-      const ogc = latestShot.open_golf_coach || {};
+      const shotToRender = latestShot || sampleShot;
+      const ogc = shotToRender.open_golf_coach || {};
       const us = ogc.us_customary_units || {};
 
-      const metricsMap = [
-        { key: 'ball_speed', label: 'BALL SPEED', val: (us.ball_speed_mph || 0).toFixed(1), unit: 'MPH', accent: 'accent-green' },
-        { key: 'club_speed', label: 'CLUB SPEED', val: (us.club_speed_mph || 0).toFixed(1), unit: 'MPH', accent: '' },
-        { key: 'smash', label: 'SMASH FACTOR', val: (ogc.smash_factor || 1.23).toFixed(2), unit: '', accent: '' },
-        { key: 'carry', label: 'CARRY', val: (us.carry_distance_yards || 0).toFixed(1), unit: 'YDS', accent: 'accent-yellow' },
-        { key: 'total', label: 'TOTAL', val: (us.total_distance_yards || 0).toFixed(1), unit: 'YDS', accent: '' },
-        { key: 'launch_angle', label: 'LAUNCH ANGLE', val: (latestShot.vertical_launch_angle_degrees || 0).toFixed(1) + '°', unit: '', accent: '' },
-        { key: 'total_spin', label: 'TOTAL SPIN', val: Math.round(ogc.total_spin_rpm || 0), unit: 'RPM', accent: '' },
-        { key: 'club_path', label: 'CLUB PATH', val: Math.abs(ogc.club_path_degrees?.right_handed || 0).toFixed(1) + '° ' + ((ogc.club_path_degrees?.right_handed || 0) > 0 ? 'R' : 'L'), unit: '', accent: 'accent-pink' },
-        { key: 'face_angle', label: 'FACE ANGLE', val: Math.abs(ogc.club_face_to_target_degrees?.right_handed || 0).toFixed(1) + '° ' + ((ogc.club_face_to_target_degrees?.right_handed || 0) > 0 ? 'Open' : 'Closed'), unit: '', accent: 'accent-yellow' },
-        { key: 'offline', label: 'OFFLINE', val: Math.abs(us.offline_distance_yards || 0).toFixed(1) + ' ' + ((us.offline_distance_yards || 0) < 0 ? 'L' : 'R'), unit: 'YDS', accent: '' }
-      ];
+      document.getElementById('v_ball_speed').innerHTML = `${(us.ball_speed_mph || 0).toFixed(1)}<span class="metric-unit">MPH</span>`;
+      document.getElementById('v_club_speed').innerHTML = `${(us.club_speed_mph || 0).toFixed(1)}<span class="metric-unit">MPH</span>`;
+      document.getElementById('v_carry').innerHTML = `${(us.carry_distance_yards || 0).toFixed(1)}<span class="metric-unit">YDS</span>`;
+      document.getElementById('v_total').innerHTML = `${(us.total_distance_yards || 0).toFixed(1)}<span class="metric-unit">YDS</span>`;
+      document.getElementById('v_smash').innerText = (ogc.smash_factor || 1.23).toFixed(2);
+      document.getElementById('v_launch_angle').innerText = `${(shotToRender.vertical_launch_angle_degrees || 0).toFixed(1)}°`;
+      document.getElementById('v_push_pull').innerText = `${(shotToRender.horizontal_launch_angle_degrees || 0).toFixed(1)}°`;
+      document.getElementById('v_total_spin').innerHTML = `${Math.round(ogc.total_spin_rpm || 0)}<span class="metric-unit">RPM</span>`;
+      document.getElementById('v_sidespin').innerHTML = `${Math.round(ogc.sidespin_rpm || 0)}<span class="metric-unit">RPM</span>`;
+      document.getElementById('v_spin_axis').innerText = `${(ogc.spin_axis_degrees || 0).toFixed(1)}°`;
 
-      const hud = document.getElementById('metrics-hud');
-      hud.innerHTML = '';
+      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+      document.getElementById('v_club_path').innerText = `${Math.abs(pathDeg).toFixed(1)}° ${pathDeg > 0 ? 'R' : 'L'}`;
 
-      metricsMap.forEach(m => {
-        if (layoutConfig.metrics[m.key]) {
-          const card = document.createElement('div');
-          card.className = `metric-card ${m.accent}`;
-          card.innerHTML = `
-            <div class="metric-label">${m.label}</div>
-            <div class="metric-val">${m.val}<span class="metric-unit">${m.unit}</span></div>
-          `;
-          hud.appendChild(card);
-        }
-      });
+      const faceDeg = ogc.club_face_to_target_degrees?.right_handed || 0;
+      document.getElementById('v_face_angle').innerText = `${Math.abs(faceDeg).toFixed(1)}° ${faceDeg > 0 ? 'Open' : 'Closed'}`;
 
-      drawDivot();
-      drawFaceImpact();
+      const offYds = us.offline_distance_yards || 0;
+      document.getElementById('v_offline').innerHTML = `${Math.abs(offYds).toFixed(1)} <span class="metric-unit">${offYds < 0 ? 'L' : 'R'}</span>`;
+
+      drawDivot(shotToRender);
+      drawFaceImpact(shotToRender);
+      drawOverheadPath(shotToRender);
+      drawSideLaunch(shotToRender);
+      drawSpinAxis3D(shotToRender);
     }
 
-    function drawDivot() {
+    // 1. Virtual Divot Projector Canvas
+    function drawDivot(shot) {
       const canvas = document.getElementById('divotCanvas');
+      if (!canvas || !canvas.offsetWidth) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
+      const cx = (canvas.width / 2) + calibOffsetX;
+      const cy = (canvas.height / 2) + calibOffsetY;
+      const scale = Math.min(canvas.width, canvas.height) / 220.0;
 
-      const ogc = latestShot?.open_golf_coach || {};
-      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+      const currentShotData = shot || latestShot || {};
+      const ogc = currentShotData.open_golf_coach || {};
+      const pathDeg = (ogc.club_path_degrees?.right_handed || 0) + calibTiltDeg;
       const rad = pathDeg * Math.PI / 180;
 
-      // Target centerline grid
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = '#222530';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(cx - 90, cy); ctx.lineTo(cx + 90, cy);
-      ctx.moveTo(cx, cy - 90); ctx.lineTo(cx, cy + 90);
+      ctx.moveTo(cx - (90 * scale), cy); ctx.lineTo(cx + (90 * scale), cy);
+      ctx.moveTo(cx, cy - (90 * scale)); ctx.lineTo(cx, cy + (90 * scale));
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw Rotated Divot Polygon
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(rad);
+      ctx.scale(scale, scale);
 
       const w = 36, h = 120;
       ctx.beginPath();
@@ -264,77 +813,295 @@
       ctx.fill();
       ctx.stroke();
 
-      // Swing Path Arrow
       ctx.beginPath();
-      ctx.moveTo(0, 70);
-      ctx.lineTo(0, -70);
+      ctx.moveTo(0, 70); ctx.lineTo(0, -70);
       ctx.strokeStyle = '#00E5FF';
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Arrow head
       ctx.beginPath();
-      ctx.moveTo(0, -70);
-      ctx.lineTo(-6, -60);
-      ctx.lineTo(6, -60);
+      ctx.moveTo(0, -70); ctx.lineTo(-6, -60); ctx.lineTo(6, -60);
       ctx.fillStyle = '#00E5FF';
       ctx.fill();
 
       ctx.restore();
+
+      if (isEditMode) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 10 * scale, 0, Math.PI * 2);
+        ctx.strokeStyle = '#FF1744';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = '#FF1744';
+        ctx.fill();
+
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillStyle = '#FF1744';
+        ctx.textAlign = 'center';
+        ctx.fillText('🎯 BALL ORIGIN', cx, cy + (22 * scale));
+      }
     }
 
-    function drawFaceImpact() {
+    // 2. Quad 1: Clubface Impact Location Canvas
+    function drawFaceImpact(shot) {
       const canvas = document.getElementById('faceCanvas');
+      if (!canvas || !canvas.offsetWidth) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const cx = canvas.width / 2;
       const cy = canvas.height / 2;
+      const scale = Math.min(canvas.width / 220.0, canvas.height / 150.0);
+
+      const faceW = 180 * scale;
+      const faceH = 100 * scale;
 
       if (faceImg.complete && faceImg.naturalWidth > 0) {
-        ctx.drawImage(faceImg, cx - 90, cy - 50, 180, 100);
+        ctx.drawImage(faceImg, cx - (faceW / 2), cy - (faceH / 2), faceW, faceH);
       } else {
         ctx.fillStyle = '#222530';
-        ctx.fillRect(cx - 80, cy - 40, 160, 80);
+        ctx.fillRect(cx - (faceW / 2), cy - (faceH / 2), faceW, faceH);
       }
 
-      if (latestShot) {
-        const ogc = latestShot.open_golf_coach || {};
+      const currentShotData = shot || latestShot;
+      if (currentShotData) {
+        const ogc = currentShotData.open_golf_coach || {};
         const faceToPath = ogc.club_face_to_path_degrees?.right_handed || 0;
-        const vertLaunch = latestShot.vertical_launch_angle_degrees || 20.0;
+        const vertLaunch = currentShotData.vertical_launch_angle_degrees || 20.0;
+        const smash = ogc.smash_factor || 1.24;
+        const effPct = Math.round(Math.min(100, Math.max(0, ((smash - 1.0) / 0.5) * 100)));
 
         const hImpactMm = Math.round(faceToPath * 0.75);
         const vImpactMm = Math.round((vertLaunch - 22.0) * 0.85);
 
-        const pxShiftH = Math.max(-35, Math.min(30, Math.round(hImpactMm * 1.5)));
-        const pxShiftV = Math.max(-18, Math.min(18, Math.round(vImpactMm * 1.5)));
+        const pxShiftH = Math.max(-40, Math.min(35, Math.round(hImpactMm * 1.8))) * scale;
+        const pxShiftV = Math.max(-22, Math.min(22, Math.round(vImpactMm * 1.8))) * scale;
 
-        const impactX = cx - 15 + pxShiftH;
-        const impactY = cy - pxShiftV;
+        const impactX = cx - (15 * scale) + pxShiftH;
+        const impactY = cy - (5 * scale) - pxShiftV;
 
         ctx.beginPath();
-        ctx.arc(impactX, impactY, 9, 0, Math.PI * 2);
+        ctx.arc(impactX, impactY, 9 * scale, 0, Math.PI * 2);
         ctx.strokeStyle = '#FF1744';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.5 * scale;
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.arc(impactX, impactY, 4, 0, Math.PI * 2);
+        ctx.arc(impactX, impactY, 4 * scale, 0, Math.PI * 2);
         ctx.fillStyle = '#FF1744';
         ctx.fill();
+
+        const hDir = hImpactMm > 0 ? 'Heel' : 'Toe';
+        const vDir = vImpactMm > 0 ? 'High' : 'Low (Thin/Topped)';
+        const impactStr = `H Impact: ${Math.abs(hImpactMm)}mm ${hDir}   |   V Impact: ${Math.abs(vImpactMm)}mm ${vDir}`;
+
+        ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
+        ctx.fillStyle = '#FF1744';
+        ctx.textAlign = 'center';
+        ctx.fillText(impactStr, cx, 20 * scale);
+
+        ctx.fillStyle = '#00E5FF';
+        ctx.fillText(`Distance Efficiency: ${effPct}%`, cx, canvas.height - (8 * scale));
       }
     }
 
-    // Initialize
+    // 3. Quad 2: Overhead Address & Path Canvas (1-to-1 Python Matching with 10.png)
+    function drawOverheadPath(shot) {
+      const canvas = document.getElementById('overheadCanvas');
+      if (!canvas || !canvas.offsetWidth) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2 - 10;
+      const scale = Math.min(canvas.width / 220.0, canvas.height / 180.0);
+
+      const currentShotData = shot || latestShot || {};
+      const ogc = currentShotData.open_golf_coach || {};
+      const faceTarget = ogc.club_face_to_target_degrees?.right_handed || 0;
+      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#40C4FF';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - (90 * scale), cy); ctx.lineTo(cx + (90 * scale), cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Closed (-faceTarget) rotates LEFT; Open (+faceTarget) rotates RIGHT
+      if (overheadImg.complete && overheadImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(faceTarget * Math.PI / 180);
+        ctx.drawImage(overheadImg, -45 * scale, -45 * scale, 90 * scale, 90 * scale);
+        ctx.restore();
+      }
+
+      // Out-To-In (-pathDeg) tilts LEFT; In-To-Out (+pathDeg) tilts RIGHT
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(pathDeg * Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(0, 65 * scale); ctx.lineTo(0, -65 * scale);
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 3 * scale;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0, -65 * scale); ctx.lineTo(-5 * scale, -55 * scale); ctx.lineTo(5 * scale, -55 * scale);
+      ctx.fillStyle = '#00E5FF';
+      ctx.fill();
+      ctx.restore();
+
+      ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
+      ctx.fillStyle = '#00E5FF';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Path: ${Math.abs(pathDeg).toFixed(1)}° ${pathDeg > 0 ? 'In-To-Out' : 'Out-To-In'}`, cx, canvas.height - (18 * scale));
+      ctx.fillStyle = '#FFEA00';
+      ctx.fillText(`Face/Target: ${Math.abs(faceTarget).toFixed(1)}° ${faceTarget > 0 ? 'Open' : 'Closed'}`, cx, canvas.height - (4 * scale));
+    }
+
+    // 4. Quad 3: Side-View Trajectory Arc Canvas
+    function drawSideLaunch(shot) {
+      const canvas = document.getElementById('sideCanvas');
+      if (!canvas || !canvas.offsetWidth) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const scale = Math.min(canvas.width / 220.0, canvas.height / 150.0);
+      const groundY = canvas.height - (35 * scale);
+      const startX = 30 * scale;
+
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#3A3F4D';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(10, groundY); ctx.lineTo(canvas.width - 10, groundY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (sideImg.complete && sideImg.naturalWidth > 0) {
+        ctx.drawImage(sideImg, startX - (20 * scale), groundY - (35 * scale), 40 * scale, 35 * scale);
+      }
+
+      const currentShotData = shot || latestShot || {};
+      const vertLaunch = currentShotData.vertical_launch_angle_degrees || 18.0;
+      ctx.beginPath();
+      for (let t = 0; t <= 100; t += 5) {
+        const frac = t / 100.0;
+        const px = startX + (frac * (canvas.width - startX - 20));
+        const apexH = Math.sin(frac * Math.PI) * Math.min(canvas.height * 0.45, vertLaunch * 2.0 * scale);
+        const py = groundY - apexH;
+        if (t === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = '#00FF66';
+      ctx.lineWidth = 2.5 * scale;
+      ctx.stroke();
+
+      ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
+      ctx.fillStyle = '#00FF66';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Launch Angle: ${vertLaunch.toFixed(1)}°`, canvas.width / 2, 20 * scale);
+      ctx.fillStyle = '#E0E0E0';
+      ctx.fillText(`Descent: ${(vertLaunch * 1.6).toFixed(1)}°`, canvas.width / 2, canvas.height - (8 * scale));
+    }
+
+    // 5. Quad 4: 3D Spin Axis & Rating Canvas (Dynamic Extraction)
+    function drawSpinAxis3D(shot) {
+      const canvas = document.getElementById('spinCanvas');
+      if (!canvas || !canvas.offsetWidth) return;
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const scale = Math.min(canvas.width / 220.0, canvas.height / 150.0);
+
+      const currentShotData = shot || latestShot || {};
+      const ogc = currentShotData.open_golf_coach || {};
+      const spinAxis = ogc.spin_axis_degrees || 0;
+      const totalSpin = Math.round(ogc.total_spin_rpm || 0);
+
+      let rank = 'A';
+      if (ogc.shot_rank) {
+        rank = typeof ogc.shot_rank === 'object' ? (ogc.shot_rank.right_handed || 'A') : ogc.shot_rank;
+      } else if (currentShotData.shot_rank) {
+        rank = currentShotData.shot_rank;
+      }
+
+      let shotName = 'PURE DRAW';
+      if (ogc.shot_name) {
+        shotName = typeof ogc.shot_name === 'object' ? (ogc.shot_name.right_handed || 'PURE DRAW') : ogc.shot_name;
+      } else if (currentShotData.shot_name) {
+        shotName = currentShotData.shot_name;
+      }
+
+      const rankColors = { A: '#00FF66', B: '#00E5FF', C: '#FFC107', D: '#FF4081' };
+      const badgeColor = rankColors[rank] || '#00FF66';
+
+      ctx.fillStyle = badgeColor;
+      ctx.fillRect(15 * scale, 12 * scale, 24 * scale, 20 * scale);
+      ctx.font = `bold ${Math.max(9, Math.round(12 * scale))}px sans-serif`;
+      ctx.fillStyle = '#101114';
+      ctx.textAlign = 'center';
+      ctx.fillText(rank, 27 * scale, 26 * scale);
+
+      ctx.font = `bold ${Math.max(9, Math.round(12 * scale))}px sans-serif`;
+      ctx.fillStyle = badgeColor;
+      ctx.textAlign = 'left';
+      ctx.fillText(shotName.toUpperCase(), 46 * scale, 26 * scale);
+
+      const ballR = 20 * scale;
+      ctx.beginPath();
+      ctx.arc(cx, cy + (5 * scale), ballR, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.strokeStyle = '#D0D5DD';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(cx, cy + (5 * scale));
+      ctx.rotate(spinAxis * Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(0, 32 * scale); ctx.lineTo(0, -32 * scale);
+      ctx.strokeStyle = '#FF4081';
+      ctx.lineWidth = 3.5 * scale;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0, -32 * scale); ctx.lineTo(-5 * scale, -24 * scale); ctx.lineTo(5 * scale, -24 * scale);
+      ctx.fillStyle = '#FF4081';
+      ctx.fill();
+      ctx.restore();
+
+      ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
+      ctx.fillStyle = '#00E5FF';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Spin Axis: ${Math.abs(spinAxis).toFixed(1)}° ${spinAxis > 0 ? 'R' : 'L'}`, cx, canvas.height - (20 * scale));
+      ctx.fillStyle = '#8E94A5';
+      ctx.fillText(`Total Spin: ${totalSpin} RPM`, cx, canvas.height - (6 * scale));
+    }
+
+    window.addEventListener('resize', () => renderShotData());
     initWebSocket();
-    fetch('/api/layout').then(r => r.json()).then(data => {
-      layoutConfig = data;
-      applyLayoutConfig();
-    }).catch(() => {});
-    fetch('/api/shot').then(r => r.json()).then(data => {
-      latestShot = data;
-      renderShotData();
-    }).catch(() => {});
   </script>
 </body>
 </html>
