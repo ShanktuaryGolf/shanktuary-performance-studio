@@ -832,14 +832,19 @@ class ShanktuaryApp:
         self.canvas.create_text(q4_cx, q4_cy + 75, text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", 11, "bold"))
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
-        cx = offset_x + (pane_w // 2)
-        cy = (h // 2) - 20
+        # Load calibration offsets
+        calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
+        cal_x = calib.get("offset_x", 0)
+        cal_y = calib.get("offset_y", 0)
+
+        cx = offset_x + (pane_w // 2) + cal_x
+        cy = (h // 2) - 20 + cal_y
 
         self.canvas.create_line(cx - 130, cy, cx + 130, cy, fill="#22252E", width=2, dash=(4, 4))
         self.canvas.create_line(cx, cy - 130, cx, cy + 130, fill="#22252E", width=2, dash=(4, 4))
 
         divot_w, divot_h = 42, 150
-        angle_rad = math.radians(club_path)
+        angle_rad = math.radians(club_path + calib.get("tilt_deg", 0.0))
 
         pts = [
             (cx - divot_w // 2, cy + 20),
@@ -862,6 +867,11 @@ class ShanktuaryApp:
         px1, py1 = self.rotate_point(cx, cy + path_len // 2, cx, cy, angle_rad)
         px2, py2 = self.rotate_point(cx, cy - path_len // 2, cx, cy, angle_rad)
         self.canvas.create_line(px1, py1, px2, py2, fill="#00E5FF", width=3, arrow=tk.LAST, arrowshape=(12, 15, 5))
+
+        # Luminous Red Physical Ball Origin Anchor Crosshair
+        self.canvas.create_oval(cx - 10, cy - 10, cx + 10, cy + 10, outline="#FF1744", width=2)
+        self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="#FF1744", outline="")
+        self.canvas.create_text(cx, cy + 22, text="🎯 PHYSICAL BALL ORIGIN", fill="#FF1744", font=("Helvetica", 8, "bold"))
 
         self.canvas.create_text(cx, 55, text=f"DIVOT PROJECTOR  •  {shot_name.upper()}", fill="#00FF66", font=("Helvetica", 14, "bold"))
 

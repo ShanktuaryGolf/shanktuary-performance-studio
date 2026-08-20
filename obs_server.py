@@ -5,8 +5,10 @@ Shanktuary Performance Studio - OBS Overlay & Web Configurator Server
 Runs an HTTP + WebSocket server in a background thread on port 9321.
 Based on the proven architecture from ShanktuaryGolf/SwingLab:
   - Serves http://localhost:9321         -> Transparent OBS Browser Source Overlay (overlay.html)
+  - Serves http://localhost:9321?edit=true-> Interactive Drag, Drop & Resize Widget Canvas Editor
+  - Serves http://localhost:9321?mode=projector -> Fullscreen Floor Projector Mat Mode
   - Serves http://localhost:9321/config   -> Interactive Web Configurator UI (config.html)
-  - Serves /api/layout                   -> GET/POST saved layout preferences (overlay_layout.json)
+  - Serves /api/layout                   -> GET/POST saved layout preferences, widget positions, and divot physical calibration
   - Serves /api/shot                     -> GET last shot payload
   - Broadcasts live shot events to connected OBS browser sources over WebSocket
 """
@@ -33,40 +35,53 @@ def get_assets_dir():
             return base / "assets"
         return base
     
-    script_assets = SCRIPT_DIR / "assets"
-    if script_assets.exists():
-        return script_assets
-        
-    cwd_assets = Path.cwd() / "assets"
-    if cwd_assets.exists():
-        return cwd_assets
-        
-    return script_assets
+    candidates = [
+        SCRIPT_DIR / "assets",
+        SCRIPT_DIR / "shanktuary-performance-studio" / "assets",
+        Path.cwd() / "assets",
+        Path.cwd() / "shanktuary-performance-studio" / "assets",
+        Path("/home/sean/shanktuary-performance-studio/assets"),
+        Path("/home/sean/assets"),
+        Path("/home/sean/sps/assets")
+    ]
+    
+    for path in candidates:
+        if path.exists() and (path / "config.html").exists():
+            return path
+
+    return SCRIPT_DIR / "assets"
 
 ASSETS_DIR = get_assets_dir()
 CONFIG_DIR = Path.home() / ".config" / "shanktuary"
 LAYOUT_FILE = CONFIG_DIR / "overlay_layout.json"
 
+# Default positions, sizes, visibility, and physical divot calibration (1920x1080 canvas)
 DEFAULT_LAYOUT = {
-    "visuals": {
-        "divot": True,
-        "face_impact": True,
-        "overhead": True
+    "widgets": {
+        "divot": {"x": 30, "y": 30, "w": 250, "h": 250, "visible": True},
+        "face_impact": {"x": 290, "y": 30, "w": 250, "h": 180, "visible": True},
+        "overhead_path": {"x": 550, "y": 30, "w": 250, "h": 200, "visible": True},
+        "side_launch": {"x": 810, "y": 30, "w": 250, "h": 180, "visible": True},
+        "spin_axis_3d": {"x": 1070, "y": 30, "w": 250, "h": 180, "visible": True},
+        "ball_speed": {"x": 30, "y": 970, "w": 140, "h": 70, "visible": True},
+        "club_speed": {"x": 180, "y": 970, "w": 140, "h": 70, "visible": True},
+        "carry": {"x": 330, "y": 970, "w": 140, "h": 70, "visible": True},
+        "total": {"x": 480, "y": 970, "w": 140, "h": 70, "visible": False},
+        "smash": {"x": 630, "y": 970, "w": 140, "h": 70, "visible": True},
+        "launch_angle": {"x": 780, "y": 970, "w": 140, "h": 70, "visible": True},
+        "push_pull": {"x": 930, "y": 970, "w": 140, "h": 70, "visible": False},
+        "total_spin": {"x": 1080, "y": 970, "w": 140, "h": 70, "visible": True},
+        "sidespin": {"x": 1230, "y": 970, "w": 140, "h": 70, "visible": False},
+        "spin_axis": {"x": 1380, "y": 970, "w": 140, "h": 70, "visible": True},
+        "club_path": {"x": 1530, "y": 970, "w": 140, "h": 70, "visible": True},
+        "face_angle": {"x": 1680, "y": 970, "w": 140, "h": 70, "visible": True},
+        "offline": {"x": 1780, "y": 970, "w": 140, "h": 70, "visible": False}
     },
-    "metrics": {
-        "ball_speed": True,
-        "club_speed": True,
-        "carry": True,
-        "total": False,
-        "smash": True,
-        "launch_angle": True,
-        "push_pull": False,
-        "total_spin": True,
-        "sidespin": False,
-        "spin_axis": True,
-        "club_path": True,
-        "face_angle": True,
-        "offline": True
+    "divot_calibration": {
+        "offset_x": 0,
+        "offset_y": 0,
+        "tilt_deg": 0.0,
+        "scale": 1.0
     },
     "styling": {
         "theme": "dark",
@@ -102,7 +117,6 @@ class OBSState:
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             LAYOUT_FILE.write_text(json.dumps(layout_data, indent=2))
-            # Broadcast layout update to OBS browser clients
             self.broadcast({"type": "layout_update", "layout": layout_data})
             return True
         except Exception as e:
@@ -145,7 +159,6 @@ obs_state = OBSState()
 
 class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Silence verbose HTTP logging
         return
 
     def do_GET(self):
@@ -155,7 +168,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
         assets_dir = get_assets_dir()
 
-        # Handle WebSocket Handshake
         if self.headers.get("Upgrade", "").lower() == "websocket":
             self.handle_websocket()
             return
@@ -179,7 +191,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, f"File Not Found: {parsed_path}")
 
     def do_POST(self):
-        parsed_path = self.path.split("?")[0]
+        parsed_path = self.path.split("?")[0].rstrip("/")
         if parsed_path == "/api/layout":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8")
@@ -205,7 +217,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_error(500, str(e))
         else:
-            self.send_error(404, "File Not Found")
+            self.send_error(404, f"File Not Found: {filepath}")
 
     def send_json(self, obj, code=200):
         try:
@@ -239,7 +251,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         with obs_state.lock:
             obs_state.ws_clients.add(raw_sock)
 
-        # Send initial state and layout
         with obs_state.lock:
             current_shot = obs_state.latest_shot
         
@@ -253,7 +264,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        # Keep socket open in read loop
         try:
             while True:
                 data = raw_sock.recv(1024)

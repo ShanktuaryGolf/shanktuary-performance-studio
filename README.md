@@ -1,102 +1,65 @@
-# ⛳ Shanktuary Performance Studio
+# Shanktuary Performance Studio
 
-A professional, open-source **Launch Monitor Dashboard & Performance Analytics Suite** for the **OpenLaunch Nova** launch monitor.
-
-![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.8+-green.svg)
-![OpenLaunch](https://img.shields.io/badge/Hardware-OpenLaunch_Nova-cyan.svg)
+> **Ultimate Golf Launch Monitor Suite for OpenLaunch Nova & OpenGolfCoach**
+> *Featuring Live 4-Quadrant Visual Telemetry, High-Contrast Studio Views, Floor Divot Projection, and Built-in OBS Browser Source Server.*
 
 ---
 
-## 🌟 Key Features
+## 🌟 Overview & Feature Highlights
 
-* **Zero-Config mDNS Auto-Discovery:** Automatically discovers any OpenLaunch Nova hardware on your local network using official `_openlaunch-ws._tcp.local.` mDNS zeroconf broadcasting. No IP address setup required!
-* **Mode 1 — 4-Quadrant Quad Studio Dashboard:**
-  * **Top-Left (Overhead View):** Real clubhead address view (`iron_overhead.png`) with dynamic face angle rotation and Cyan swing path vector arrow.
-  * **Bottom-Left (Side Elevation View):** Profile side view (`iron_side.png`) showing dynamic launch angle vector, peak height, and backspin.
-  * **Top-Right (3D Spin Axis):** 3D golf ball with tilted red spin axis vector, sidespin, and shot grade badge (`Rank A–D`).
-  * **Bottom-Right (Face Impact Location):** Real clubface (`iron_face.png`) with glowing red impact target ring directly on scorelines/leading edge showing **High/Low** and **Heel/Toe** displacement.
-* **Mode 2 — Floor Divot Projector View:**
-  * High-contrast rotated turf divot patch optimized for hitting mat floor projection.
-* **Mode 3 — Performance Suite & Trajectory Comparison Dashboard:**
-  * **LAST vs AVERAGE Comparison Table:** Side-by-side comparison table for 10 key metrics (Ball Speed, Launch Angle, Total Spin, Carry, Total Distance, Push/Pull, Sidespin, Descent Angle, Peak Height, Offline).
-  * **Multi-Shot Overlaid Trajectory Graph:** 2D side elevation plot (0 to 350 YDS) showing parabolic flight curves for **ALL shots** in your practice session.
-  * **Top-Down Shot Dispersion Target Map:** Target centerline map plotting landing markers for every shot + a **90% confidence dispersion ellipse** to visualize shot grouping.
-  * **Interactive Session Shot List:** Select any historical shot from the sidebar list or click a landing dot on the dispersion map.
-  * **Click-to-Inspect Quad View:** Click `[🔍 INSPECT QUAD VIEW]` to view full 4-Quadrant clubface impact & path analysis for any past shot!
-  * **Draggable Sidebar Divider:** Click and drag the cyan divider line to dynamically resize the session stats sidebar.
+Shanktuary Performance Studio is a high-performance launch monitor visualization suite and streaming overlay system designed specifically for **OpenLaunch Nova** and **OpenGolfCoach** compatible launch monitors.
 
-* **Built-in OBS Studio Browser Source Overlay Server:**
-  * **OBS Browser Source URL:** `http://localhost:9321` (1920x1080 transparent HUD overlay for live streaming / video capture).
-  * **Interactive Web Configurator (`http://localhost:9321/config`):** Toggle switches to check/uncheck every metric, Virtual Divot Projector canvas, clubface impact ring, and theme styles with instant live sync!
+### 🎨 1. Extreme Customizability & Drag & Drop Editor
+- **Web Configurator UI ([`http://localhost:9321/config`](http://localhost:9321/config)):** Live control panel to toggle metric cards, adjust themes, and tune display settings.
+- **Interactive Drag & Drop Canvas ([`http://localhost:9321/?edit=true`](http://localhost:9321/?edit=true)):** Arrange your stream overlay on a 1920x1080 canvas with 40px grid snapping. Move any widget anywhere on screen.
 
-### 1. Installation
+### 📐 2. Dynamic Canvas Size & Resizable Widgets
+- **Corner Resize Grip Handle (`◢`):** Click and drag the bottom-right corner of ANY widget to resize it to your preferred dimensions.
+- **Fluid Auto-Scaling HTML5 Canvases:** All graphics (turf divots, clubface impact rings, overhead address vectors, launch arcs, 3D spin axis vectors) scale up 100% crisp and clear regardless of container size (e.g. expand the Virtual Divot to half-screen or full-screen!).
 
-Clone the repository and install dependencies:
+### 🎯 3. Complete 5 Visual Widgets Suite
+1. 🌿 **Virtual Divot Projector (`w_divot`):** Rotated turf divot patch with swing path vector arrow, physical ball origin anchor (`🎯 BALL ORIGIN`), X/Y physical offset calibration, and rotational tilt adjustment (`-45° to +45°`).
+2. 🎯 **Quad 1: Clubface Impact Location (`w_face_impact`):** Scoreline impact spot (`iron_face.png`) with Heel/Toe & High/Low text telemetry + Distance Efficiency %.
+3. 📐 **Quad 2: Overhead Address & Path (`w_overhead_path`):** Overhead iron graphic (`iron_overhead.png`) with dynamic address rotation + cyan club path vector arrow (1-to-1 sign matched with Quad View).
+4. 🏹 **Quad 3: Side Launch Trajectory Arc (`w_side_launch`):** Side club profile (`iron_side.png`) + 2D launch angle trajectory arc + apex height.
+5. 🌀 **Quad 4: 3D Spin Axis & Rating (`w_spin_axis_3d`):** Dynamic Shot Quality Rating Badge (`A / B / C / D`) + Shot Title (`PULL HOOK`, `PURE DRAW`) + rotated 3D spin axis vector arrow.
 
+### 🎥 4. Floor Projection Support & Fullscreen Mat Mode
+- **Fullscreen Floor Projector Mode ([`http://localhost:9321/?mode=projector`](http://localhost:9321/?mode=projector)):** Pitch-black background mode outputting ONLY the high-contrast divot patch and target line for floor projectors.
+- **Physical Ball Alignment Calibration:** 1-click canvas positioning, X/Y physical offset shifting, and rotational tilt calibration so the projected divot lines up 100% perfectly on top of your physical golf ball on the mat.
+
+### 📡 5. Automatic OBS Scene Integration
+- **Built-in HTTP + WebSocket Server (Port 9321):** Runs automatically in a background thread when Shanktuary launches.
+- **Instant OBS Browser Source Setup:** Add `http://localhost:9321` as an OBS Browser Source for a clean, transparent, real-time stream overlay.
+
+---
+
+## 🚀 Quick Start
+
+### Running from Source
 ```bash
 git clone https://github.com/ShanktuaryGolf/shanktuary-performance-studio.git
 cd shanktuary-performance-studio
 pip install -r requirements.txt
-```
-
-### 2. Running the Application
-
-Ensure your OpenLaunch Nova device is powered on and connected to the same network (Wi-Fi or LAN), then run:
-
-```bash
 python3 shanktuary_performance_studio.py
 ```
 
-* The app will automatically discover your Nova hardware via mDNS (`_openlaunch-ws._tcp.local.`) and start receiving live shot telemetry!
+### OBS & Browser Source URLs
+- 🎥 **Clean OBS Browser Source:** `http://localhost:9321`
+- ✏️ **Drag & Drop Canvas Editor:** `http://localhost:9321/?edit=true`
+- 🎥 **Floor Projector Fullscreen Mode:** `http://localhost:9321/?mode=projector`
+- ⚙️ **Web Configurator UI:** `http://localhost:9321/config`
 
 ---
 
-## 🎮 Keyboard & Mouse Controls
-
-| Key / Action | Function |
-| :--- | :--- |
-| **`1`**, **`2`**, **`3`** | Jump directly to View Modes 1, 2, or 3 |
-| **`M`** or **`Tab`** | Cycle through View Modes (1 $\rightarrow$ 2 $\rightarrow$ 3) |
-| **`F`** or **`F11`** | Toggle Fullscreen Mode |
-| **`C`** | Clear Session Shot History |
-| **`Esc`** | Exit Application |
-| **Click & Drag Line** | Resize Session Stats Sidebar in Mode 3 |
-| **Click Shot / Dot** | Select any historical shot in Mode 3 |
+## ⌨️ Desktop Hotkeys & Controls
+- `[M]` / `[Tab]` — Switch Display Mode (1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite)
+- `[F]` — Toggle Fullscreen
+- `[C]` — Clear Session Shot History
+- `[Esc]` — Exit App / Fullscreen
 
 ---
 
-## 🔧 Advanced Configuration
-
-### Environment Variables
-You can manually override device discovery or connection settings using environment variables:
-
-```bash
-# Override device IP address
-export NOVA_IP=192.168.1.100
-
-# Run Shanktuary Performance Studio
-python3 shanktuary_performance_studio.py
-```
-
-### Session History Logs
-All session shots are automatically saved to disk in JSON format at:
-```text
-shanktuary_session_history.json
-```
-
----
-
-## 🛠️ CLI WebSocket Logger Utility
-
-Include a standalone CLI event listener to print raw Nova WebSocket JSON telemetry:
-
-```bash
-python3 listen_nova_events.py
-```
-
----
-
-## 📄 License
-
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+## 📄 License & Credits
+Developed by **Shanktuary Golf** for OpenLaunch Nova & OpenGolfCoach systems.
+Distributed under the MIT License.
