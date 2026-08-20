@@ -50,10 +50,10 @@ Shanktuary Performance Studio is a comprehensive launch monitor visualization, p
 *(Runs automatically on `http://localhost:9321`)*
 
 - **Built-in HTTP + WebSocket Server (Port 9321):** Automatic background server for transparent OBS Studio Browser Source overlays.
+- **Web Configurator Control Panel ([`http://localhost:9321/config`](http://localhost:9321/config)):** Live control panel for toggling telemetry cards, switching themes, and managing saved layout presets.
 - **Interactive Drag & Drop Canvas ([`http://localhost:9321/?edit=true`](http://localhost:9321/?edit=true)):** Arrange any widget on a 1920x1080 canvas with 40px grid snapping.
 - **Corner Resize Grip Handles (`◢`):** Click and drag the bottom-right corner of ANY widget container to resize it to any dimensions (e.g. half-screen or full-screen divots!).
 - **Fluid Vector Scaling:** All graphics scale 100% crisp and clear at any size.
-- **Web Configurator Control Panel ([`http://localhost:9321/config`](http://localhost:9321/config)):** Live control panel for toggling telemetry cards, switching themes, and managing saved layout presets.
 - **Pristine Broadcast Output:** Clean broadcast canvas with zero stream icons or pencil overlays.
 
 ---
