@@ -3,7 +3,7 @@
 export class GolfBall {
   constructor(scene) {
     this.scene = scene;
-    this.visualRadius = 0.085; // Realistic golf ball scale
+    this.visualRadius = 0.055; // Refined realistic scale (~1.9 inches)
     
     // 1. Create Geometrically-Dimpled 3D Sphere (392 Authentic Dimples)
     const geometry = this.createDimpledGeometry(this.visualRadius);
@@ -34,7 +34,7 @@ export class GolfBall {
     this.scene.add(this.tracerLine);
     
     // 4. Ground Landing Marker Ring
-    const ringGeo = new THREE.RingGeometry(0.4, 0.9, 32);
+    const ringGeo = new THREE.RingGeometry(0.4, 0.8, 32);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0x00FF66,
@@ -55,25 +55,23 @@ export class GolfBall {
   }
 
   createDimpledGeometry(radius) {
-    // High-poly sphere for crisp physical dimple depressions
     const geometry = new THREE.SphereGeometry(radius, 80, 80);
     const pos = geometry.attributes.position;
     const colors = [];
     
-    // Generate 392 Dimple Centers using Fibonacci Golden Spiral Distribution
     const N = 392;
     const dimpleCenters = [];
     for (let i = 0; i < N; i++) {
       const z = 1.0 - (2.0 * i) / (N - 1);
       const r = Math.sqrt(Math.max(0.0, 1.0 - z * z));
-      const theta = i * Math.PI * (3.0 - Math.sqrt(5.0)); // Golden angle
+      const theta = i * Math.PI * (3.0 - Math.sqrt(5.0));
       const x = r * Math.cos(theta);
       const y = r * Math.sin(theta);
       dimpleCenters.push(new THREE.Vector3(x, y, z));
     }
     
-    const dimpleAngleThreshold = 0.082; // Angular radius of each dimple (~4.7 degrees)
-    const maxDepressionDepth = radius * 0.12; // Inward displacement depth
+    const dimpleAngleThreshold = 0.082;
+    const maxDepressionDepth = radius * 0.12;
     
     const v = new THREE.Vector3();
     const vNorm = new THREE.Vector3();
@@ -84,7 +82,6 @@ export class GolfBall {
       
       let minAngle = 999;
       for (let j = 0; j < N; j++) {
-        // Dot product between unit vectors
         const dot = Math.min(1.0, Math.max(-1.0, vNorm.dot(dimpleCenters[j])));
         const angle = Math.acos(dot);
         if (angle < minAngle) {
@@ -92,24 +89,20 @@ export class GolfBall {
         }
       }
       
-      // If vertex is inside a dimple depression, displace it inward & calculate AO
       let ao = 1.0;
       if (minAngle < dimpleAngleThreshold) {
         const ratio = minAngle / dimpleAngleThreshold;
-        // Smooth cosine bowl depression profile
         const depth = maxDepressionDepth * Math.pow(Math.cos(ratio * (Math.PI / 2)), 2);
         v.sub(vNorm.multiplyScalar(depth));
         pos.setXYZ(i, v.x, v.y, v.z);
-        
-        // Ambient occlusion shading inside dimple cup for strong visual contrast
-        ao = 0.80 + 0.20 * ratio;
+        ao = 0.78 + 0.22 * ratio;
       }
       
       colors.push(ao, ao, ao);
     }
     
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.computeVertexNormals(); // Recalculate true 3D lighting normals for inward dimples
+    geometry.computeVertexNormals();
     return geometry;
   }
 
@@ -120,15 +113,12 @@ export class GolfBall {
     canvas.height = size;
     const ctx = canvas.getContext('2d');
     
-    // Pure White Base
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, size, size);
     
-    // Black Alignment Line
     ctx.fillStyle = '#111111';
     ctx.fillRect(size / 2 - 3, 0, 6, size);
     
-    // Red Brand Number "1"
     ctx.fillStyle = '#e11d48';
     ctx.font = 'bold 44px sans-serif';
     ctx.textAlign = 'center';
@@ -165,7 +155,7 @@ export class GolfBall {
 
   createTurfImpact(x, z) {
     for (let i = 0; i < 8; i++) {
-      const pGeo = new THREE.PlaneGeometry(0.16, 0.16);
+      const pGeo = new THREE.PlaneGeometry(0.14, 0.14);
       pGeo.rotateX(-Math.PI / 2);
       const pMat = new THREE.MeshBasicMaterial({
         color: 0x7da85b,
@@ -190,21 +180,16 @@ export class GolfBall {
       
       const p = this.trajectory[targetIndex];
       
-      // Position ball with bottom flush on turf
       this.mesh.position.set(p.x, Math.max(this.visualRadius, p.y), p.z);
-      
-      // Rotate ball along flight trajectory
       this.mesh.rotation.x -= deltaTime * 18;
       this.mesh.rotation.y += deltaTime * 2;
       
-      // Update flight tracer ribbon
       if (this.tracerPoints.length === 0 || 
           this.tracerPoints[this.tracerPoints.length - 1].distanceTo(this.mesh.position) > 0.3) {
         this.tracerPoints.push(new THREE.Vector3(p.x, Math.max(this.visualRadius, p.y), p.z));
         this.tracerGeo.setFromPoints(this.tracerPoints);
       }
       
-      // Turf bounce impact
       if (p.bounces > this.lastBounces) {
         this.createTurfImpact(p.x, p.z);
         this.lastBounces = p.bounces;
@@ -215,7 +200,6 @@ export class GolfBall {
       }
     }
     
-    // Update particle lifespans
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= deltaTime;

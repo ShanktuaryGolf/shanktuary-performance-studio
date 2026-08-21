@@ -1,4 +1,4 @@
-// Professional 3D Driving Range Environment (Photorealistic Turf, Target Greens, Background Mountains)
+// Professional 3D Driving Range Environment (Clean Target Greens, No Sand Traps, Background Mountains)
 
 export function setupEnvironment(scene) {
     const textureLoader = new THREE.TextureLoader();
@@ -46,16 +46,15 @@ export function setupEnvironment(scene) {
     
     // Tee Divider Markers
     const markerGeo = new THREE.SphereGeometry(0.12, 16, 16);
-    const markerMatL = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
-    const markerMatR = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
-    const markerL = new THREE.Mesh(markerGeo, markerMatL);
+    const markerMat = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
+    const markerL = new THREE.Mesh(markerGeo, markerMat);
     markerL.position.set(-2.5, 0.12, 0);
     scene.add(markerL);
-    const markerR = new THREE.Mesh(markerGeo, markerMatR);
+    const markerR = new THREE.Mesh(markerGeo, markerMat);
     markerR.position.set(2.5, 0.12, 0);
     scene.add(markerR);
     
-    // 4. Clean PGA-Style Target Greens (50, 100, 150, 200, 250, 300 yards)
+    // 4. Clean PGA Target Greens (No Sand Traps)
     const targets = [
         { yd: 50, radius: 7, color: 0x4CAF50 },
         { yd: 100, radius: 9, color: 0x2196F3 },
@@ -66,7 +65,7 @@ export function setupEnvironment(scene) {
     ];
     
     targets.forEach(t => {
-        createTargetGreen(scene, t.yd, t.radius, t.color, textureLoader);
+        createTargetGreen(scene, t.yd, t.radius, t.color);
     });
     
     // 5. Yardage Hash Lines across the Fairway (50, 100, 150, 200, 250, 300)
@@ -74,11 +73,11 @@ export function setupEnvironment(scene) {
         createYardageLine(scene, t.yd);
     });
     
-    // 6. Background 3D Mountain Range (rangeMtns.glb)
+    // 6. Background 3D Mountain Range
     loadBackgroundMountains(scene);
 }
 
-function createTargetGreen(scene, yardage, radius, ringColor, textureLoader) {
+function createTargetGreen(scene, yardage, radius, ringColor) {
     const zDist = yardage;
     
     // Outer Target Green Ring
@@ -132,28 +131,8 @@ function createTargetGreen(scene, yardage, radius, ringColor, textureLoader) {
     flag.castShadow = true;
     scene.add(flag);
     
-    // Flanking Sand Bunker
-    const sandTex = textureLoader.load('/range/textures/sand.png');
-    sandTex.wrapS = THREE.RepeatWrapping;
-    sandTex.wrapT = THREE.RepeatWrapping;
-    sandTex.repeat.set(2, 2);
-    
-    const bunkerGeo = new THREE.CylinderGeometry(radius * 0.4, radius * 0.5, 0.08, 24);
-    const bunkerMat = new THREE.MeshStandardMaterial({ 
-        map: sandTex,
-        color: 0xe8d7a7, 
-        roughness: 0.95 
-    });
-    
-    // Place bunker naturally offset
-    const bunkerL = new THREE.Mesh(bunkerGeo, bunkerMat);
-    bunkerL.position.set(-radius - 3, 0.04, -zDist + 2);
-    bunkerL.scale.set(1.4, 1.0, 0.9);
-    bunkerL.receiveShadow = true;
-    scene.add(bunkerL);
-    
-    // Yardage Target Board
-    createDistanceSign(scene, -radius - 8, -zDist, `${yardage}`);
+    // Yardage Target Board (Offset left)
+    createDistanceSign(scene, -radius - 6, -zDist, `${yardage}`);
 }
 
 function createDistanceSign(scene, x, z, text) {
