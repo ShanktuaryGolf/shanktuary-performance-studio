@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+// Multi-Mode 3D Camera System
 
 export const CameraModes = {
     GOLFER: 0,
@@ -9,17 +9,16 @@ export const CameraModes = {
 };
 
 export class CameraController {
-    constructor(camera, domElement) {
+    constructor(camera) {
         this.camera = camera;
-        this.domElement = domElement;
         this.mode = CameraModes.GOLFER;
         
-        this.target = new THREE.Vector3(0, 0, -10);
-        this.currentPosition = new THREE.Vector3().copy(camera.position);
-        this.desiredPosition = new THREE.Vector3().copy(camera.position);
+        this.target = new THREE.Vector3(0, 1.5, -40);
+        this.currentPosition = new THREE.Vector3(0, 2.5, 6);
+        this.desiredPosition = new THREE.Vector3(0, 2.5, 6);
         
-        this.ballPosition = new THREE.Vector3();
-        this.landingPosition = new THREE.Vector3(0, 0, -100);
+        this.ballPosition = new THREE.Vector3(0, 0.25, 0);
+        this.landingPosition = new THREE.Vector3(0, 0.05, -150);
         
         this.setupEventListeners();
         this.updateModeUI();
@@ -54,7 +53,7 @@ export class CameraController {
         const modeNames = ["Golfer View", "Follow-Cam", "Broadcast Tower", "Target Green", "Top-Down Blimp"];
         const modeLabel = document.getElementById('camera-mode-label');
         if (modeLabel) {
-            modeLabel.innerText = "Cam: " + modeNames[this.mode];
+            modeLabel.innerText = "🎥 Cam: " + modeNames[this.mode] + " [V]";
         }
     }
     
@@ -67,31 +66,31 @@ export class CameraController {
     }
     
     update(deltaTime) {
-        const lerpFactor = 5.0 * deltaTime; // Smooth damping
+        const lerpFactor = Math.min(1.0, 4.0 * deltaTime);
         
         switch (this.mode) {
             case CameraModes.GOLFER:
-                this.desiredPosition.set(0, 2, 5); // Behind tee
-                this.target.set(0, 0, -10); // Look forward
+                this.desiredPosition.set(0, 2.5, 6);
+                this.target.set(0, 1.5, -40);
                 break;
                 
             case CameraModes.FOLLOW:
-                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 2, this.ballPosition.z + 5);
+                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 3, this.ballPosition.z + 8);
                 this.target.copy(this.ballPosition);
                 break;
                 
             case CameraModes.BROADCAST:
-                this.desiredPosition.set(20, 15, -20); 
+                this.desiredPosition.set(35, 18, -30);
                 this.target.copy(this.ballPosition);
                 break;
                 
             case CameraModes.LANDING:
-                this.desiredPosition.set(this.landingPosition.x + 5, this.landingPosition.y + 2, this.landingPosition.z + 10);
+                this.desiredPosition.set(this.landingPosition.x + 5, this.landingPosition.y + 3, this.landingPosition.z + 15);
                 this.target.copy(this.landingPosition);
                 break;
                 
             case CameraModes.BLIMP:
-                this.desiredPosition.set(this.ballPosition.x, 50, this.ballPosition.z + 1); // Avoid exact top down gimbal lock
+                this.desiredPosition.set(this.ballPosition.x, 70, this.ballPosition.z + 10);
                 this.target.copy(this.ballPosition);
                 break;
         }
