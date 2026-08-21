@@ -224,6 +224,7 @@ class ShanktuaryApp:
         self.land_dot_coords = [] # (x, y, index)
         self.inspect_btn_rect = None # (x1, y1, x2, y2)
         self.clear_btn_rect = None # (x1, y1, x2, y2)
+        self.btn_3d_range_rect = None # (x1, y1, x2, y2)
 
         # Load Assets
         self.overhead_img = load_image_asset(OVERHEAD_PATH, target_h=210, mirror=True)
@@ -245,6 +246,7 @@ class ShanktuaryApp:
         self.root.bind("1", lambda e: self.set_mode(1))
         self.root.bind("2", lambda e: self.set_mode(2))
         self.root.bind("3", lambda e: self.set_mode(3))
+        self.root.bind("4", lambda e: self.launch_3d_range())
         self.root.bind("<c>", lambda e: self.clear_session())
         self.root.bind("<C>", lambda e: self.clear_session())
 
@@ -276,6 +278,9 @@ class ShanktuaryApp:
         self.session_shots.clear()
         self.selected_shot_index = -1
         self.draw_screen()
+
+    def launch_3d_range(self, event=None):
+        webbrowser.open("http://localhost:9321/range")
 
     def save_session_to_file(self):
         try:
@@ -312,6 +317,10 @@ class ShanktuaryApp:
         return nx, ny
 
     def handle_mouse_hover(self, event):
+        if self.btn_3d_range_rect and self.btn_3d_range_rect[0] <= event.x <= self.btn_3d_range_rect[2] and self.btn_3d_range_rect[1] <= event.y <= self.btn_3d_range_rect[3]:
+            self.canvas.config(cursor="hand2")
+            return
+
         if self.view_mode == 3:
             w = self.canvas.winfo_width()
             sb_x1 = w - self.sidebar_width - 15
@@ -343,6 +352,10 @@ class ShanktuaryApp:
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
+        if self.btn_3d_range_rect and self.btn_3d_range_rect[0] <= event.x <= self.btn_3d_range_rect[2] and self.btn_3d_range_rect[1] <= event.y <= self.btn_3d_range_rect[3]:
+            self.launch_3d_range()
+            return
+
         if self.view_mode == 3:
             w = self.canvas.winfo_width()
             sb_x1 = w - self.sidebar_width - 15
@@ -462,7 +475,9 @@ class ShanktuaryApp:
         self.inspect_btn_rect = None
         self.clear_btn_rect = None
 
-        foot_text = f"[M/Tab] Mode (1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite) | [F] Fullscreen | [C] Clear ({len(self.session_shots)} shots) | [Esc] Exit"
+        self.btn_3d_range_rect = None
+
+        foot_text = f"[M/Tab] Mode (1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite) | [4] 3D Range | [F] Fullscreen | [C] Clear ({len(self.session_shots)} shots) | [Esc] Exit"
         self.canvas.create_text(w // 2, h - 14, text=foot_text, fill="#4E5363", font=("Helvetica", 9))
 
         if not self.current_shot and self.view_mode != 3:
@@ -510,6 +525,11 @@ class ShanktuaryApp:
             self.draw_divot_focus(w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name)
         else:
             self.draw_performance_suite(w, h)
+
+        # Draw Global 3D Range Button
+        self.btn_3d_range_rect = (w - 110, 15, w - 15, 45)
+        self.canvas.create_rectangle(self.btn_3d_range_rect[0], self.btn_3d_range_rect[1], self.btn_3d_range_rect[2], self.btn_3d_range_rect[3], fill="#00E5FF", outline="")
+        self.canvas.create_text(w - 62, 30, text="🏔️ 3D RANGE", fill="#101114", font=("Helvetica", 9, "bold"))
 
     def draw_performance_suite(self, w, h):
         table_h = 85
