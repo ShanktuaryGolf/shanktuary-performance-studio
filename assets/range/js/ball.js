@@ -1,15 +1,14 @@
-// High-Precision 3D Geometrically-Dimpled Golf Ball Model
+// Photorealistic 3D Golf Ball & High-Visibility 3D Glowing Tracer Ribbon
 
 export class GolfBall {
   constructor(scene) {
     this.scene = scene;
-    this.visualRadius = 0.055; // Refined realistic scale (~1.9 inches)
+    this.visualRadius = 0.055;
     
-    // 1. Create Geometrically-Dimpled 3D Sphere (392 Authentic Dimples)
+    // 1. 3D Geometrically-Dimpled Golf Ball (392 Dimples)
     const geometry = this.createDimpledGeometry(this.visualRadius);
     const texture = this.createBallTexture();
     
-    // 2. High-Gloss PBR Material with Specular Sheen
     const material = new THREE.MeshStandardMaterial({
       map: texture,
       vertexColors: true,
@@ -18,23 +17,36 @@ export class GolfBall {
     });
     
     this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.position.set(0, this.visualRadius + 0.02, 0); // Sits resting on the tee pad
+    this.mesh.position.set(0, this.visualRadius + 0.02, 0);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.scene.add(this.mesh);
     
-    // 3. Glowing 3D Flight Tracer Ribbon
-    this.tracerPoints = [];
+    // 2. High-Visibility 3D Glowing Tracer Ribbon (Topgolf / Protracer Style)
+    this.maxTracerSegments = 500;
     this.tracerGeo = new THREE.BufferGeometry();
-    this.tracerMat = new THREE.LineBasicMaterial({
-      color: 0x00E5FF,
-      linewidth: 4
-    });
-    this.tracerLine = new THREE.Line(this.tracerGeo, this.tracerMat);
-    this.scene.add(this.tracerLine);
+    this.tracerPositions = new Float32Array(this.maxTracerSegments * 6 * 3); // 2 triangles per quad
+    this.tracerColors = new Float32Array(this.maxTracerSegments * 6 * 3);
     
-    // 4. Ground Landing Marker Ring
-    const ringGeo = new THREE.RingGeometry(0.4, 0.8, 32);
+    this.tracerGeo.setAttribute('position', new THREE.BufferAttribute(this.tracerPositions, 3));
+    this.tracerGeo.setAttribute('color', new THREE.BufferAttribute(this.tracerColors, 3));
+    
+    this.tracerMat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9
+    });
+    
+    this.tracerMesh = new THREE.Mesh(this.tracerGeo, this.tracerMat);
+    this.tracerMesh.frustumCulled = false;
+    this.scene.add(this.tracerMesh);
+    
+    this.tracerPath = [];
+    this.ribbonWidth = 0.12; // 3D ribbon width in yards
+    
+    // 3. Ground Landing Target Ring
+    const ringGeo = new THREE.RingGeometry(0.5, 1.0, 32);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0x00FF66,
@@ -131,8 +143,13 @@ export class GolfBall {
 
   reset() {
     this.mesh.position.set(0, this.visualRadius + 0.02, 0);
-    this.tracerPoints = [];
-    this.tracerGeo.setFromPoints([]);
+    this.tracerPath = [];
+    this.tracerPositions.fill(0);
+    this.tracerColors.fill(0);
+    this.tracerGeo.attributes.position.needsUpdate = true;
+    this.tracerGeo.attributes.color.needsUpdate = true;
+    this.tracerGeo.setDrawRange(0, 0);
+    
     this.landingRing.visible = false;
     this.isAnimating = false;
     this.elapsedTime = 0;
@@ -151,6 +168,71 @@ export class GolfBall {
       this.landingRing.position.set(finalPoint.x, 0.03, finalPoint.z);
       this.landingRing.visible = true;
     }
+  }
+
+  updateTracerRibbon(newPos) {
+    if (this.tracerPath.length === 0 || 
+        this.tracerPath[this.tracerPath.length - 1].distanceTo(newPos) > 0.3) {
+      this.tracerPath.push(newPos.clone());
+    }
+    
+    const count = this.tracerPath.length;
+    if (count < 2) return;
+    
+    let vIdx = 0;
+    const halfWidth = this.ribbonWidth;
+    
+    for (let i = 0; i < count - 1; i++) {
+      if (i >= this.maxTracerSegments - 1) break;
+      
+      const p1 = this.tracerPath[i];
+      const p2 = this.tracerPath[i + 1];
+      
+      // Calculate perpendicular ribbon orientation
+      const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const side = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(halfWidth);
+      
+      // 4 Quad Vertices
+      const v0 = new THREE.Vector3().subVectors(p1, side);
+      const v1 = new THREE.Vector3().addVectors(p1, side);
+      const v2 = new THREE.Vector3().subVectors(p2, side);
+      const v3 = new THREE.Vector3().addVectors(p2, side);
+      
+      // Gradient colors (Neon Cyan 0x00E5FF -> Glowing Green 0x00FF66)
+      const t1 = i / count;
+      const t2 = (i + 1) / count;
+      
+      const r1 = 0.0, g1 = 0.90 + 0.10 * t1, b1 = 1.0 - 0.60 * t1;
+      const r2 = 0.0, g2 = 0.90 + 0.10 * t2, b2 = 1.0 - 0.60 * t2;
+      
+      // Triangle 1 (v0, v1, v2)
+      this.setVertex(vIdx++, v0, r1, g1, b1);
+      this.setVertex(vIdx++, v1, r1, g1, b1);
+      this.setVertex(vIdx++, v2, r2, g2, b2);
+      
+      // Triangle 2 (v1, v3, v2)
+      this.setVertex(vIdx++, v1, r1, g1, b1);
+      this.setVertex(vIdx++, v3, r2, g2, b2);
+      this.setVertex(vIdx++, v2, r2, g2, b2);
+    }
+    
+    this.tracerGeo.attributes.position.needsUpdate = true;
+    this.tracerGeo.attributes.color.needsUpdate = true;
+    this.tracerGeo.setDrawRange(0, vIdx);
+  }
+
+  setVertex(idx, pos, r, g, b) {
+    const pArray = this.tracerPositions;
+    const cArray = this.tracerColors;
+    
+    pArray[idx * 3] = pos.x;
+    pArray[idx * 3 + 1] = pos.y;
+    pArray[idx * 3 + 2] = pos.z;
+    
+    cArray[idx * 3] = r;
+    cArray[idx * 3 + 1] = g;
+    cArray[idx * 3 + 2] = b;
   }
 
   createTurfImpact(x, z) {
@@ -179,16 +261,14 @@ export class GolfBall {
       );
       
       const p = this.trajectory[targetIndex];
+      const ballPos = new THREE.Vector3(p.x, Math.max(this.visualRadius, p.y), p.z);
       
-      this.mesh.position.set(p.x, Math.max(this.visualRadius, p.y), p.z);
+      this.mesh.position.copy(ballPos);
       this.mesh.rotation.x -= deltaTime * 18;
       this.mesh.rotation.y += deltaTime * 2;
       
-      if (this.tracerPoints.length === 0 || 
-          this.tracerPoints[this.tracerPoints.length - 1].distanceTo(this.mesh.position) > 0.3) {
-        this.tracerPoints.push(new THREE.Vector3(p.x, Math.max(this.visualRadius, p.y), p.z));
-        this.tracerGeo.setFromPoints(this.tracerPoints);
-      }
+      // Update thick glowing 3D flight tracer ribbon
+      this.updateTracerRibbon(ballPos);
       
       if (p.bounces > this.lastBounces) {
         this.createTurfImpact(p.x, p.z);
