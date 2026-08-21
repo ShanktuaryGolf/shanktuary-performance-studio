@@ -1,5 +1,5 @@
-// Exact Par-3 Holes Physics Engine from ShanktuaryGolf/Minigames
-// Implements Minigames Regime Bounce Retentions (0.70 - 0.78) and USGA Stimpmeter Green Roll
+// Calibrated Golf Physics Engine with Realistic Turf Restitution & Controlled Rollout
+// Zero Trampoline Bounces (0.28 / 0.15 Restitution) & Natural Roll Friction (12 m/s^2)
 
 export class GolfPhysicsEngine {
   constructor() {
@@ -9,28 +9,11 @@ export class GolfPhysicsEngine {
     this.ballRadius = 0.02135; // meters
     this.ballArea = Math.PI * Math.pow(this.ballRadius, 2);
 
-    // Par-3 Green & Fairway Properties from Minigames (physics-worker.js)
-    this.GREEN_ROLL_FACTOR = 0.95; // Retains 95% horizontal forward velocity on green impact
-    this.GREEN_STIMP_MU = 0.082; // Realistic tournament Stimpmeter friction (11.5 Stimp)
-  }
-
-  getPhysicsRegime(vlaDeg, ballSpeedMPH) {
-    if (vlaDeg >= 22.0 || ballSpeedMPH <= 75.0) return 'WEDGE';
-    if (vlaDeg <= 14.0 && ballSpeedMPH >= 140.0) return 'LOW_TRAJECTORY';
-    if (ballSpeedMPH >= 150.0) return 'POWER_SHOT';
-    if (vlaDeg >= 18.0) return 'HIGH_IRON';
-    return 'MID_IRON';
-  }
-
-  getRegimeBounceRetention(regime) {
-    switch (regime) {
-      case 'WEDGE': return 0.70;
-      case 'LOW_TRAJECTORY': return 0.78;
-      case 'MID_IRON': return 0.75;
-      case 'HIGH_IRON': return 0.70;
-      case 'POWER_SHOT': return 0.75;
-      default: return 0.74;
-    }
+    // Realistic Ground Interaction Constants
+    this.FAIRWAY_BOUNCE = 0.28; // Small natural check hop (no trampoline)
+    this.WEDGE_BOUNCE = 0.14;   // Soft bite for wedges & high-spin shots
+    this.ROLL_FACTOR = 0.65;    // 35% horizontal velocity absorbed per bounce
+    this.TURF_DECEL = 13.5;     // 13.5 m/s^2 linear turf roll friction
   }
 
   calculateTrajectory(shot) {
@@ -60,10 +43,11 @@ export class GolfPhysicsEngine {
     let inFlight = true;
     let bounces = 0;
 
-    const regime = this.getPhysicsRegime(vlaDeg, ballSpeedMPH);
-    const bounceRetention = this.getRegimeBounceRetention(regime);
+    // Wedge / High-spin regime bites soft
+    const isWedgeOrHighSpin = vlaDeg >= 22.0 || currentSpinRPM >= 6000 || ballSpeedMPH <= 75;
+    const bounceRetention = isWedgeOrHighSpin ? this.WEDGE_BOUNCE : this.FAIRWAY_BOUNCE;
 
-    for (let step = 0; step < 3000; step++) {
+    for (let step = 0; step < 2500; step++) {
       const v = Math.sqrt(vx * vx + vy * vy + vz * vz);
 
       trajectory.push({
@@ -77,12 +61,12 @@ export class GolfPhysicsEngine {
 
       if (inFlight) {
         if (v > 0.5) {
-          // Spin decay from Minigames: Math.exp(-dt / 24.5)
+          // Spin decay: Math.exp(-dt / 24.5)
           currentSpinRPM *= Math.exp(-dt / 24.5);
           const spinRadS = (currentSpinRPM * 2 * Math.PI) / 60.0;
           const spinRatio = Math.min(0.6, (this.ballRadius * spinRadS) / v);
 
-          // Quintavalla Drag & Lift
+          // Quintavalla Aerodynamics
           const cd = 0.22 + 0.38 * spinRatio;
           const cl = Math.min(0.28, 0.07 + 0.80 * spinRatio);
 
@@ -111,32 +95,31 @@ export class GolfPhysicsEngine {
         y += vy * dt;
         z += vz * dt;
 
-        // Ground Impact & Bounce
+        // Ground Impact Handling
         if (y <= this.ballRadius && step > 10) {
           y = this.ballRadius;
           bounces++;
 
-          // Minigames Bounce & Roll Retention
-          vy = -vy * (bounceRetention * (1.0 - bounces * 0.12));
-          vz *= this.GREEN_ROLL_FACTOR;
-          vx *= this.GREEN_ROLL_FACTOR;
+          // Gentle ground check bounce (NO trampoline!)
+          vy = -vy * bounceRetention;
+          vz *= this.ROLL_FACTOR;
+          vx *= this.ROLL_FACTOR;
 
-          // Transition to smooth green roll when vertical bounce subsides
-          if (Math.abs(vy) < 0.25 || bounces >= 3) {
+          // Transition to rolling after initial hop dissipation
+          if (Math.abs(vy) < 0.4 || bounces >= 2) {
             inFlight = false;
             vy = 0;
           }
         }
       } else {
-        // Physical Green Roll (Stimpmeter Deceleration: a = mu * g)
+        // Controlled Ground Turf Roll Phase
         const groundSpeed = Math.sqrt(vx * vx + vz * vz);
-        if (groundSpeed < 0.04) {
-          break; // Ball fully stopped naturally
+        if (groundSpeed < 0.05) {
+          break; // Ball came to full stop
         }
 
-        // Linear physical friction force: F_friction = mu * m * g
-        const decel = this.GREEN_STIMP_MU * this.gravity * dt;
-        const newSpeed = Math.max(0, groundSpeed - decel);
+        // Linear turf deceleration: a = 13.5 m/s^2
+        const newSpeed = Math.max(0, groundSpeed - this.TURF_DECEL * dt);
         const ratio = newSpeed / groundSpeed;
 
         vx *= ratio;
