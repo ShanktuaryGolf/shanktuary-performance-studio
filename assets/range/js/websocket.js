@@ -1,4 +1,4 @@
-// WebSocket Telemetry, Proximity & Dynamic Demo Shot Generator
+// WebSocket Telemetry, Proximity & Live Nova / OpenGolfCoach Shot Handler
 
 import { setTargetDistance } from './environment.js';
 
@@ -79,7 +79,57 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     });
 
+    // Unpack all possible shapes from Nova, OpenGolfCoach, and Performance Studio
+    function extractShotTelemetry(msg) {
+        if (!msg) return null;
+        
+        const raw = msg.data || msg;
+        const shotObj = raw.shot || raw;
+        const us = shotObj.us_units || raw.us_units || shotObj;
+        
+        const ballSpeed = parseFloat(
+            us.ball_speed_mph || us.ballSpeed || us.ball_speed || shotObj.ballSpeed || raw.ballSpeed || 0
+        );
+        
+        if (ballSpeed <= 5.0) {
+            return null; // Not a valid shot
+        }
+        
+        const vla = parseFloat(
+            us.vert_launch_angle_deg || us.vertical_launch_angle_degrees || us.verticalLaunchAngle || us.vla || 12.0
+        );
+        
+        const hla = parseFloat(
+            us.horiz_launch_angle_deg || us.horizontal_launch_angle_degrees || us.horizontalLaunchAngle || us.hla || 0.0
+        );
+        
+        const totalSpin = parseFloat(
+            us.total_spin_rpm || us.total_spin || us.spinSpeed || us.spin_rate || 2500.0
+        );
+        
+        const spinAxis = parseFloat(
+            us.spin_axis_deg || us.spin_axis_degrees || us.spin_axis || us.spinAxis || 0.0
+        );
+        
+        const clubSpeed = parseFloat(
+            us.club_speed_mph || us.club_speed || us.clubSpeed || 0.0
+        );
+        
+        return {
+            ballSpeed,
+            verticalLaunchAngle: vla,
+            horizontalLaunchAngle: hla,
+            total_spin: totalSpin,
+            spin_axis: spinAxis,
+            clubSpeed
+        };
+    }
+
     function fireShot(shotData) {
+        if (!shotData) return;
+        
+        console.log('[+] Launching live shot in 3D Driving Range:', shotData);
+        
         const trajectory = physicsEngine.calculateTrajectory(shotData);
         
         const finalPt = trajectory[trajectory.length - 1];
@@ -97,9 +147,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             : `🎯 Pin Delta: ${distToPinYds.toFixed(1)} yds (${dz >= 0 ? '+' : ''}${dz.toFixed(1)}y)`;
         
         if (telemetryDiv) {
-            telemetryDiv.innerHTML = `Ball Speed: ${(shotData.ballSpeed || shotData.ball_speed_mph || 110).toFixed(1)} mph\n` +
-                                     `Launch Ang: ${(shotData.verticalLaunchAngle || shotData.vertical_launch_angle_degrees || 18).toFixed(1)}°\n` +
-                                     `Total Spin: ${Math.round(shotData.total_spin || shotData.total_spin_rpm || 5000)} rpm\n` +
+            telemetryDiv.innerHTML = `Ball Speed: ${shotData.ballSpeed.toFixed(1)} mph\n` +
+                                     `Launch Ang: ${shotData.verticalLaunchAngle.toFixed(1)}°\n` +
+                                     `Total Spin: ${Math.round(shotData.total_spin)} rpm\n` +
                                      `Carry: ${carryYds.toFixed(1)} yds (${Math.abs(offlineYds).toFixed(1)}y ${offlineDir})\n` +
                                      `${pinFeedback}`;
         }
@@ -108,38 +158,31 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         ball.launch(trajectory);
     }
     
-    // Generate realistic PGA Tour telemetry based on Target Distance
     function generateRealisticShotForDistance(targetYds) {
         let speed, vla, spin;
         
         if (targetYds <= 80) {
-            // Lob / Sand Wedge (50 - 80 yds)
             speed = 52 + (targetYds - 50) * 0.45;
             vla = 30.0 - (targetYds - 50) * 0.1;
             spin = 8200 - (targetYds - 50) * 15;
         } else if (targetYds <= 120) {
-            // Gap / Pitching Wedge (80 - 120 yds)
             speed = 65 + (targetYds - 80) * 0.55;
             vla = 26.0 - (targetYds - 80) * 0.12;
             spin = 7500 - (targetYds - 80) * 20;
         } else if (targetYds <= 170) {
-            // Mid Irons (8-Iron, 7-Iron, 6-Iron: 120 - 170 yds)
             speed = 88 + (targetYds - 120) * 0.52;
             vla = 21.0 - (targetYds - 120) * 0.09;
             spin = 6400 - (targetYds - 120) * 25;
         } else if (targetYds <= 220) {
-            // Long Irons / Hybrids (170 - 220 yds)
             speed = 114 + (targetYds - 170) * 0.45;
             vla = 16.5 - (targetYds - 170) * 0.06;
             spin = 4800 - (targetYds - 170) * 20;
         } else {
-            // Woods & Drivers (220+ yds)
             speed = 138 + (targetYds - 220) * 0.40;
             vla = 13.5 - Math.min(3.0, (targetYds - 220) * 0.03);
             spin = 3200 - Math.min(1000, (targetYds - 220) * 10);
         }
         
-        // Add subtle natural dispersion
         return {
             ballSpeed: speed + (Math.random() * 2.0 - 1.0),
             verticalLaunchAngle: vla + (Math.random() * 1.0 - 0.5),
@@ -164,6 +207,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     });
     
+    // Connect to WebSocket Server on Port 9321
     function connectWS() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host || 'localhost:9321'}`;
@@ -177,10 +221,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                if (msg.type === 'shot' && msg.data) {
-                    fireShot(msg.data);
-                } else if (msg.type === 'init' && msg.data) {
-                    fireShot(msg.data);
+                console.log('[+] Received WebSocket message:', msg.type);
+                
+                if (msg.type === 'shot' || msg.type === 'init') {
+                    const parsed = extractShotTelemetry(msg);
+                    if (parsed) {
+                        fireShot(parsed);
+                    }
                 }
             } catch (err) {
                 console.error('[!] Error parsing WebSocket message:', err);

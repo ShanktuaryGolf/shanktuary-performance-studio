@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Add parent directory to path to import obs_server
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
-from obs_server import start_obs_server, OBS_PORT
+from obs_server import start_obs_server, OBS_PORT, obs_state
 
 @pytest.fixture(scope="module")
 def server():
@@ -38,3 +38,20 @@ def test_range_static_js(server):
         
         body = response.read().decode("utf-8")
         assert "initRenderer" in body
+
+def test_push_live_shot(server):
+    sample_shot = {
+        "type": "shot",
+        "shot": {
+            "us_units": {
+                "ball_speed_mph": 152.4,
+                "vert_launch_angle_deg": 12.8,
+                "horiz_launch_angle_deg": -1.2,
+                "total_spin_rpm": 2540.0,
+                "spin_axis_deg": 2.1,
+                "carry_yds": 254.8
+            }
+        }
+    }
+    obs_state.push_shot(sample_shot)
+    assert obs_state.latest_shot == sample_shot
