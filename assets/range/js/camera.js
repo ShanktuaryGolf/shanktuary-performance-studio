@@ -1,4 +1,4 @@
-// Multi-Mode 3D Camera System with Cinematic Framing
+// Multi-Mode 3D Camera System with Up-Close Golf Ball Framing
 
 export const CameraModes = {
     GOLFER: 0,
@@ -13,11 +13,11 @@ export class CameraController {
         this.camera = camera;
         this.mode = CameraModes.GOLFER;
         
-        this.target = new THREE.Vector3(0, 0.6, -30);
-        this.currentPosition = new THREE.Vector3(0, 1.4, 3.2);
-        this.desiredPosition = new THREE.Vector3(0, 1.4, 3.2);
+        this.target = new THREE.Vector3(0, 0.25, -20);
+        this.currentPosition = new THREE.Vector3(0, 0.75, 2.0);
+        this.desiredPosition = new THREE.Vector3(0, 0.75, 2.0);
         
-        this.ballPosition = new THREE.Vector3(0, 0.08, 0);
+        this.ballPosition = new THREE.Vector3(0, 0.085, 0);
         this.landingPosition = new THREE.Vector3(0, 0.05, -150);
         
         this.setupEventListeners();
@@ -70,12 +70,12 @@ export class CameraController {
         
         switch (this.mode) {
             case CameraModes.GOLFER:
-                this.desiredPosition.set(0, 1.4, 3.2);
-                this.target.set(0, 0.6, -30);
+                this.desiredPosition.set(0, 0.75, 2.0); // Close view behind the ball
+                this.target.set(0, 0.25, -20);
                 break;
                 
             case CameraModes.FOLLOW:
-                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 1.2, this.ballPosition.z + 3.5);
+                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 0.8, this.ballPosition.z + 2.5);
                 this.target.copy(this.ballPosition);
                 break;
                 
