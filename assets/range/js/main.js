@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+// Main Driving Range Application Entrypoint
+
 import { initRenderer } from './renderer.js';
 import { setupEnvironment } from './environment.js';
 import { setupFoliage } from './foliage.js';
@@ -7,47 +8,40 @@ import { GolfPhysicsEngine } from './physics.js';
 import { GolfBall } from './ball.js';
 import { setupWebSocketAndUI } from './websocket.js';
 
-async function main() {
-    const { scene, camera, renderer } = await initRenderer();
+function start() {
+    console.log('[+] Initializing 3D Driving Range...');
     
+    const { scene, camera, renderer } = initRenderer();
+    
+    // Setup Environment & Foliage
     setupEnvironment(scene);
     setupFoliage(scene);
     
-    // Initialize Physics and Ball
+    // Physics, Ball & Camera
     const physicsEngine = new GolfPhysicsEngine();
     const ball = new GolfBall(scene);
+    const cameraController = new CameraController(camera);
     
-    // Initialize Camera Controller
-    const cameraController = new CameraController(camera, renderer.domElement);
-    
-    // Initialize WebSocket and UI
+    // WebSocket & UI Controls
     setupWebSocketAndUI(scene, physicsEngine, ball, cameraController);
     
     const clock = new THREE.Clock();
     
+    // Render Loop
     function animate() {
         requestAnimationFrame(animate);
         
-        const delta = clock.getDelta();
+        const delta = Math.min(clock.getDelta(), 0.1);
         
-        // Update ball animation
-        if (ball) {
-            ball.update(delta);
-            if (cameraController) {
-                cameraController.setBallPosition(ball.mesh.position);
-            }
-        }
+        ball.update(delta);
+        cameraController.setBallPosition(ball.mesh.position);
+        cameraController.update(delta);
         
-        // Update camera interpolation
-        if (cameraController) {
-            cameraController.update(delta);
-        }
-        
-        renderer.renderAsync(scene, camera);
+        renderer.render(scene, camera);
     }
     
     animate();
+    console.log('[✓] 3D Driving Range is running!');
 }
 
-main().catch(console.error);
-
+window.addEventListener('DOMContentLoaded', start);
