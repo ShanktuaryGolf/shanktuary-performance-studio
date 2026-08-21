@@ -1,4 +1,4 @@
-// 3D Golf Ball with 3-Second Auto-Reset to Tee Box & Camera Return
+// 3D Golf Ball with Real Turf Pitch Mark / Divot Indentations
 
 export class GolfBall {
   constructor(scene) {
@@ -59,7 +59,10 @@ export class GolfBall {
     this.landingRing.visible = false;
     this.scene.add(this.landingRing);
     
+    // 4. Session Divots & Pitch Marks
+    this.divots = [];
     this.particles = [];
+    
     this.trajectory = null;
     this.elapsedTime = 0;
     this.isAnimating = false;
@@ -67,7 +70,7 @@ export class GolfBall {
     this.restTimer = 0;
     this.lastBounces = 0;
     
-    this.onResetCallback = null; // Called when 3-second auto-reset fires
+    this.onResetCallback = null;
   }
 
   createDimpledGeometry(radius) {
@@ -238,19 +241,58 @@ export class GolfBall {
     cArray[idx * 3 + 2] = b;
   }
 
-  createTurfImpact(x, z) {
-    for (let i = 0; i < 8; i++) {
-      const pGeo = new THREE.PlaneGeometry(0.14, 0.14);
+  createTurfDivot(x, z) {
+    // 1. Realistic Soil Divot & Pitch Mark Decal
+    const divotGeo = new THREE.CircleGeometry(0.24, 24);
+    divotGeo.rotateX(-Math.PI / 2);
+    
+    // Create dark organic soil texture with displacement lip
+    const dCanvas = document.createElement('canvas');
+    dCanvas.width = 128;
+    dCanvas.height = 128;
+    const dCtx = dCanvas.getContext('2d');
+    
+    const grad = dCtx.createRadialGradient(64, 64, 4, 64, 64, 60);
+    grad.addColorStop(0, '#2d1808'); // Dark soil crater center
+    grad.addColorStop(0.5, '#422812'); // Earth
+    grad.addColorStop(0.85, '#2e591b'); // Bruised grass rim
+    grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+    
+    dCtx.fillStyle = grad;
+    dCtx.fillRect(0, 0, 128, 128);
+    
+    const dTex = new THREE.CanvasTexture(dCanvas);
+    const divotMat = new THREE.MeshBasicMaterial({
+      map: dTex,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false
+    });
+    
+    const divotMesh = new THREE.Mesh(divotGeo, divotMat);
+    divotMesh.position.set(x, 0.022, z);
+    divotMesh.scale.set(1.0, 1.0, 1.4); // Stretched in direction of impact
+    this.scene.add(divotMesh);
+    
+    this.divots.push(divotMesh);
+    if (this.divots.length > 20) {
+      const old = this.divots.shift();
+      this.scene.remove(old);
+    }
+    
+    // 2. Flying Turf / Dirt Particle Spray
+    for (let i = 0; i < 10; i++) {
+      const pGeo = new THREE.PlaneGeometry(0.12, 0.12);
       pGeo.rotateX(-Math.PI / 2);
       const pMat = new THREE.MeshBasicMaterial({
-        color: 0x7da85b,
+        color: (i % 2 === 0) ? 0x3d2314 : 0x6e964b,
         transparent: true,
-        opacity: 0.8
+        opacity: 0.85
       });
       const pMesh = new THREE.Mesh(pGeo, pMat);
-      pMesh.position.set(x + (Math.random() * 0.3 - 0.15), 0.04, z + (Math.random() * 0.3 - 0.15));
+      pMesh.position.set(x + (Math.random() * 0.4 - 0.2), 0.04, z + (Math.random() * 0.4 - 0.2));
       this.scene.add(pMesh);
-      this.particles.push({ mesh: pMesh, life: 0.7, maxLife: 0.7 });
+      this.particles.push({ mesh: pMesh, life: 0.8, maxLife: 0.8 });
     }
   }
 
@@ -272,19 +314,18 @@ export class GolfBall {
       
       this.updateTracerRibbon(ballPos);
       
+      // On First Ground Impact: Create Turf Pitch Mark / Divot
       if (p.bounces > this.lastBounces) {
-        this.createTurfImpact(p.x, p.z);
+        this.createTurfDivot(p.x, p.z);
         this.lastBounces = p.bounces;
       }
       
-      // When ball reaches the end of its roll
       if (targetIndex >= this.trajectory.length - 1) {
         this.isAnimating = false;
         this.isAtRest = true;
         this.restTimer = 0;
       }
     } else if (this.isAtRest) {
-      // 3-Second Auto-Reset Timer after ball comes to rest
       this.restTimer += deltaTime;
       if (this.restTimer >= 3.0) {
         this.isAtRest = false;

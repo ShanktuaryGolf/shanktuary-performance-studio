@@ -1,4 +1,4 @@
-// Realistic Contoured PGA Golf Green Complex with Fairway Centerline & Alignment Corridor
+// Realistic PGA Driving Range Environment with Tour Alignment Rods & Fairway Centerline
 
 let activeTargetGreen = null;
 let signContext = null;
@@ -37,26 +37,8 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     terrain.receiveShadow = true;
     scene.add(terrain);
     
-    // 3. Tee Box Hitting Pad
-    const teeGeo = new THREE.BoxGeometry(8, 0.04, 6);
-    const teeMat = new THREE.MeshStandardMaterial({ 
-        color: 0x1f4a14, 
-        roughness: 0.9 
-    });
-    const teePad = new THREE.Mesh(teeGeo, teeMat);
-    teePad.position.set(0, 0.02, 0);
-    teePad.receiveShadow = true;
-    scene.add(teePad);
-    
-    // Tee Markers
-    const markerGeo = new THREE.SphereGeometry(0.12, 16, 16);
-    const markerMat = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
-    const markerL = new THREE.Mesh(markerGeo, markerMat);
-    markerL.position.set(-2.5, 0.12, 0);
-    scene.add(markerL);
-    const markerR = new THREE.Mesh(markerGeo, markerMat);
-    markerR.position.set(2.5, 0.12, 0);
-    scene.add(markerR);
+    // 3. Tour Hitting Station (Alignment Rails & Practice Ball Pyramid)
+    createTourHittingStation(scene);
     
     // 4. Fairway Centerline & Target Alignment Grid (PGA ShotLink Style)
     createFairwayCenterLine(scene);
@@ -68,54 +50,89 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     loadBackgroundMountains(scene);
 }
 
+function createTourHittingStation(scene) {
+    const stationGroup = new THREE.Group();
+    
+    // Two Sleek Wooden / Composite Guide Rails flanking the ball (matching dr.jpg)
+    const railGeo = new THREE.BoxGeometry(0.12, 0.06, 2.4);
+    const railMat = new THREE.MeshStandardMaterial({
+        color: 0x4a5d43, // Deep olive/slate guide rail
+        roughness: 0.7,
+        metalness: 0.1
+    });
+    
+    const leftRail = new THREE.Mesh(railGeo, railMat);
+    leftRail.position.set(-0.85, 0.03, 0);
+    leftRail.castShadow = true;
+    leftRail.receiveShadow = true;
+    stationGroup.add(leftRail);
+    
+    const rightRail = new THREE.Mesh(railGeo, railMat);
+    rightRail.position.set(0.85, 0.03, 0);
+    rightRail.castShadow = true;
+    rightRail.receiveShadow = true;
+    stationGroup.add(rightRail);
+    
+    // Tour Practice Ball Tray / Pyramid (Offset to the right, matching dr.jpg)
+    const ballMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.3,
+        metalness: 0.05
+    });
+    const ballGeo = new THREE.SphereGeometry(0.045, 12, 12);
+    
+    const pyramidPositions = [
+        // Base Layer (3x3)
+        [0.98, 0.045, 0.4], [1.08, 0.045, 0.4], [1.18, 0.045, 0.4],
+        [0.98, 0.045, 0.5], [1.08, 0.045, 0.5], [1.18, 0.045, 0.5],
+        [0.98, 0.045, 0.6], [1.08, 0.045, 0.6], [1.18, 0.045, 0.6],
+        // Second Layer (2x2)
+        [1.03, 0.11, 0.45], [1.13, 0.11, 0.45],
+        [1.03, 0.11, 0.55], [1.13, 0.11, 0.55],
+        // Top Ball
+        [1.08, 0.17, 0.50],
+        // Loose balls nearby
+        [0.92, 0.045, 0.25], [1.22, 0.045, 0.28]
+    ];
+    
+    pyramidPositions.forEach(p => {
+        const b = new THREE.Mesh(ballGeo, ballMat);
+        b.position.set(p[0], p[1], p[2]);
+        b.castShadow = true;
+        stationGroup.add(b);
+    });
+    
+    scene.add(stationGroup);
+}
+
 function createFairwayCenterLine(scene) {
     const centerGroup = new THREE.Group();
     
-    // Create Dashed Centerline Texture
-    const dashCanvas = document.createElement('canvas');
-    dashCanvas.width = 64;
-    dashCanvas.height = 256;
-    const ctx = dashCanvas.getContext('2d');
-    
-    // Transparent background
-    ctx.clearRect(0, 0, 64, 256);
-    
-    // Glowing white dash with cyan halo
-    ctx.fillStyle = 'rgba(0, 229, 255, 0.35)';
-    ctx.fillRect(20, 32, 24, 192); // Halo
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(26, 32, 12, 192); // Crisp core line
-    
-    const dashTex = new THREE.CanvasTexture(dashCanvas);
-    dashTex.wrapS = THREE.RepeatWrapping;
-    dashTex.wrapT = THREE.RepeatWrapping;
-    dashTex.repeat.set(1, 80); // 80 repeating dashes down 400 yards
-    
-    // Primary Center Reference Stripe (X = 0)
-    const centerLineGeo = new THREE.PlaneGeometry(0.6, 400);
+    // Crisp Solid/Dashed White Centerline (matching dr.jpg)
+    const centerLineGeo = new THREE.PlaneGeometry(0.4, 400);
     centerLineGeo.rotateX(-Math.PI / 2);
     
     const centerLineMat = new THREE.MeshBasicMaterial({
-        map: dashTex,
+        color: 0xffffff,
         transparent: true,
         opacity: 0.85,
         depthWrite: false
     });
     
     const centerLine = new THREE.Mesh(centerLineGeo, centerLineMat);
-    centerLine.position.set(0, 0.015, -200); // Extends from Z = 0 to Z = -400
+    centerLine.position.set(0, 0.015, -200);
     centerGroup.add(centerLine);
     
     // Lateral Corridor Reference Guidelines (+/- 10 yards, +/- 20 yards)
     const corridorMat = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.15,
+        opacity: 0.18,
         depthWrite: false
     });
     
     [-20, -10, 10, 20].forEach(xOffset => {
-        const lineGeo = new THREE.PlaneGeometry(0.15, 400);
+        const lineGeo = new THREE.PlaneGeometry(0.12, 400);
         lineGeo.rotateX(-Math.PI / 2);
         const lineMesh = new THREE.Mesh(lineGeo, corridorMat);
         lineMesh.position.set(xOffset, 0.014, -200);
@@ -130,7 +147,7 @@ function createFairwayCenterLine(scene) {
         const crossMat = new THREE.MeshBasicMaterial({
             color: 0xffffff,
             transparent: true,
-            opacity: 0.22,
+            opacity: 0.25,
             depthWrite: false
         });
         const crossMesh = new THREE.Mesh(crossGeo, crossMat);
