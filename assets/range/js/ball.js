@@ -1,4 +1,4 @@
-// Photorealistic 3D Golf Ball & High-Visibility 3D Glowing Tracer Ribbon
+// 3D Golf Ball with 3-Second Auto-Reset to Tee Box & Camera Return
 
 export class GolfBall {
   constructor(scene) {
@@ -22,10 +22,10 @@ export class GolfBall {
     this.mesh.receiveShadow = true;
     this.scene.add(this.mesh);
     
-    // 2. High-Visibility 3D Glowing Tracer Ribbon (Topgolf / Protracer Style)
+    // 2. High-Visibility 3D Glowing Tracer Ribbon
     this.maxTracerSegments = 500;
     this.tracerGeo = new THREE.BufferGeometry();
-    this.tracerPositions = new Float32Array(this.maxTracerSegments * 6 * 3); // 2 triangles per quad
+    this.tracerPositions = new Float32Array(this.maxTracerSegments * 6 * 3);
     this.tracerColors = new Float32Array(this.maxTracerSegments * 6 * 3);
     
     this.tracerGeo.setAttribute('position', new THREE.BufferAttribute(this.tracerPositions, 3));
@@ -43,7 +43,7 @@ export class GolfBall {
     this.scene.add(this.tracerMesh);
     
     this.tracerPath = [];
-    this.ribbonWidth = 0.12; // 3D ribbon width in yards
+    this.ribbonWidth = 0.12;
     
     // 3. Ground Landing Target Ring
     const ringGeo = new THREE.RingGeometry(0.5, 1.0, 32);
@@ -63,7 +63,11 @@ export class GolfBall {
     this.trajectory = null;
     this.elapsedTime = 0;
     this.isAnimating = false;
+    this.isAtRest = false;
+    this.restTimer = 0;
     this.lastBounces = 0;
+    
+    this.onResetCallback = null; // Called when 3-second auto-reset fires
   }
 
   createDimpledGeometry(radius) {
@@ -152,6 +156,8 @@ export class GolfBall {
     
     this.landingRing.visible = false;
     this.isAnimating = false;
+    this.isAtRest = false;
+    this.restTimer = 0;
     this.elapsedTime = 0;
     this.lastBounces = 0;
   }
@@ -160,6 +166,8 @@ export class GolfBall {
     this.reset();
     this.trajectory = trajectoryPoints;
     this.isAnimating = true;
+    this.isAtRest = false;
+    this.restTimer = 0;
     this.elapsedTime = 0;
     this.lastBounces = 0;
     
@@ -188,30 +196,25 @@ export class GolfBall {
       const p1 = this.tracerPath[i];
       const p2 = this.tracerPath[i + 1];
       
-      // Calculate perpendicular ribbon orientation
       const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
       const up = new THREE.Vector3(0, 1, 0);
       const side = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(halfWidth);
       
-      // 4 Quad Vertices
       const v0 = new THREE.Vector3().subVectors(p1, side);
       const v1 = new THREE.Vector3().addVectors(p1, side);
       const v2 = new THREE.Vector3().subVectors(p2, side);
       const v3 = new THREE.Vector3().addVectors(p2, side);
       
-      // Gradient colors (Neon Cyan 0x00E5FF -> Glowing Green 0x00FF66)
       const t1 = i / count;
       const t2 = (i + 1) / count;
       
       const r1 = 0.0, g1 = 0.90 + 0.10 * t1, b1 = 1.0 - 0.60 * t1;
       const r2 = 0.0, g2 = 0.90 + 0.10 * t2, b2 = 1.0 - 0.60 * t2;
       
-      // Triangle 1 (v0, v1, v2)
       this.setVertex(vIdx++, v0, r1, g1, b1);
       this.setVertex(vIdx++, v1, r1, g1, b1);
       this.setVertex(vIdx++, v2, r2, g2, b2);
       
-      // Triangle 2 (v1, v3, v2)
       this.setVertex(vIdx++, v1, r1, g1, b1);
       this.setVertex(vIdx++, v3, r2, g2, b2);
       this.setVertex(vIdx++, v2, r2, g2, b2);
@@ -267,7 +270,6 @@ export class GolfBall {
       this.mesh.rotation.x -= deltaTime * 18;
       this.mesh.rotation.y += deltaTime * 2;
       
-      // Update thick glowing 3D flight tracer ribbon
       this.updateTracerRibbon(ballPos);
       
       if (p.bounces > this.lastBounces) {
@@ -275,11 +277,25 @@ export class GolfBall {
         this.lastBounces = p.bounces;
       }
       
+      // When ball reaches the end of its roll
       if (targetIndex >= this.trajectory.length - 1) {
         this.isAnimating = false;
+        this.isAtRest = true;
+        this.restTimer = 0;
+      }
+    } else if (this.isAtRest) {
+      // 3-Second Auto-Reset Timer after ball comes to rest
+      this.restTimer += deltaTime;
+      if (this.restTimer >= 3.0) {
+        this.isAtRest = false;
+        this.reset();
+        if (typeof this.onResetCallback === 'function') {
+          this.onResetCallback();
+        }
       }
     }
     
+    // Update particle lifespans
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= deltaTime;

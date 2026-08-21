@@ -3,7 +3,7 @@
 import { initRenderer } from './renderer.js';
 import { setupEnvironment } from './environment.js';
 import { setupFoliage } from './foliage.js';
-import { CameraController } from './camera.js';
+import { CameraController, CameraModes } from './camera.js';
 import { GolfPhysicsEngine } from './physics.js';
 import { GolfBall } from './ball.js';
 import { setupWebSocketAndUI } from './websocket.js';
@@ -21,6 +21,12 @@ function start() {
     const physicsEngine = new GolfPhysicsEngine();
     const ball = new GolfBall(scene);
     const cameraController = new CameraController(camera);
+    
+    // 3-Second Auto-Reset: Return camera to Golfer View at Tee Box
+    ball.onResetCallback = () => {
+        console.log('[+] Shot complete: Returning camera & ball to Tee Box');
+        cameraController.setMode(CameraModes.GOLFER);
+    };
     
     // WebSocket & UI Controls
     setupWebSocketAndUI(scene, physicsEngine, ball, cameraController);
