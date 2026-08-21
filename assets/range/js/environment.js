@@ -1,4 +1,4 @@
-// Realistic Contoured PGA Golf Green Complex (Flush with Turf Surface)
+// Realistic Contoured PGA Golf Green Complex with Fairway Centerline & Alignment Corridor
 
 let activeTargetGreen = null;
 let signContext = null;
@@ -58,11 +58,87 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     markerR.position.set(2.5, 0.12, 0);
     scene.add(markerR);
     
-    // 4. Create Organic Contoured PGA Target Green (Flush at Turf Height)
+    // 4. Fairway Centerline & Target Alignment Grid (PGA ShotLink Style)
+    createFairwayCenterLine(scene);
+    
+    // 5. Create Organic Contoured PGA Target Green
     createOrganicTargetGreen(scene, initialTargetYards, textureLoader);
     
-    // 5. Background 3D Mountains
+    // 6. Background 3D Mountains
     loadBackgroundMountains(scene);
+}
+
+function createFairwayCenterLine(scene) {
+    const centerGroup = new THREE.Group();
+    
+    // Create Dashed Centerline Texture
+    const dashCanvas = document.createElement('canvas');
+    dashCanvas.width = 64;
+    dashCanvas.height = 256;
+    const ctx = dashCanvas.getContext('2d');
+    
+    // Transparent background
+    ctx.clearRect(0, 0, 64, 256);
+    
+    // Glowing white dash with cyan halo
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.35)';
+    ctx.fillRect(20, 32, 24, 192); // Halo
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(26, 32, 12, 192); // Crisp core line
+    
+    const dashTex = new THREE.CanvasTexture(dashCanvas);
+    dashTex.wrapS = THREE.RepeatWrapping;
+    dashTex.wrapT = THREE.RepeatWrapping;
+    dashTex.repeat.set(1, 80); // 80 repeating dashes down 400 yards
+    
+    // Primary Center Reference Stripe (X = 0)
+    const centerLineGeo = new THREE.PlaneGeometry(0.6, 400);
+    centerLineGeo.rotateX(-Math.PI / 2);
+    
+    const centerLineMat = new THREE.MeshBasicMaterial({
+        map: dashTex,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false
+    });
+    
+    const centerLine = new THREE.Mesh(centerLineGeo, centerLineMat);
+    centerLine.position.set(0, 0.015, -200); // Extends from Z = 0 to Z = -400
+    centerGroup.add(centerLine);
+    
+    // Lateral Corridor Reference Guidelines (+/- 10 yards, +/- 20 yards)
+    const corridorMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.15,
+        depthWrite: false
+    });
+    
+    [-20, -10, 10, 20].forEach(xOffset => {
+        const lineGeo = new THREE.PlaneGeometry(0.15, 400);
+        lineGeo.rotateX(-Math.PI / 2);
+        const lineMesh = new THREE.Mesh(lineGeo, corridorMat);
+        lineMesh.position.set(xOffset, 0.014, -200);
+        centerGroup.add(lineMesh);
+    });
+    
+    // 50-Yard Interval Cross Arcs across the range (50, 100, 150, 200, 250, 300, 350)
+    const intervalDistances = [50, 100, 150, 200, 250, 300, 350];
+    intervalDistances.forEach(dist => {
+        const crossGeo = new THREE.PlaneGeometry(50, 0.25);
+        crossGeo.rotateX(-Math.PI / 2);
+        const crossMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.22,
+            depthWrite: false
+        });
+        const crossMesh = new THREE.Mesh(crossGeo, crossMat);
+        crossMesh.position.set(0, 0.014, -dist);
+        centerGroup.add(crossMesh);
+    });
+    
+    scene.add(centerGroup);
 }
 
 function createOrganicTargetGreen(scene, yardage, textureLoader) {
@@ -70,15 +146,15 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
     
     // 1. Organic Teardrop / Kidney Green Shape
     const shape = new THREE.Shape();
-    const w = 12; // Width radius
-    const l = 16; // Length radius
+    const w = 12;
+    const l = 16;
     
     shape.moveTo(0, l);
     shape.bezierCurveTo(w * 0.9, l * 0.9, w * 1.1, l * 0.2, w * 0.8, -l * 0.4);
     shape.bezierCurveTo(w * 0.5, -l * 0.9, -w * 0.5, -l * 0.9, -w * 0.8, -l * 0.4);
     shape.bezierCurveTo(-w * 1.1, l * 0.2, -w * 0.9, l * 0.9, 0, l);
     
-    // Outer Fringe Collar (Second Cut Grass) - Flush at Y = 0.012
+    // Outer Fringe Collar (Second Cut Grass)
     const fringeShape = new THREE.Shape();
     const fw = w + 2.5;
     const fl = l + 2.5;
@@ -95,11 +171,11 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         roughness: 0.85
     });
     const fringeMesh = new THREE.Mesh(fringeGeo, fringeMat);
-    fringeMesh.position.set(0, 0.012, 0); // Sits right on fairway
+    fringeMesh.position.set(0, 0.016, 0);
     fringeMesh.receiveShadow = true;
     greenGroup.add(fringeMesh);
     
-    // Manicured Putting Surface (Pristine Bentgrass with Mower Stripes) - Flush at Y = 0.018
+    // Manicured Putting Surface (Pristine Bentgrass with Mower Stripes)
     const greenGeo = new THREE.ShapeGeometry(shape);
     greenGeo.rotateX(-Math.PI / 2);
     
@@ -124,7 +200,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         metalness: 0.05
     });
     const greenMesh = new THREE.Mesh(greenGeo, greenMat);
-    greenMesh.position.set(0, 0.018, 0); // Sits on top of fringe
+    greenMesh.position.set(0, 0.018, 0);
     greenMesh.receiveShadow = true;
     greenGroup.add(greenMesh);
     
@@ -159,7 +235,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         roughness: 0.4
     });
     const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(0.6, 2.8, 0);
+    flag.position.set(0.6, 2.9, 0);
     flag.castShadow = true;
     greenGroup.add(flag);
     
@@ -185,18 +261,6 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
     const post = new THREE.Mesh(postGeo, postMat);
     post.position.set(-w - 6, 0.6, 0);
     greenGroup.add(post);
-    
-    // 5. Fairway Yardage Hash Line
-    const lineGeo = new THREE.PlaneGeometry(180, 0.5);
-    lineGeo.rotateX(-Math.PI / 2);
-    const lineMat = new THREE.MeshBasicMaterial({ 
-        color: 0xffffff, 
-        transparent: true, 
-        opacity: 0.4 
-    });
-    const yardageLine = new THREE.Mesh(lineGeo, lineMat);
-    yardageLine.position.y = 0.01;
-    greenGroup.add(yardageLine);
     
     // Set position down range
     greenGroup.position.set(0, 0, -yardage);
