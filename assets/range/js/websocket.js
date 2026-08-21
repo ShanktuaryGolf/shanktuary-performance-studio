@@ -1,4 +1,4 @@
-// WebSocket Telemetry, Proximity & Custom Yardage HUD Controller
+// WebSocket Telemetry, Proximity & Dynamic Demo Shot Generator
 
 import { setTargetDistance } from './environment.js';
 
@@ -15,7 +15,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     
     let currentTargetYards = 150;
     
-    // Load saved distance from localStorage
     const savedDist = localStorage.getItem('sps_range_target_dist');
     if (savedDist) {
         currentTargetYards = parseInt(savedDist, 10);
@@ -33,7 +32,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         localStorage.setItem('sps_range_target_dist', currentTargetYards);
     }
     
-    // Direct numerical input listener
     if (targetInput) {
         targetInput.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
@@ -51,18 +49,16 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         targetInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 updateTarget(parseFloat(targetInput.value));
-                targetInput.blur(); // Remove focus
+                targetInput.blur();
             }
         });
     }
     
-    // Stepper Buttons (-10, -5, +5, +10)
     if (btnMinus10) btnMinus10.addEventListener('click', () => updateTarget(currentTargetYards - 10));
     if (btnMinus5) btnMinus5.addEventListener('click', () => updateTarget(currentTargetYards - 5));
     if (btnPlus5) btnPlus5.addEventListener('click', () => updateTarget(currentTargetYards + 5));
     if (btnPlus10) btnPlus10.addEventListener('click', () => updateTarget(currentTargetYards + 10));
     
-    // Quick Preset Buttons
     presetBtns.forEach(btn => {
         btn.addEventListener('click', (e) => {
             const yds = parseInt(e.target.getAttribute('data-yds'), 10);
@@ -70,7 +66,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         });
     });
     
-    // Arrow Key Stepping (when not typing in the input box)
     window.addEventListener('keydown', (e) => {
         if (document.activeElement === targetInput) return;
         if (e.key === 'ArrowLeft') {
@@ -92,7 +87,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         const offlineYds = finalPt.x;
         const offlineDir = finalPt.x >= 0 ? "R" : "L";
         
-        // Calculate Proximity to Target Pin
         const dx = finalPt.x;
         const dz = carryYds - currentTargetYards;
         const distToPinYds = Math.sqrt(dx * dx + dz * dz);
@@ -103,9 +97,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             : `🎯 Pin Delta: ${distToPinYds.toFixed(1)} yds (${dz >= 0 ? '+' : ''}${dz.toFixed(1)}y)`;
         
         if (telemetryDiv) {
-            telemetryDiv.innerHTML = `Ball Speed: ${(shotData.ballSpeed || shotData.ball_speed_mph || 150).toFixed(1)} mph\n` +
-                                     `Launch Ang: ${(shotData.verticalLaunchAngle || shotData.vertical_launch_angle_degrees || 12).toFixed(1)}°\n` +
-                                     `Total Spin: ${Math.round(shotData.total_spin || shotData.total_spin_rpm || 2500)} rpm\n` +
+            telemetryDiv.innerHTML = `Ball Speed: ${(shotData.ballSpeed || shotData.ball_speed_mph || 110).toFixed(1)} mph\n` +
+                                     `Launch Ang: ${(shotData.verticalLaunchAngle || shotData.vertical_launch_angle_degrees || 18).toFixed(1)}°\n` +
+                                     `Total Spin: ${Math.round(shotData.total_spin || shotData.total_spin_rpm || 5000)} rpm\n` +
                                      `Carry: ${carryYds.toFixed(1)} yds (${Math.abs(offlineYds).toFixed(1)}y ${offlineDir})\n` +
                                      `${pinFeedback}`;
         }
@@ -114,17 +108,51 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         ball.launch(trajectory);
     }
     
+    // Generate realistic PGA Tour telemetry based on Target Distance
+    function generateRealisticShotForDistance(targetYds) {
+        let speed, vla, spin;
+        
+        if (targetYds <= 80) {
+            // Lob / Sand Wedge (50 - 80 yds)
+            speed = 52 + (targetYds - 50) * 0.45;
+            vla = 30.0 - (targetYds - 50) * 0.1;
+            spin = 8200 - (targetYds - 50) * 15;
+        } else if (targetYds <= 120) {
+            // Gap / Pitching Wedge (80 - 120 yds)
+            speed = 65 + (targetYds - 80) * 0.55;
+            vla = 26.0 - (targetYds - 80) * 0.12;
+            spin = 7500 - (targetYds - 80) * 20;
+        } else if (targetYds <= 170) {
+            // Mid Irons (8-Iron, 7-Iron, 6-Iron: 120 - 170 yds)
+            speed = 88 + (targetYds - 120) * 0.52;
+            vla = 21.0 - (targetYds - 120) * 0.09;
+            spin = 6400 - (targetYds - 120) * 25;
+        } else if (targetYds <= 220) {
+            // Long Irons / Hybrids (170 - 220 yds)
+            speed = 114 + (targetYds - 170) * 0.45;
+            vla = 16.5 - (targetYds - 170) * 0.06;
+            spin = 4800 - (targetYds - 170) * 20;
+        } else {
+            // Woods & Drivers (220+ yds)
+            speed = 138 + (targetYds - 220) * 0.40;
+            vla = 13.5 - Math.min(3.0, (targetYds - 220) * 0.03);
+            spin = 3200 - Math.min(1000, (targetYds - 220) * 10);
+        }
+        
+        // Add subtle natural dispersion
+        return {
+            ballSpeed: speed + (Math.random() * 2.0 - 1.0),
+            verticalLaunchAngle: vla + (Math.random() * 1.0 - 0.5),
+            horizontalLaunchAngle: (Math.random() * 2.0 - 1.0),
+            total_spin: spin + (Math.random() * 200 - 100),
+            spin_axis: (Math.random() * 2.0 - 1.0)
+        };
+    }
+    
     // Demo Shot Button
     if (demoBtn) {
         demoBtn.addEventListener('click', () => {
-            const targetSpeed = Math.sqrt(currentTargetYards) * 12.8;
-            const demoShot = {
-                ballSpeed: targetSpeed + (Math.random() * 6 - 3),
-                verticalLaunchAngle: 13.0 + (Math.random() * 2 - 1),
-                horizontalLaunchAngle: (Math.random() * 2.5 - 1.25),
-                total_spin: 2500 + (Math.random() * 300 - 150),
-                spin_axis: (Math.random() * 3 - 1.5)
-            };
+            const demoShot = generateRealisticShotForDistance(currentTargetYards);
             fireShot(demoShot);
         });
     }
