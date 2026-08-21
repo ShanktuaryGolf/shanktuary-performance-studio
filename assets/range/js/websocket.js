@@ -1,13 +1,17 @@
-// WebSocket Telemetry, Proximity & HUD Controller
+// WebSocket Telemetry, Proximity & Custom Yardage HUD Controller
 
 import { setTargetDistance } from './environment.js';
 
 export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController) {
     const telemetryDiv = document.getElementById('telemetry-data');
     const demoBtn = document.getElementById('btn-demo-shot');
-    const targetSlider = document.getElementById('target-dist-slider');
-    const targetText = document.getElementById('target-dist-text');
+    const targetInput = document.getElementById('target-dist-input');
     const presetBtns = document.querySelectorAll('.preset-btn');
+    
+    const btnMinus10 = document.getElementById('btn-step-minus-10');
+    const btnMinus5 = document.getElementById('btn-step-minus-5');
+    const btnPlus5 = document.getElementById('btn-step-plus-5');
+    const btnPlus10 = document.getElementById('btn-step-plus-10');
     
     let currentTargetYards = 150;
     
@@ -15,25 +19,50 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const savedDist = localStorage.getItem('sps_range_target_dist');
     if (savedDist) {
         currentTargetYards = parseInt(savedDist, 10);
-        if (targetSlider) targetSlider.value = currentTargetYards;
-        if (targetText) targetText.innerText = `${currentTargetYards} YDS`;
+        if (targetInput) targetInput.value = currentTargetYards;
         setTargetDistance(currentTargetYards);
     }
     
     function updateTarget(newYards) {
-        currentTargetYards = Math.max(50, Math.min(350, newYards));
-        if (targetSlider) targetSlider.value = currentTargetYards;
-        if (targetText) targetText.innerText = `${currentTargetYards} YDS`;
+        if (isNaN(newYards) || newYards <= 0) return;
+        currentTargetYards = Math.max(30, Math.min(500, Math.round(newYards)));
+        if (targetInput && document.activeElement !== targetInput) {
+            targetInput.value = currentTargetYards;
+        }
         setTargetDistance(currentTargetYards);
         localStorage.setItem('sps_range_target_dist', currentTargetYards);
     }
     
-    if (targetSlider) {
-        targetSlider.addEventListener('input', (e) => {
-            updateTarget(parseInt(e.target.value, 10));
+    // Direct numerical input listener
+    if (targetInput) {
+        targetInput.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!isNaN(val) && val >= 30 && val <= 500) {
+                setTargetDistance(val);
+                currentTargetYards = val;
+                localStorage.setItem('sps_range_target_dist', currentTargetYards);
+            }
+        });
+        
+        targetInput.addEventListener('change', (e) => {
+            updateTarget(parseFloat(e.target.value));
+        });
+        
+        targetInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                updateTarget(parseFloat(targetInput.value));
+                targetInput.blur(); // Remove focus
+            }
         });
     }
     
+    // Stepper Buttons (-10, -5, +5, +10)
+    if (btnMinus10) btnMinus10.addEventListener('click', () => updateTarget(currentTargetYards - 10));
+    if (btnMinus5) btnMinus5.addEventListener('click', () => updateTarget(currentTargetYards - 5));
+    if (btnPlus5) btnPlus5.addEventListener('click', () => updateTarget(currentTargetYards + 5));
+    if (btnPlus10) btnPlus10.addEventListener('click', () => updateTarget(currentTargetYards + 10));
+    
+    // Quick Preset Buttons
     presetBtns.forEach(btn => {
         btn.addEventListener('click', (e) => {
             const yds = parseInt(e.target.getAttribute('data-yds'), 10);
@@ -41,12 +70,17 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         });
     });
     
-    // Arrow Key Adjustments (Left/Right arrow keys adjust target by 5 yards)
+    // Arrow Key Stepping (when not typing in the input box)
     window.addEventListener('keydown', (e) => {
+        if (document.activeElement === targetInput) return;
         if (e.key === 'ArrowLeft') {
             updateTarget(currentTargetYards - 5);
         } else if (e.key === 'ArrowRight') {
             updateTarget(currentTargetYards + 5);
+        } else if (e.key === 'ArrowUp') {
+            updateTarget(currentTargetYards + 10);
+        } else if (e.key === 'ArrowDown') {
+            updateTarget(currentTargetYards - 10);
         }
     });
 
@@ -83,7 +117,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     // Demo Shot Button
     if (demoBtn) {
         demoBtn.addEventListener('click', () => {
-            // Pick speed to match target green approximately
             const targetSpeed = Math.sqrt(currentTargetYards) * 12.8;
             const demoShot = {
                 ballSpeed: targetSpeed + (Math.random() * 6 - 3),
@@ -97,6 +130,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
     
     window.addEventListener('keydown', (e) => {
+        if (document.activeElement === targetInput) return;
         if (e.code === 'Space') {
             if (demoBtn) demoBtn.click();
         }
