@@ -1,4 +1,4 @@
-// Multi-Mode 3D Camera System
+// Multi-Mode 3D Camera System with Cinematic Framing
 
 export const CameraModes = {
     GOLFER: 0,
@@ -13,11 +13,11 @@ export class CameraController {
         this.camera = camera;
         this.mode = CameraModes.GOLFER;
         
-        this.target = new THREE.Vector3(0, 1.5, -40);
-        this.currentPosition = new THREE.Vector3(0, 2.5, 6);
-        this.desiredPosition = new THREE.Vector3(0, 2.5, 6);
+        this.target = new THREE.Vector3(0, 0.6, -30);
+        this.currentPosition = new THREE.Vector3(0, 1.4, 3.2);
+        this.desiredPosition = new THREE.Vector3(0, 1.4, 3.2);
         
-        this.ballPosition = new THREE.Vector3(0, 0.25, 0);
+        this.ballPosition = new THREE.Vector3(0, 0.08, 0);
         this.landingPosition = new THREE.Vector3(0, 0.05, -150);
         
         this.setupEventListeners();
@@ -66,31 +66,31 @@ export class CameraController {
     }
     
     update(deltaTime) {
-        const lerpFactor = Math.min(1.0, 4.0 * deltaTime);
+        const lerpFactor = Math.min(1.0, 5.0 * deltaTime);
         
         switch (this.mode) {
             case CameraModes.GOLFER:
-                this.desiredPosition.set(0, 2.5, 6);
-                this.target.set(0, 1.5, -40);
+                this.desiredPosition.set(0, 1.4, 3.2);
+                this.target.set(0, 0.6, -30);
                 break;
                 
             case CameraModes.FOLLOW:
-                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 3, this.ballPosition.z + 8);
+                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 1.2, this.ballPosition.z + 3.5);
                 this.target.copy(this.ballPosition);
                 break;
                 
             case CameraModes.BROADCAST:
-                this.desiredPosition.set(35, 18, -30);
+                this.desiredPosition.set(25, 12, -20);
                 this.target.copy(this.ballPosition);
                 break;
                 
             case CameraModes.LANDING:
-                this.desiredPosition.set(this.landingPosition.x + 5, this.landingPosition.y + 3, this.landingPosition.z + 15);
+                this.desiredPosition.set(this.landingPosition.x + 3, this.landingPosition.y + 2, this.landingPosition.z + 10);
                 this.target.copy(this.landingPosition);
                 break;
                 
             case CameraModes.BLIMP:
-                this.desiredPosition.set(this.ballPosition.x, 70, this.ballPosition.z + 10);
+                this.desiredPosition.set(this.ballPosition.x, 50, this.ballPosition.z + 6);
                 this.target.copy(this.ballPosition);
                 break;
         }
