@@ -1,4 +1,4 @@
-// Realistic Contoured PGA Golf Green Complex with Manicured Putting Surface & Fringe Collar
+// Realistic Contoured PGA Golf Green Complex (Flush with Turf Surface)
 
 let activeTargetGreen = null;
 let signContext = null;
@@ -7,7 +7,7 @@ let signTexture = null;
 export function setupEnvironment(scene, initialTargetYards = 150) {
     const textureLoader = new THREE.TextureLoader();
     
-    // 1. Sky and Soft Atmospheric Fog
+    // 1. Sky and Atmospheric Fog
     scene.background = new THREE.Color(0xa8d8ea);
     scene.fog = new THREE.FogExp2(0xa8d8ea, 0.0012);
     
@@ -38,13 +38,13 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     scene.add(terrain);
     
     // 3. Tee Box Hitting Pad
-    const teeGeo = new THREE.BoxGeometry(8, 0.05, 6);
+    const teeGeo = new THREE.BoxGeometry(8, 0.04, 6);
     const teeMat = new THREE.MeshStandardMaterial({ 
         color: 0x1f4a14, 
         roughness: 0.9 
     });
     const teePad = new THREE.Mesh(teeGeo, teeMat);
-    teePad.position.set(0, 0.025, 0);
+    teePad.position.set(0, 0.02, 0);
     teePad.receiveShadow = true;
     scene.add(teePad);
     
@@ -58,7 +58,7 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     markerR.position.set(2.5, 0.12, 0);
     scene.add(markerR);
     
-    // 4. Create Organic Contoured PGA Target Green
+    // 4. Create Organic Contoured PGA Target Green (Flush at Turf Height)
     createOrganicTargetGreen(scene, initialTargetYards, textureLoader);
     
     // 5. Background 3D Mountains
@@ -68,7 +68,7 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
 function createOrganicTargetGreen(scene, yardage, textureLoader) {
     const greenGroup = new THREE.Group();
     
-    // 1. Create Organic Teardrop / Kidney Green Shape Curve
+    // 1. Organic Teardrop / Kidney Green Shape
     const shape = new THREE.Shape();
     const w = 12; // Width radius
     const l = 16; // Length radius
@@ -78,7 +78,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
     shape.bezierCurveTo(w * 0.5, -l * 0.9, -w * 0.5, -l * 0.9, -w * 0.8, -l * 0.4);
     shape.bezierCurveTo(-w * 1.1, l * 0.2, -w * 0.9, l * 0.9, 0, l);
     
-    // Outer Fringe Collar (Second Cut Grass)
+    // Outer Fringe Collar (Second Cut Grass) - Flush at Y = 0.012
     const fringeShape = new THREE.Shape();
     const fw = w + 2.5;
     const fl = l + 2.5;
@@ -87,37 +87,22 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
     fringeShape.bezierCurveTo(fw * 0.5, -fl * 0.9, -fw * 0.5, -fl * 0.9, -fw * 0.8, -fl * 0.4);
     fringeShape.bezierCurveTo(-fw * 1.1, fl * 0.2, -fw * 0.9, fl * 0.9, 0, fl);
     
-    const fringeGeo = new THREE.ExtrudeGeometry(fringeShape, {
-        depth: 0.08,
-        bevelEnabled: true,
-        bevelSegments: 4,
-        steps: 1,
-        bevelSize: 0.8,
-        bevelThickness: 0.06
-    });
+    const fringeGeo = new THREE.ShapeGeometry(fringeShape);
     fringeGeo.rotateX(-Math.PI / 2);
     
     const fringeMat = new THREE.MeshStandardMaterial({
-        color: 0x275e1a, // Darker green fringe collar
+        color: 0x275e1a,
         roughness: 0.85
     });
     const fringeMesh = new THREE.Mesh(fringeGeo, fringeMat);
-    fringeMesh.position.set(0, 0.02, 0);
+    fringeMesh.position.set(0, 0.012, 0); // Sits right on fairway
     fringeMesh.receiveShadow = true;
     greenGroup.add(fringeMesh);
     
-    // Manicured Putting Surface (Pristine Bentgrass with Mower Stripes)
-    const greenGeo = new THREE.ExtrudeGeometry(shape, {
-        depth: 0.12,
-        bevelEnabled: true,
-        bevelSegments: 4,
-        steps: 1,
-        bevelSize: 0.4,
-        bevelThickness: 0.04
-    });
+    // Manicured Putting Surface (Pristine Bentgrass with Mower Stripes) - Flush at Y = 0.018
+    const greenGeo = new THREE.ShapeGeometry(shape);
     greenGeo.rotateX(-Math.PI / 2);
     
-    // Create striped bentgrass putting texture
     const greenCanvas = document.createElement('canvas');
     greenCanvas.width = 512;
     greenCanvas.height = 512;
@@ -139,7 +124,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         metalness: 0.05
     });
     const greenMesh = new THREE.Mesh(greenGeo, greenMat);
-    greenMesh.position.set(0, 0.06, 0);
+    greenMesh.position.set(0, 0.018, 0); // Sits on top of fringe
     greenMesh.receiveShadow = true;
     greenGroup.add(greenMesh);
     
@@ -148,21 +133,21 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
     cupRimGeo.rotateX(-Math.PI / 2);
     const cupRimMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const cupRim = new THREE.Mesh(cupRimGeo, cupRimMat);
-    cupRim.position.set(0, 0.185, 0);
+    cupRim.position.set(0, 0.022, 0);
     greenGroup.add(cupRim);
     
     const cupInteriorGeo = new THREE.CircleGeometry(0.22, 32);
     cupInteriorGeo.rotateX(-Math.PI / 2);
     const cupInteriorMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
     const cupInterior = new THREE.Mesh(cupInteriorGeo, cupInteriorMat);
-    cupInterior.position.set(0, 0.184, 0);
+    cupInterior.position.set(0, 0.021, 0);
     greenGroup.add(cupInterior);
     
     // 3. Pin Flagstick (Fiberglass Striped Stick)
     const poleGeo = new THREE.CylinderGeometry(0.035, 0.035, 3.2, 16);
     const poleMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.2 });
     const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.set(0, 1.7, 0);
+    pole.position.set(0, 1.6, 0);
     pole.castShadow = true;
     greenGroup.add(pole);
     
@@ -174,7 +159,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         roughness: 0.4
     });
     const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(0.6, 2.9, 0);
+    flag.position.set(0.6, 2.8, 0);
     flag.castShadow = true;
     greenGroup.add(flag);
     
@@ -210,7 +195,7 @@ function createOrganicTargetGreen(scene, yardage, textureLoader) {
         opacity: 0.4 
     });
     const yardageLine = new THREE.Mesh(lineGeo, lineMat);
-    yardageLine.position.y = 0.03;
+    yardageLine.position.y = 0.01;
     greenGroup.add(yardageLine);
     
     // Set position down range
