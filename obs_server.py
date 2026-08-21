@@ -176,6 +176,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(assets_dir / "overlay.html", "text/html; charset=utf-8")
         elif parsed_path == "/config":
             self.serve_file(assets_dir / "config.html", "text/html; charset=utf-8")
+        elif parsed_path == "/range":
+            self.serve_file(assets_dir / "range" / "index.html", "text/html; charset=utf-8")
         elif parsed_path == "/api/layout":
             self.send_json(obs_state.load_layout())
         elif parsed_path == "/api/shot":
@@ -185,7 +187,16 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path.startswith("/assets/"):
             asset_filename = parsed_path.replace("/assets/", "")
             file_path = assets_dir / asset_filename
-            mime = "image/png" if file_path.suffix == ".png" else "text/plain"
+            import mimetypes
+            mime, _ = mimetypes.guess_type(file_path)
+            if not mime: mime = "application/octet-stream"
+            self.serve_file(file_path, mime)
+        elif parsed_path.startswith("/range/"):
+            asset_filename = parsed_path.replace("/range/", "")
+            file_path = assets_dir / "range" / asset_filename
+            import mimetypes
+            mime, _ = mimetypes.guess_type(file_path)
+            if not mime: mime = "application/octet-stream"
             self.serve_file(file_path, mime)
         else:
             self.send_error(404, f"File Not Found: {parsed_path}")
