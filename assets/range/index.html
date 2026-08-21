@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Driving Range</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue fallback */
+            font-family: sans-serif;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+            min-width: 200px;
+            pointer-events: none; /* Let clicks pass through to canvas... */
+        }
+        #hud > * {
+            pointer-events: auto; /* ...but keep HUD items clickable */
+        }
+        #hud h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+        }
+        #camera-mode-label {
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .controls {
+            margin-top: 15px;
+        }
+        button {
+            margin-right: 10px;
+            padding: 5px 10px;
+            cursor: pointer;
+            background: #fff;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #e0e0e0;
+        }
+        #telemetry-data {
+            font-family: monospace;
+            font-size: 1rem;
+            white-space: pre-wrap;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+    <!-- Import maps polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "three/nodes": "https://unpkg.com/three@0.160.0/examples/jsm/nodes/Nodes.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="hud">
+        <h2>Shot Telemetry</h2>
+        <div id="camera-mode-label">Cam: Golfer View</div>
+        <div id="telemetry-data">Waiting for shot...</div>
+        <div class="controls">
+            <button id="btn-demo-shot">Demo Shot</button>
+            <button id="btn-cam-switch">Switch Cam [V]</button>
+        </div>
+    </div>
+    <script type="module" src="/range/js/main.js"></script>
+</body>
+</html>
