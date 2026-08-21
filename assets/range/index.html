@@ -23,7 +23,7 @@
             border: 1px solid rgba(0, 229, 255, 0.35);
             backdrop-filter: blur(10px);
             z-index: 10;
-            min-width: 270px;
+            min-width: 280px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.6);
             pointer-events: none;
         }
@@ -48,7 +48,7 @@
             margin-bottom: 12px;
         }
         
-        /* Target Green Distance Control Section */
+        /* Direct Number Input Target Box */
         .target-control-box {
             background: rgba(0, 229, 255, 0.08);
             border: 1px solid rgba(0, 229, 255, 0.25);
@@ -62,37 +62,64 @@
             font-weight: 700;
             font-size: 0.88rem;
             color: #00E5FF;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
-        .target-val {
+        .input-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        #target-dist-input {
+            background: #101116;
+            border: 1px solid #00E5FF;
             color: #00FF66;
-            font-family: monospace;
-            font-size: 1.05rem;
+            font-family: 'Consolas', monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 6px 10px;
+            border-radius: 6px;
+            width: 90px;
+            text-align: center;
+            outline: none;
         }
-        input[type="range"] {
-            width: 100%;
+        #target-dist-input:focus {
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+            border-color: #00FF66;
+        }
+        .step-btn {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
             cursor: pointer;
-            accent-color: #00FF66;
-            margin: 4px 0 8px 0;
+            transition: all 0.2s ease;
+        }
+        .step-btn:hover {
+            background: #00E5FF;
+            color: #101116;
         }
         .presets-row {
             display: flex;
-            gap: 6px;
+            gap: 4px;
             justify-content: space-between;
         }
         .preset-btn {
-            background: rgba(255, 255, 255, 0.12);
-            color: #fff;
-            padding: 3px 6px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #ccc;
+            padding: 4px 6px;
             font-size: 0.75rem;
             border-radius: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             cursor: pointer;
             flex: 1;
             text-align: center;
         }
         .preset-btn:hover {
-            background: #00E5FF;
+            background: #00FF66;
             color: #101116;
             font-weight: 700;
         }
@@ -151,13 +178,19 @@
         </div>
         <div id="camera-mode-label">🎥 Cam: Golfer View [V]</div>
         
-        <!-- Interactive Target Distance Slider & Presets -->
+        <!-- Direct Number Input & Stepper Controls -->
         <div class="target-control-box">
             <div class="target-label-row">
-                <span>🎯 TARGET PIN</span>
-                <span class="target-val" id="target-dist-text">150 YDS</span>
+                <span>🎯 TARGET PIN DISTANCE</span>
+                <span style="font-size: 0.8rem; color: #8E94A5;">Type or Step</span>
             </div>
-            <input type="range" id="target-dist-slider" min="50" max="350" step="5" value="150">
+            <div class="input-row">
+                <input type="number" id="target-dist-input" min="30" max="500" step="1" value="150">
+                <button class="step-btn" id="btn-step-minus-10">-10</button>
+                <button class="step-btn" id="btn-step-minus-5">-5</button>
+                <button class="step-btn" id="btn-step-plus-5">+5</button>
+                <button class="step-btn" id="btn-step-plus-10">+10</button>
+            </div>
             <div class="presets-row">
                 <button class="preset-btn" data-yds="75">75y</button>
                 <button class="preset-btn" data-yds="100">100y</button>
