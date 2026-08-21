@@ -10,53 +10,110 @@
             overflow: hidden;
             background-color: #0b141a;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            user-select: none;
         }
         #hud {
             position: absolute;
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(16, 17, 22, 0.85);
+            background: rgba(16, 17, 22, 0.88);
             padding: 16px 20px;
-            border-radius: 10px;
-            border: 1px solid rgba(0, 229, 255, 0.3);
-            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 229, 255, 0.35);
+            backdrop-filter: blur(10px);
             z-index: 10;
-            min-width: 240px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            min-width: 270px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
             pointer-events: none;
         }
         #hud > * {
             pointer-events: auto;
         }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
         #hud h2 {
-            margin: 0 0 6px 0;
-            font-size: 1.1rem;
+            margin: 0;
+            font-size: 1.15rem;
             color: #00E5FF;
             letter-spacing: 1px;
         }
         #camera-mode-label {
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             color: #8E94A5;
             margin-bottom: 12px;
         }
+        
+        /* Target Green Distance Control Section */
+        .target-control-box {
+            background: rgba(0, 229, 255, 0.08);
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .target-label-row {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 700;
+            font-size: 0.88rem;
+            color: #00E5FF;
+            margin-bottom: 6px;
+        }
+        .target-val {
+            color: #00FF66;
+            font-family: monospace;
+            font-size: 1.05rem;
+        }
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #00FF66;
+            margin: 4px 0 8px 0;
+        }
+        .presets-row {
+            display: flex;
+            gap: 6px;
+            justify-content: space-between;
+        }
+        .preset-btn {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            padding: 3px 6px;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+        }
+        .preset-btn:hover {
+            background: #00E5FF;
+            color: #101116;
+            font-weight: 700;
+        }
+        
         #telemetry-data {
             font-family: 'Consolas', monospace;
             font-size: 0.95rem;
             white-space: pre-wrap;
             color: #00FF66;
             line-height: 1.4;
-            background: rgba(0, 0, 0, 0.4);
+            background: rgba(0, 0, 0, 0.45);
             padding: 8px 12px;
             border-radius: 6px;
             border-left: 3px solid #00FF66;
         }
         .controls {
-            margin-top: 14px;
+            margin-top: 12px;
             display: flex;
             gap: 10px;
         }
-        button {
+        .action-btn {
             padding: 8px 14px;
             cursor: pointer;
             background: #00E5FF;
@@ -66,8 +123,9 @@
             font-weight: 700;
             font-size: 0.85rem;
             transition: all 0.2s ease;
+            flex: 1;
         }
-        button:hover {
+        .action-btn:hover {
             background: #00FF66;
             transform: translateY(-1px);
         }
@@ -88,12 +146,33 @@
 </head>
 <body>
     <div id="hud">
-        <h2>🏌️ 3D DRIVING RANGE</h2>
+        <div class="header-row">
+            <h2>🏌️ 3D DRIVING RANGE</h2>
+        </div>
         <div id="camera-mode-label">🎥 Cam: Golfer View [V]</div>
+        
+        <!-- Interactive Target Distance Slider & Presets -->
+        <div class="target-control-box">
+            <div class="target-label-row">
+                <span>🎯 TARGET PIN</span>
+                <span class="target-val" id="target-dist-text">150 YDS</span>
+            </div>
+            <input type="range" id="target-dist-slider" min="50" max="350" step="5" value="150">
+            <div class="presets-row">
+                <button class="preset-btn" data-yds="75">75y</button>
+                <button class="preset-btn" data-yds="100">100y</button>
+                <button class="preset-btn" data-yds="150">150y</button>
+                <button class="preset-btn" data-yds="200">200y</button>
+                <button class="preset-btn" data-yds="250">250y</button>
+                <button class="preset-btn" data-yds="300">300y</button>
+            </div>
+        </div>
+
         <div id="telemetry-data">Ready for shot...</div>
+        
         <div class="controls">
-            <button id="btn-demo-shot">🚀 DEMO SHOT</button>
-            <button id="btn-cam-switch">🎥 SWITCH CAM [V]</button>
+            <button class="action-btn" id="btn-demo-shot">🚀 DEMO SHOT</button>
+            <button class="action-btn" id="btn-cam-switch">🎥 CAM [V]</button>
         </div>
     </div>
     <script type="module" src="/range/js/main.js"></script>
