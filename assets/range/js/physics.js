@@ -1,17 +1,19 @@
-// Calibrated Quintavalla / Bearman Aerodynamic Golf Physics Engine
-// Perfectly matches real-world flight apex, carry distance, and turf roll
+// Exact ShanktuaryGolf/Minigames Physics Engine
+// Matches Minigames (physics-worker.js & empirical-golf-model.js)
 
 export class GolfPhysicsEngine {
   constructor() {
     this.gravity = 9.81; // m/s^2
     this.airDensity = 1.225; // kg/m^3
-    this.ballMass = 0.04593; // kg
-    this.ballRadius = 0.02135; // meters
+    this.ballMass = 0.04593; // kg (1.62 oz)
+    this.ballRadius = 0.02135; // meters (1.68" diameter)
     this.ballArea = Math.PI * Math.pow(this.ballRadius, 2);
 
-    this.SPIN_DECAY_RATE = 0.04; // 4% spin decay per second
-    this.BOUNCE_RETENTION = 0.40; // Green/fairway bounce elasticity
-    this.ROLL_FRICTION = 0.90; // Turf roll friction per tick
+    // Minigames Ground Interaction Constants
+    this.FAIRWAY_BOUNCE = 0.28;
+    this.WEDGE_BOUNCE = 0.15; // Soft green bite
+    this.ROLL_FACTOR = 0.70; // 30% horizontal velocity loss on first bounce
+    this.ROLL_FRICTION = 0.85; // Natural turf rolling deceleration
   }
 
   calculateTrajectory(shot) {
@@ -36,12 +38,16 @@ export class GolfPhysicsEngine {
     let y = this.ballRadius;
     let z = 0;
 
-    const dt = 0.01; // 10ms step
+    const dt = 0.01; // 10ms simulation tick
     const trajectory = [];
     let inFlight = true;
     let bounces = 0;
 
-    // Simulate complete flight until landing and roll stop
+    // Determine bounce elasticity based on club regime (Wedges bite soft, Drivers skip)
+    const bounceRetention = (vlaDeg >= 22.0 || currentSpinRPM >= 6000) 
+        ? this.WEDGE_BOUNCE 
+        : this.FAIRWAY_BOUNCE;
+
     for (let step = 0; step < 2500; step++) {
       const v = Math.sqrt(vx * vx + vy * vy + vz * vz);
 
@@ -56,13 +62,14 @@ export class GolfPhysicsEngine {
 
       if (inFlight) {
         if (v > 0.5) {
-          currentSpinRPM *= Math.exp(-this.SPIN_DECAY_RATE * dt);
+          // Spin decay from Minigames: Math.exp(-dt / 24.5)
+          currentSpinRPM *= Math.exp(-dt / 24.5);
           const spinRadS = (currentSpinRPM * 2 * Math.PI) / 60.0;
           const spinRatio = Math.min(0.6, (this.ballRadius * spinRadS) / v);
 
-          // Calibrated Drag & Lift Coefficients (Bearman & Harvey / Quintavalla)
-          const cd = 0.22 + 0.40 * spinRatio;
-          const cl = Math.min(0.30, 0.06 + 0.85 * spinRatio);
+          // Quintavalla Drag & Lift from Minigames
+          const cd = 0.22 + 0.38 * spinRatio;
+          const cl = Math.min(0.28, 0.07 + 0.80 * spinRatio);
 
           const dragForce = 0.5 * this.airDensity * this.ballArea * cd * v * v;
           const liftForce = 0.5 * this.airDensity * this.ballArea * cl * v * v;
@@ -94,12 +101,13 @@ export class GolfPhysicsEngine {
           y = this.ballRadius;
           bounces++;
 
-          vy = -vy * this.BOUNCE_RETENTION;
-          vz *= 0.82;
-          vx *= 0.82;
+          // Soft realistic bounce from Minigames
+          vy = -vy * bounceRetention;
+          vz *= this.ROLL_FACTOR;
+          vx *= this.ROLL_FACTOR;
 
-          // Transition to turf roll when vertical bounce dissipates
-          if (Math.abs(vy) < 0.5 || bounces >= 4) {
+          // If vertical bounce energy is depleted or 2 small hops completed, enter pure turf roll
+          if (Math.abs(vy) < 0.4 || bounces >= 2) {
             inFlight = false;
             vy = 0;
           }
@@ -108,7 +116,7 @@ export class GolfPhysicsEngine {
         // Turf Rolling Phase
         const groundSpeed = Math.sqrt(vx * vx + vz * vz);
         if (groundSpeed < 0.08) {
-          break; // Ball fully stopped
+          break; // Ball came to full stop
         }
 
         vx *= Math.pow(this.ROLL_FRICTION, dt * 60);
