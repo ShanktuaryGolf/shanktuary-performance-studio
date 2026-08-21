@@ -1,4 +1,4 @@
-// WebSocket Telemetry, Proximity & Live Nova / OpenGolfCoach Shot Handler
+// WebSocket Telemetry, Proximity & Live Nova / OpenGolfCoach Real Shot Handler
 
 import { setTargetDistance } from './environment.js';
 
@@ -79,41 +79,81 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     });
 
-    // Unpack all possible shapes from Nova, OpenGolfCoach, and Performance Studio
+    // Extract exact native OpenLaunch Nova & OpenGolfCoach telemetry
     function extractShotTelemetry(msg) {
         if (!msg) return null;
         
-        const raw = msg.data || msg;
-        const shotObj = raw.shot || raw;
-        const us = shotObj.us_units || raw.us_units || shotObj;
+        const raw = msg.data || msg.shot || msg;
+        const ogc = raw.open_golf_coach || (raw.shot && raw.shot.open_golf_coach) || {};
+        const us = ogc.us_customary_units || raw.us_units || (raw.shot && raw.shot.us_units) || {};
         
-        const ballSpeed = parseFloat(
-            us.ball_speed_mph || us.ballSpeed || us.ball_speed || shotObj.ballSpeed || raw.ballSpeed || 0
-        );
-        
-        if (ballSpeed <= 5.0) {
-            return null; // Not a valid shot
+        // 1. Ball Speed (MPH)
+        let ballSpeed = 0.0;
+        if (us.ball_speed_mph) {
+            ballSpeed = parseFloat(us.ball_speed_mph);
+        } else if (raw.ball_speed_meters_per_second) {
+            ballSpeed = parseFloat(raw.ball_speed_meters_per_second) * 2.236936;
+        } else if (raw.ball_speed_mph) {
+            ballSpeed = parseFloat(raw.ball_speed_mph);
+        } else if (raw.ballSpeed) {
+            ballSpeed = parseFloat(raw.ballSpeed);
         }
         
-        const vla = parseFloat(
-            us.vert_launch_angle_deg || us.vertical_launch_angle_degrees || us.verticalLaunchAngle || us.vla || 12.0
-        );
+        if (isNaN(ballSpeed) || ballSpeed < 5.0) {
+            return null; // Ignore invalid / zero shots
+        }
         
-        const hla = parseFloat(
-            us.horiz_launch_angle_deg || us.horizontal_launch_angle_degrees || us.horizontalLaunchAngle || us.hla || 0.0
-        );
+        // 2. Vertical Launch Angle (Degrees)
+        let vla = 14.0;
+        if (raw.vertical_launch_angle_degrees !== undefined) {
+            vla = parseFloat(raw.vertical_launch_angle_degrees);
+        } else if (us.vert_launch_angle_deg !== undefined) {
+            vla = parseFloat(us.vert_launch_angle_deg);
+        } else if (raw.vla !== undefined) {
+            vla = parseFloat(raw.vla);
+        } else if (raw.verticalLaunchAngle !== undefined) {
+            vla = parseFloat(raw.verticalLaunchAngle);
+        }
         
-        const totalSpin = parseFloat(
-            us.total_spin_rpm || us.total_spin || us.spinSpeed || us.spin_rate || 2500.0
-        );
+        // 3. Horizontal Launch Angle (Degrees)
+        let hla = 0.0;
+        if (raw.horizontal_launch_angle_degrees !== undefined) {
+            hla = parseFloat(raw.horizontal_launch_angle_degrees);
+        } else if (us.horiz_launch_angle_deg !== undefined) {
+            hla = parseFloat(us.horiz_launch_angle_deg);
+        } else if (raw.hla !== undefined) {
+            hla = parseFloat(raw.hla);
+        } else if (raw.horizontalLaunchAngle !== undefined) {
+            hla = parseFloat(raw.horizontalLaunchAngle);
+        }
         
-        const spinAxis = parseFloat(
-            us.spin_axis_deg || us.spin_axis_degrees || us.spin_axis || us.spinAxis || 0.0
-        );
+        // 4. Total Spin (RPM)
+        let totalSpin = 3000.0;
+        if (raw.total_spin_rpm !== undefined) {
+            totalSpin = parseFloat(raw.total_spin_rpm);
+        } else if (ogc.total_spin_rpm !== undefined) {
+            totalSpin = parseFloat(ogc.total_spin_rpm);
+        } else if (us.total_spin_rpm !== undefined) {
+            totalSpin = parseFloat(us.total_spin_rpm);
+        } else if (raw.total_spin !== undefined) {
+            totalSpin = parseFloat(raw.total_spin);
+        } else if (raw.spinSpeed !== undefined) {
+            totalSpin = parseFloat(raw.spinSpeed);
+        }
         
-        const clubSpeed = parseFloat(
-            us.club_speed_mph || us.club_speed || us.clubSpeed || 0.0
-        );
+        // 5. Spin Axis (Degrees)
+        let spinAxis = 0.0;
+        if (raw.spin_axis_degrees !== undefined) {
+            spinAxis = parseFloat(raw.spin_axis_degrees);
+        } else if (ogc.spin_axis_degrees !== undefined) {
+            spinAxis = parseFloat(ogc.spin_axis_degrees);
+        } else if (us.spin_axis_deg !== undefined) {
+            spinAxis = parseFloat(us.spin_axis_deg);
+        } else if (raw.spin_axis !== undefined) {
+            spinAxis = parseFloat(raw.spin_axis);
+        } else if (raw.spinAxis !== undefined) {
+            spinAxis = parseFloat(raw.spinAxis);
+        }
         
         return {
             ballSpeed,
@@ -121,23 +161,24 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             horizontalLaunchAngle: hla,
             total_spin: totalSpin,
             spin_axis: spinAxis,
-            clubSpeed
+            ogcCarry: us.carry_distance_yards ? parseFloat(us.carry_distance_yards) : null,
+            ogcOffline: us.offline_distance_yards ? parseFloat(us.offline_distance_yards) : null
         };
     }
 
     function fireShot(shotData) {
         if (!shotData) return;
         
-        console.log('[+] Launching live shot in 3D Driving Range:', shotData);
+        console.log('[+] Live Nova Shot Received:', shotData);
         
         const trajectory = physicsEngine.calculateTrajectory(shotData);
         
         const finalPt = trajectory[trajectory.length - 1];
-        const carryYds = Math.abs(finalPt.z);
-        const offlineYds = finalPt.x;
-        const offlineDir = finalPt.x >= 0 ? "R" : "L";
+        const carryYds = shotData.ogcCarry || Math.abs(finalPt.z);
+        const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : finalPt.x;
+        const offlineDir = offlineYds >= 0 ? "R" : "L";
         
-        const dx = finalPt.x;
+        const dx = offlineYds;
         const dz = carryYds - currentTargetYards;
         const distToPinYds = Math.sqrt(dx * dx + dz * dz);
         const onGreen = distToPinYds <= 10.0;
@@ -212,18 +253,19 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host || 'localhost:9321'}`;
         
+        console.log('[+] Connecting to WebSocket:', wsUrl);
         const ws = new WebSocket(wsUrl);
         
         ws.onopen = () => {
-            console.log('[+] Connected to Shanktuary WebSocket server');
+            console.log('[✓] Connected to Shanktuary WebSocket server');
         };
         
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                console.log('[+] Received WebSocket message:', msg.type);
+                console.log('[+] Received WebSocket message type:', msg.type);
                 
-                if (msg.type === 'shot' || msg.type === 'init') {
+                if (msg.type === 'shot') {
                     const parsed = extractShotTelemetry(msg);
                     if (parsed) {
                         fireShot(parsed);
@@ -235,6 +277,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         };
         
         ws.onclose = () => {
+            console.log('[!] WebSocket disconnected, reconnecting in 2s...');
             setTimeout(connectWS, 2000);
         };
     }
