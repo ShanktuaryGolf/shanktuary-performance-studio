@@ -1,96 +1,159 @@
-// Procedural Fairway, Target Greens, Distance Markers & Water Hazard
+// Professional 3D Driving Range Environment (Photorealistic Turf, Target Greens, Background Mountains)
 
 export function setupEnvironment(scene) {
-    // 1. Procedural Tournament Striped Fairway
-    const terrainGeometry = new THREE.PlaneGeometry(300, 600, 32, 32);
-    terrainGeometry.rotateX(-Math.PI / 2);
+    const textureLoader = new THREE.TextureLoader();
     
-    // Create striped mowing pattern on canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#2e5d1e';
-    ctx.fillRect(0, 0, 512, 512);
-    ctx.fillStyle = '#264f19';
-    for (let i = 0; i < 512; i += 32) {
-        ctx.fillRect(i, 0, 16, 512);
-    }
+    // 1. Sky and Volumetric Atmospheric Fog
+    scene.background = new THREE.Color(0xa8d8ea); // Soft morning sky
+    scene.fog = new THREE.FogExp2(0xa8d8ea, 0.0012);
     
-    const stripeTexture = new THREE.CanvasTexture(canvas);
-    stripeTexture.wrapS = THREE.RepeatWrapping;
-    stripeTexture.wrapT = THREE.RepeatWrapping;
-    stripeTexture.repeat.set(15, 30);
+    // 2. High-Res Fairway Turf with Normal Mapping
+    const grassTex = textureLoader.load('/range/textures/gen_fairway_tex.png');
+    grassTex.wrapS = THREE.RepeatWrapping;
+    grassTex.wrapT = THREE.RepeatWrapping;
+    grassTex.repeat.set(25, 50);
     
-    const terrainMaterial = new THREE.MeshStandardMaterial({
-        map: stripeTexture,
+    const grassNormal = textureLoader.load('/range/textures/gen_fairway_map.png');
+    grassNormal.wrapS = THREE.RepeatWrapping;
+    grassNormal.wrapT = THREE.RepeatWrapping;
+    grassNormal.repeat.set(25, 50);
+    
+    const terrainGeo = new THREE.PlaneGeometry(350, 700, 64, 64);
+    terrainGeo.rotateX(-Math.PI / 2);
+    
+    const terrainMat = new THREE.MeshStandardMaterial({
+        map: grassTex,
+        normalMap: grassNormal,
         roughness: 0.85,
         metalness: 0.05
     });
     
-    const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
-    terrain.position.set(0, 0, -250); // Centered down range
+    const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+    terrain.position.set(0, 0, -250);
     terrain.receiveShadow = true;
     scene.add(terrain);
     
-    // Tee Box Pad at (0, 0.02, 0)
-    const teeGeo = new THREE.BoxGeometry(6, 0.04, 6);
-    const teeMat = new THREE.MeshStandardMaterial({ color: 0x1f4414, roughness: 0.9 });
+    // 3. Tee Box Hitting Pad
+    const teeGeo = new THREE.BoxGeometry(8, 0.05, 6);
+    const teeMat = new THREE.MeshStandardMaterial({ 
+        color: 0x1f4a14, 
+        roughness: 0.9 
+    });
     const teePad = new THREE.Mesh(teeGeo, teeMat);
-    teePad.position.set(0, 0.02, 0);
+    teePad.position.set(0, 0.025, 0);
     teePad.receiveShadow = true;
     scene.add(teePad);
     
-    // 2. Target Greens at 50, 100, 150, 200, 250, 300 yards
-    const distances = [50, 100, 150, 200, 250, 300];
-    distances.forEach(yd => {
-        createTargetGreen(scene, yd);
+    // Tee Divider Markers
+    const markerGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const markerMatL = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
+    const markerMatR = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.3 });
+    const markerL = new THREE.Mesh(markerGeo, markerMatL);
+    markerL.position.set(-2.5, 0.12, 0);
+    scene.add(markerL);
+    const markerR = new THREE.Mesh(markerGeo, markerMatR);
+    markerR.position.set(2.5, 0.12, 0);
+    scene.add(markerR);
+    
+    // 4. Clean PGA-Style Target Greens (50, 100, 150, 200, 250, 300 yards)
+    const targets = [
+        { yd: 50, radius: 7, color: 0x4CAF50 },
+        { yd: 100, radius: 9, color: 0x2196F3 },
+        { yd: 150, radius: 11, color: 0xFFC107 },
+        { yd: 200, radius: 12, color: 0xFF5722 },
+        { yd: 250, radius: 14, color: 0x9C27B0 },
+        { yd: 300, radius: 16, color: 0x00E5FF }
+    ];
+    
+    targets.forEach(t => {
+        createTargetGreen(scene, t.yd, t.radius, t.color, textureLoader);
     });
     
-    // 3. Water Hazard at 175 yards with Stone Bridge
-    createWaterHazard(scene, 175);
+    // 5. Yardage Hash Lines across the Fairway (50, 100, 150, 200, 250, 300)
+    targets.forEach(t => {
+        createYardageLine(scene, t.yd);
+    });
+    
+    // 6. Background 3D Mountain Range (rangeMtns.glb)
+    loadBackgroundMountains(scene);
 }
 
-function createTargetGreen(scene, yardage) {
-    const zDist = yardage; // In yards down -Z
+function createTargetGreen(scene, yardage, radius, ringColor, textureLoader) {
+    const zDist = yardage;
     
-    // Raised circular green
-    const greenRadius = 8 + (yardage * 0.02);
-    const greenGeo = new THREE.CylinderGeometry(greenRadius, greenRadius + 1.5, 0.15, 32);
-    const greenMat = new THREE.MeshStandardMaterial({ 
-        color: 0x3d7e26, 
+    // Outer Target Green Ring
+    const outerGeo = new THREE.CylinderGeometry(radius, radius + 1.2, 0.1, 48);
+    const outerMat = new THREE.MeshStandardMaterial({ 
+        color: 0x2f6d1f, 
         roughness: 0.7 
     });
-    const green = new THREE.Mesh(greenGeo, greenMat);
-    green.position.set(0, 0.08, -zDist);
-    green.receiveShadow = true;
-    scene.add(green);
+    const outerGreen = new THREE.Mesh(outerGeo, outerMat);
+    outerGreen.position.set(0, 0.05, -zDist);
+    outerGreen.receiveShadow = true;
+    scene.add(outerGreen);
     
-    // White Flagstick with Red Pin Flag
-    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 3, 16);
+    // Inner Bullseye Target Ring
+    const innerGeo = new THREE.CylinderGeometry(radius * 0.45, radius * 0.45, 0.12, 32);
+    const innerMat = new THREE.MeshStandardMaterial({ 
+        color: ringColor, 
+        roughness: 0.5,
+        emissive: ringColor,
+        emissiveIntensity: 0.2
+    });
+    const innerGreen = new THREE.Mesh(innerGeo, innerMat);
+    innerGreen.position.set(0, 0.06, -zDist);
+    innerGreen.receiveShadow = true;
+    scene.add(innerGreen);
+    
+    // Center Cup Hole
+    const cupGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.15, 16);
+    const cupMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+    const cup = new THREE.Mesh(cupGeo, cupMat);
+    cup.position.set(0, 0.07, -zDist);
+    scene.add(cup);
+    
+    // Pin Flagstick (White & Striped)
+    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 3.2, 16);
     const poleMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
     const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.set(0, 1.5, -zDist);
+    pole.position.set(0, 1.6, -zDist);
     pole.castShadow = true;
     scene.add(pole);
     
-    const flagGeo = new THREE.PlaneGeometry(1.0, 0.6);
-    const flagMat = new THREE.MeshStandardMaterial({ color: 0xff1744, side: THREE.DoubleSide });
+    // High-Vis Flag
+    const flagGeo = new THREE.PlaneGeometry(1.2, 0.7);
+    const flagMat = new THREE.MeshStandardMaterial({ 
+        color: ringColor, 
+        side: THREE.DoubleSide,
+        roughness: 0.4
+    });
     const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(0.5, 2.7, -zDist);
+    flag.position.set(0.6, 2.8, -zDist);
     flag.castShadow = true;
     scene.add(flag);
     
-    // Glowing Neon Distance Board on left side
-    createDistanceSign(scene, -greenRadius - 5, -zDist, `${yardage} YDS`);
+    // Flanking Sand Bunker
+    const sandTex = textureLoader.load('/range/textures/sand.png');
+    sandTex.wrapS = THREE.RepeatWrapping;
+    sandTex.wrapT = THREE.RepeatWrapping;
+    sandTex.repeat.set(2, 2);
     
-    // Sand Bunker around right side
-    const bunkerGeo = new THREE.CylinderGeometry(5, 6, 0.08, 16);
-    const bunkerMat = new THREE.MeshStandardMaterial({ color: 0xd9c58b, roughness: 1.0 });
-    const bunker = new THREE.Mesh(bunkerGeo, bunkerMat);
-    bunker.position.set(greenRadius + 3, 0.05, -zDist + 4);
-    bunker.receiveShadow = true;
-    scene.add(bunker);
+    const bunkerGeo = new THREE.CylinderGeometry(radius * 0.4, radius * 0.5, 0.08, 24);
+    const bunkerMat = new THREE.MeshStandardMaterial({ 
+        map: sandTex,
+        color: 0xe8d7a7, 
+        roughness: 0.95 
+    });
+    
+    // Place bunker naturally offset
+    const bunkerL = new THREE.Mesh(bunkerGeo, bunkerMat);
+    bunkerL.position.set(-radius - 3, 0.04, -zDist + 2);
+    bunkerL.scale.set(1.4, 1.0, 0.9);
+    bunkerL.receiveShadow = true;
+    scene.add(bunkerL);
+    
+    // Yardage Target Board
+    createDistanceSign(scene, -radius - 8, -zDist, `${yardage}`);
 }
 
 function createDistanceSign(scene, x, z, text) {
@@ -103,55 +166,66 @@ function createDistanceSign(scene, x, z, text) {
     sCtx.strokeStyle = '#00E5FF';
     sCtx.lineWidth = 6;
     sCtx.strokeRect(4, 4, 248, 120);
-    sCtx.fillStyle = '#00FF66';
-    sCtx.font = 'bold 48px monospace';
+    sCtx.fillStyle = '#FFFFFF';
+    sCtx.font = 'bold 54px monospace';
     sCtx.textAlign = 'center';
     sCtx.textBaseline = 'middle';
     sCtx.fillText(text, 128, 64);
     
     const texture = new THREE.CanvasTexture(signCanvas);
-    const signGeo = new THREE.BoxGeometry(3, 1.5, 0.2);
+    const signGeo = new THREE.BoxGeometry(3.2, 1.8, 0.2);
     const signMat = new THREE.MeshStandardMaterial({ 
         map: texture,
         roughness: 0.3
     });
     const sign = new THREE.Mesh(signGeo, signMat);
-    sign.position.set(x, 1.0, z);
+    sign.position.set(x, 1.2, z);
     sign.castShadow = true;
     scene.add(sign);
     
-    // Sign posts
-    const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0);
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    const postL = new THREE.Mesh(postGeo, postMat);
-    postL.position.set(x - 1, 0.5, z);
-    scene.add(postL);
-    const postR = new THREE.Mesh(postGeo, postMat);
-    postR.position.set(x + 1, 0.5, z);
-    scene.add(postR);
+    // Post
+    const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2);
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    const post = new THREE.Mesh(postGeo, postMat);
+    post.position.set(x, 0.6, z);
+    scene.add(post);
 }
 
-function createWaterHazard(scene, zDist) {
-    // Water pond geometry
-    const waterGeo = new THREE.PlaneGeometry(50, 25);
-    waterGeo.rotateX(-Math.PI / 2);
-    const waterMat = new THREE.MeshStandardMaterial({ 
-        color: 0x0066aa, 
-        roughness: 0.1,
-        metalness: 0.8,
-        transparent: true,
-        opacity: 0.85
+function createYardageLine(scene, yardage) {
+    const lineGeo = new THREE.PlaneGeometry(160, 0.4);
+    lineGeo.rotateX(-Math.PI / 2);
+    const lineMat = new THREE.MeshBasicMaterial({ 
+        color: 0xffffff, 
+        transparent: true, 
+        opacity: 0.35 
     });
-    const water = new THREE.Mesh(waterGeo, waterMat);
-    water.position.set(-15, 0.04, -zDist);
-    scene.add(water);
-    
-    // Stone Bridge crossing the hazard
-    const bridgeGeo = new THREE.BoxGeometry(6, 0.4, 20);
-    const bridgeMat = new THREE.MeshStandardMaterial({ color: 0x6e6e6e, roughness: 0.9 });
-    const bridge = new THREE.Mesh(bridgeGeo, bridgeMat);
-    bridge.position.set(8, 0.4, -zDist);
-    bridge.castShadow = true;
-    bridge.receiveShadow = true;
-    scene.add(bridge);
+    const line = new THREE.Mesh(lineGeo, lineMat);
+    line.position.set(0, 0.03, -yardage);
+    scene.add(line);
+}
+
+function loadBackgroundMountains(scene) {
+    if (typeof THREE.GLTFLoader === 'function') {
+        const loader = new THREE.GLTFLoader();
+        loader.load('/range/models/rangeMtns.glb', (gltf) => {
+            const mountains = gltf.scene;
+            mountains.position.set(0, -5, -450);
+            mountains.scale.set(15, 15, 15);
+            
+            mountains.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0x5a7580,
+                        roughness: 0.95,
+                        metalness: 0.05
+                    });
+                }
+            });
+            
+            scene.add(mountains);
+            console.log('[✓] Background 3D mountains loaded successfully!');
+        }, undefined, (err) => {
+            console.warn('[!] Mountain GLB not loaded, using natural horizon:', err);
+        });
+    }
 }

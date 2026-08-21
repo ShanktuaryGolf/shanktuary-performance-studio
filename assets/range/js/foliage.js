@@ -1,94 +1,159 @@
-// GPU Instanced Foliage: Trees and Bushes along Driving Range perimeter
+// Realistic Multi-Layer 3D Foliage System (Pine, Maple, Birch & Dense Forest Undergrowth)
 
 export function setupFoliage(scene) {
-    // 1. Pine / Fir Trees (Conical Evergreen)
-    const treeTrunkGeo = new THREE.CylinderGeometry(0.3, 0.5, 3, 8);
-    const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a2e18, roughness: 0.9 });
+    const treeGroup = new THREE.Group();
     
-    const treeLeavesGeo = new THREE.ConeGeometry(3.5, 8, 8);
-    const treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x1c441c, roughness: 0.8 });
+    // 1. Materials for Multi-Species Forest
+    const barkDarkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.95 });
+    const barkBirchMat = new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.85 });
     
-    // Create instanced meshes for 400 trees
-    const treeCount = 400;
-    const trunkInstanced = new THREE.InstancedMesh(treeTrunkGeo, treeTrunkMat, treeCount);
-    const leavesInstanced = new THREE.InstancedMesh(treeLeavesGeo, treeLeavesMat, treeCount);
+    // Foliage Materials with realistic variation
+    const pineLeavesMat = new THREE.MeshStandardMaterial({ color: 0x1a3d1c, roughness: 0.8 });
+    const mapleLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e5c1e, roughness: 0.75 });
+    const birchLeavesMat = new THREE.MeshStandardMaterial({ color: 0x487a27, roughness: 0.75 });
+    const bushMat = new THREE.MeshStandardMaterial({ color: 0x244f19, roughness: 0.85 });
     
-    trunkInstanced.castShadow = true;
-    leavesInstanced.castShadow = true;
-    
-    const dummy = new THREE.Object3D();
-    let idx = 0;
-    
-    // Left Tree Line (X = -45 to -90, Z = +20 to -400)
-    for (let z = 20; z > -400; z -= 4) {
-        if (idx >= treeCount / 2) break;
-        const x = -45 - Math.random() * 35;
-        const scale = 0.8 + Math.random() * 0.6;
-        
+    // 2. Realistic 3D Tree Prototype Builders
+    function buildPineTree(scale) {
+        const group = new THREE.Group();
         // Trunk
-        dummy.position.set(x, 1.5 * scale, z + (Math.random() * 4 - 2));
-        dummy.scale.set(scale, scale, scale);
-        dummy.rotation.y = Math.random() * Math.PI;
-        dummy.updateMatrix();
-        trunkInstanced.setMatrixAt(idx, dummy.matrix);
+        const trunkGeo = new THREE.CylinderGeometry(0.25 * scale, 0.45 * scale, 4 * scale, 8);
+        const trunk = new THREE.Mesh(trunkGeo, barkDarkMat);
+        trunk.position.y = 2 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
         
-        // Foliage
-        dummy.position.set(x, (3 + 3.5) * scale, z + (Math.random() * 4 - 2));
-        dummy.scale.set(scale, scale, scale);
-        dummy.updateMatrix();
-        leavesInstanced.setMatrixAt(idx, dummy.matrix);
+        // 4 Staggered Layered Needle Tiers
+        const tiers = [
+            { y: 3.2 * scale, r: 2.8 * scale, h: 3.0 * scale },
+            { y: 5.0 * scale, r: 2.2 * scale, h: 2.8 * scale },
+            { y: 6.8 * scale, r: 1.6 * scale, h: 2.4 * scale },
+            { y: 8.2 * scale, r: 0.9 * scale, h: 2.0 * scale }
+        ];
         
-        idx++;
+        tiers.forEach(t => {
+            const foliageGeo = new THREE.ConeGeometry(t.r, t.h, 7);
+            const foliage = new THREE.Mesh(foliageGeo, pineLeavesMat);
+            foliage.position.y = t.y;
+            foliage.castShadow = true;
+            group.add(foliage);
+        });
+        
+        return group;
     }
     
-    // Right Tree Line (X = +45 to +90, Z = +20 to -400)
-    for (let z = 20; z > -400; z -= 4) {
-        if (idx >= treeCount) break;
-        const x = 45 + Math.random() * 35;
-        const scale = 0.8 + Math.random() * 0.6;
+    function buildMapleTree(scale) {
+        const group = new THREE.Group();
+        // Gnarled Trunk
+        const trunkGeo = new THREE.CylinderGeometry(0.35 * scale, 0.55 * scale, 4.5 * scale, 8);
+        const trunk = new THREE.Mesh(trunkGeo, barkDarkMat);
+        trunk.position.y = 2.25 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
         
-        // Trunk
-        dummy.position.set(x, 1.5 * scale, z + (Math.random() * 4 - 2));
-        dummy.scale.set(scale, scale, scale);
-        dummy.rotation.y = Math.random() * Math.PI;
-        dummy.updateMatrix();
-        trunkInstanced.setMatrixAt(idx, dummy.matrix);
+        // Multi-Cluster Broadleaf Canopy
+        const canopyPositions = [
+            { x: 0, y: 5.2 * scale, z: 0, r: 2.5 * scale },
+            { x: 1.2 * scale, y: 4.8 * scale, z: 0.6 * scale, r: 1.9 * scale },
+            { x: -1.1 * scale, y: 4.6 * scale, z: -0.5 * scale, r: 1.8 * scale },
+            { x: 0.3 * scale, y: 6.3 * scale, z: -0.8 * scale, r: 1.7 * scale },
+            { x: -0.4 * scale, y: 5.8 * scale, z: 1.0 * scale, r: 1.6 * scale }
+        ];
         
-        // Foliage
-        dummy.position.set(x, (3 + 3.5) * scale, z + (Math.random() * 4 - 2));
-        dummy.scale.set(scale, scale, scale);
-        dummy.updateMatrix();
-        leavesInstanced.setMatrixAt(idx, dummy.matrix);
+        canopyPositions.forEach(c => {
+            const clusterGeo = new THREE.DodecahedronGeometry(c.r, 1);
+            const cluster = new THREE.Mesh(clusterGeo, mapleLeavesMat);
+            cluster.position.set(c.x, c.y, c.z);
+            cluster.castShadow = true;
+            group.add(cluster);
+        });
         
-        idx++;
+        return group;
     }
     
-    trunkInstanced.instanceMatrix.needsUpdate = true;
-    leavesInstanced.instanceMatrix.needsUpdate = true;
-    
-    scene.add(trunkInstanced);
-    scene.add(leavesInstanced);
-    
-    // 2. Instanced Bushes around target greens
-    const bushGeo = new THREE.DodecahedronGeometry(1.2, 1);
-    const bushMat = new THREE.MeshStandardMaterial({ color: 0x255220, roughness: 0.9 });
-    const bushCount = 150;
-    const bushInstanced = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
-    bushInstanced.castShadow = true;
-    
-    for (let i = 0; i < bushCount; i++) {
-        const side = i % 2 === 0 ? -1 : 1;
-        const x = side * (35 + Math.random() * 20);
-        const z = -Math.random() * 350;
-        const scale = 0.7 + Math.random() * 0.8;
+    function buildBirchTree(scale) {
+        const group = new THREE.Group();
+        // Slender White Trunk
+        const trunkGeo = new THREE.CylinderGeometry(0.18 * scale, 0.28 * scale, 5 * scale, 8);
+        const trunk = new THREE.Mesh(trunkGeo, barkBirchMat);
+        trunk.position.y = 2.5 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
         
-        dummy.position.set(x, 0.6 * scale, z);
-        dummy.scale.set(scale, scale * 0.8, scale);
-        dummy.rotation.set(Math.random(), Math.random(), Math.random());
-        dummy.updateMatrix();
-        bushInstanced.setMatrixAt(i, dummy.matrix);
+        // Weeping Birch Foliage Clusters
+        const clusters = [
+            { x: 0, y: 5.5 * scale, z: 0, r: 2.0 * scale },
+            { x: 0.8 * scale, y: 4.8 * scale, z: 0.4 * scale, r: 1.4 * scale },
+            { x: -0.7 * scale, y: 4.5 * scale, z: -0.3 * scale, r: 1.3 * scale },
+            { x: 0.2 * scale, y: 6.4 * scale, z: -0.5 * scale, r: 1.2 * scale }
+        ];
+        
+        clusters.forEach(c => {
+            const cGeo = new THREE.DodecahedronGeometry(c.r, 1);
+            const cMesh = new THREE.Mesh(cGeo, birchLeavesMat);
+            cMesh.position.set(c.x, c.y, c.z);
+            cMesh.castShadow = true;
+            group.add(cMesh);
+        });
+        
+        return group;
     }
     
-    bushInstanced.instanceMatrix.needsUpdate = true;
-    scene.add(bushInstanced);
+    function buildBushCluster(scale) {
+        const group = new THREE.Group();
+        const clusterCoords = [
+            { x: 0, y: 0.6 * scale, z: 0, r: 0.8 * scale },
+            { x: 0.5 * scale, y: 0.5 * scale, z: 0.3 * scale, r: 0.6 * scale },
+            { x: -0.4 * scale, y: 0.4 * scale, z: -0.2 * scale, r: 0.55 * scale }
+        ];
+        clusterCoords.forEach(c => {
+            const bGeo = new THREE.DodecahedronGeometry(c.r, 1);
+            const bMesh = new THREE.Mesh(bGeo, bushMat);
+            bMesh.position.set(c.x, c.y, c.z);
+            bMesh.castShadow = true;
+            group.add(bMesh);
+        });
+        return group;
+    }
+    
+    // 3. Populate Left & Right Tree Lines along Driving Range Perimeter
+    const treeTypes = [buildPineTree, buildMapleTree, buildBirchTree];
+    
+    // Left Boundary (X = -45 to -90, Z = +20 to -400)
+    for (let z = 20; z > -400; z -= 12) {
+        const xOffset = -42 - Math.random() * 30;
+        const scale = 0.85 + Math.random() * 0.45;
+        const typeIndex = Math.floor(Math.random() * treeTypes.length);
+        const tree = treeTypes[typeIndex](scale);
+        tree.position.set(xOffset, 0, z + (Math.random() * 6 - 3));
+        tree.rotation.y = Math.random() * Math.PI * 2;
+        treeGroup.add(tree);
+        
+        // Add Undergrowth Bush
+        if (Math.random() > 0.4) {
+            const bush = buildBushCluster(0.9 + Math.random() * 0.5);
+            bush.position.set(xOffset + (Math.random() * 6 - 3), 0, z + (Math.random() * 6 - 3));
+            treeGroup.add(bush);
+        }
+    }
+    
+    // Right Boundary (X = +45 to +90, Z = +20 to -400)
+    for (let z = 20; z > -400; z -= 12) {
+        const xOffset = 42 + Math.random() * 30;
+        const scale = 0.85 + Math.random() * 0.45;
+        const typeIndex = Math.floor(Math.random() * treeTypes.length);
+        const tree = treeTypes[typeIndex](scale);
+        tree.position.set(xOffset, 0, z + (Math.random() * 6 - 3));
+        tree.rotation.y = Math.random() * Math.PI * 2;
+        treeGroup.add(tree);
+        
+        // Add Undergrowth Bush
+        if (Math.random() > 0.4) {
+            const bush = buildBushCluster(0.9 + Math.random() * 0.5);
+            bush.position.set(xOffset + (Math.random() * 6 - 3), 0, z + (Math.random() * 6 - 3));
+            treeGroup.add(bush);
+        }
+    }
+    
+    scene.add(treeGroup);
 }
