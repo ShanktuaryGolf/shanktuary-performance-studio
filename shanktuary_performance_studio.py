@@ -1143,9 +1143,9 @@ class ShanktuaryApp:
         # 1. Backdrop
         self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="", stipple="gray75")
 
-        # 2. Centered Modal Box
-        modal_w = 540
-        modal_h = 420
+        # 2. Responsive Modal Box
+        modal_w = min(640, max(520, int(w * 0.54)))
+        modal_h = min(560, max(500, int(h * 0.76)))
         cx = w // 2
         cy = h // 2
         x1 = cx - modal_w // 2
@@ -1169,11 +1169,11 @@ class ShanktuaryApp:
 
         # Category Chips Row (y1 + 58 to y1 + 86)
         cat_y1 = y1 + 58
-        cat_y2 = cat_y1 + 26
-        chip_w = 98
-        chip_gap = 4
-        total_chips_w = len(BAG_CATEGORIES) * chip_w + (len(BAG_CATEGORIES) - 1) * chip_gap
-        start_chip_x = cx - total_chips_w // 2
+        cat_y2 = cat_y1 + 28
+        chip_gap = 6
+        avail_chips_w = modal_w - 70
+        chip_w = (avail_chips_w - (len(BAG_CATEGORIES) - 1) * chip_gap) // len(BAG_CATEGORIES)
+        start_chip_x = x1 + 35
 
         for i, cat in enumerate(BAG_CATEGORIES):
             cx1 = start_chip_x + i * (chip_w + chip_gap)
@@ -1194,14 +1194,15 @@ class ShanktuaryApp:
             ("shaft", "Shaft Specs (e.g. Ventus Black 6X, KBS Tour):", self.spec_editor_shaft),
         ]
 
-        curr_fy = y1 + 94
+        curr_fy = y1 + 102
+        field_step = 58
         for f_key, f_label, f_val in fields:
             self.canvas.create_text(x1 + 35, curr_fy, text=f_label, fill="#8E94A5", font=("Helvetica", 8, "bold"), anchor="w")
             
             box_x1 = x1 + 35
             box_x2 = x2 - 35
-            box_y1 = curr_fy + 12
-            box_y2 = box_y1 + 26
+            box_y1 = curr_fy + 14
+            box_y2 = box_y1 + 28
             self.spec_editor_field_rects[f_key] = (box_x1, box_y1, box_x2, box_y2)
 
             is_f_active = (self.spec_editor_active_field == f_key)
@@ -1212,11 +1213,11 @@ class ShanktuaryApp:
             val_text = val_display if val_display else "Click to enter..."
             self.canvas.create_text(box_x1 + 10, (box_y1 + box_y2) // 2, text=val_text, fill=val_color, font=("Consolas", 9, "bold" if is_f_active else "normal"), anchor="w")
 
-            curr_fy += 44
+            curr_fy += field_step
 
         # Action Buttons
-        btn_y1 = y2 - 46
-        btn_y2 = btn_y1 + 28
+        btn_y1 = y2 - 52
+        btn_y2 = btn_y1 + 32
 
         # Save Button
         save_x1 = cx - 180
@@ -1243,7 +1244,7 @@ class ShanktuaryApp:
             self.spec_editor_delete_rect = None
 
         # Footer Hint
-        self.canvas.create_text(cx, y2 - 8, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill="#5A6175", font=("Helvetica", 8))
+        self.canvas.create_text(cx, y2 - 12, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill="#5A6175", font=("Helvetica", 8))
 
     def get_club_color(self, club_name):
         standard = {
@@ -2785,14 +2786,20 @@ class ShanktuaryApp:
 
         # 1. Pinned Summary Averages Banner (y: 58 to 98)
         avg_y1 = top_y
-        avg_y2 = avg_y1 + 42
+        avg_y2 = avg_y1 + 40
         self.canvas.create_rectangle(table_x1, avg_y1, table_x2, avg_y2, fill="#0C2534", outline="#00E5FF", width=2)
         
         avgs = self.calculate_session_averages()
         active_count = avgs.get("count", 0)
-        self.canvas.create_text(table_x1 + 14, (avg_y1 + avg_y2) // 2, text=f"📊 SESSION AVERAGES ({active_count} active shots):", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+        
+        # Left Tag Badge (Clean, contained, zero overlap)
+        badge_x1 = table_x1 + 10
+        badge_x2 = badge_x1 + 190
+        self.canvas.create_rectangle(badge_x1, avg_y1 + 7, badge_x2, avg_y2 - 7, fill="#0E384D", outline="#00E5FF", width=1)
+        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill="#00E5FF", font=("Helvetica", 8, "bold"))
         
         if avgs:
+            metrics_x = badge_x2 + 16
             avg_metrics = (
                 f"Carry: {avgs.get('carry', 0.0):.1f}y  |  "
                 f"Ball Spd: {avgs.get('ball_speed', 0.0):.1f}mph  |  "
@@ -2803,7 +2810,7 @@ class ShanktuaryApp:
                 f"Apex: {avgs.get('apex', 0.0):.1f}y  |  "
                 f"Offline: {avgs.get('offline', 0.0):+.1f}y"
             )
-            self.canvas.create_text(table_x1 + 270, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", 9, "bold"), anchor="w")
+            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", 9, "bold"), anchor="w")
 
         # 2. Interactive Column Headers (y: 104 to 132)
         head_y1 = 104
@@ -3182,7 +3189,7 @@ class ShanktuaryApp:
             v_text = f"↕ {abs(v_impact_mm):.1f} mm HIGH"
             v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
         else:
-            v_text = f"↕ {abs(v_impact_mm):.1f} mm LOW (THIN)"
+            v_text = f"↕ {abs(v_impact_mm):.1f} mm LOW"
             v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
 
         if total_offset_mm < 3.0:
@@ -3201,7 +3208,7 @@ class ShanktuaryApp:
 
         # Top Pill Badges (Exact Strike Coordinates)
         badge_y = q4_top + 20
-        badge_w = 125
+        badge_w = 135
         # Lateral Pill
         self.canvas.create_rectangle(q4_cx - badge_w - 6, badge_y - 11, q4_cx - 6, badge_y + 11, fill="#121622", outline=h_badge_col, width=1)
         self.canvas.create_text(q4_cx - (badge_w // 2) - 6, badge_y, text=h_text, fill=h_badge_col, font=("Consolas", 8, "bold"))

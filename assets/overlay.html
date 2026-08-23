@@ -898,7 +898,7 @@
         const totalOffsetMm = Math.sqrt(hImpactMm * hImpactMm + vImpactMm * vImpactMm);
 
         const hDir = Math.abs(hImpactMm) < 1.0 ? 'CENTER' : (hImpactMm > 0 ? 'HEEL' : 'TOE');
-        const vDir = Math.abs(vImpactMm) < 1.0 ? 'FLUSH' : (vImpactMm > 0 ? 'HIGH' : 'LOW (THIN)');
+        const vDir = Math.abs(vImpactMm) < 1.0 ? 'FLUSH' : (vImpactMm > 0 ? 'HIGH' : 'LOW');
         const strikeColor = totalOffsetMm < 3.0 ? '#00FF66' : (totalOffsetMm < 8.0 ? '#FFEA00' : '#FF1744');
 
         const centerX = cx - (15 * scale);
