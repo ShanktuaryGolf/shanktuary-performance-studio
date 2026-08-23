@@ -10,5 +10,8 @@ build/
 dist/
 AppDir/
 squashfs-root/
-*.spec
 *.AppImage
+*.tar.gz
+*.zip
+.venv/
+.agents/

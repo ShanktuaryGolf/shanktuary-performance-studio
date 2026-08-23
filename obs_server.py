@@ -34,6 +34,13 @@ def get_assets_dir():
         if (base / "assets").exists():
             return base / "assets"
         return base
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+        if (base / "assets").exists():
+            return base / "assets"
+        if (base / "_internal" / "assets").exists():
+            return base / "_internal" / "assets"
+        return base
     
     candidates = [
         SCRIPT_DIR / "assets",
@@ -172,9 +179,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.handle_websocket()
             return
 
-        if parsed_path == "/" or parsed_path == "/overlay":
+        if parsed_path in ["/", "/overlay", "/divot", "/projector"]:
             self.serve_file(assets_dir / "overlay.html", "text/html; charset=utf-8")
-        elif parsed_path == "/config":
+        elif parsed_path in ["/config", "/config.html"]:
             self.serve_file(assets_dir / "config.html", "text/html; charset=utf-8")
         elif parsed_path == "/range":
             self.serve_file(assets_dir / "range" / "index.html", "text/html; charset=utf-8")

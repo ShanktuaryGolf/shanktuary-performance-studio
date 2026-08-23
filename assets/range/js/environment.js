@@ -50,6 +50,100 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     loadBackgroundMountains(scene);
 }
 
+function createDimpledBallGeometry(radius, detail = 48) {
+    const geometry = new THREE.SphereGeometry(radius, detail, detail);
+    const pos = geometry.attributes.position;
+    const colors = [];
+    
+    const N = 392;
+    const dimpleCenters = [];
+    for (let i = 0; i < N; i++) {
+        const z = 1.0 - (2.0 * i) / (N - 1);
+        const r = Math.sqrt(Math.max(0.0, 1.0 - z * z));
+        const theta = i * Math.PI * (3.0 - Math.sqrt(5.0));
+        const x = r * Math.cos(theta);
+        const y = r * Math.sin(theta);
+        dimpleCenters.push(new THREE.Vector3(x, y, z));
+    }
+    
+    const dimpleAngleThreshold = 0.088;
+    const maxDepressionDepth = radius * 0.12;
+    
+    const v = new THREE.Vector3();
+    const vNorm = new THREE.Vector3();
+    
+    for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        vNorm.copy(v).normalize();
+        
+        let minAngle = 999;
+        for (let j = 0; j < N; j++) {
+            const dot = Math.min(1.0, Math.max(-1.0, vNorm.dot(dimpleCenters[j])));
+            const angle = Math.acos(dot);
+            if (angle < minAngle) {
+                minAngle = angle;
+            }
+        }
+        
+        let ao = 1.0;
+        if (minAngle < dimpleAngleThreshold) {
+            const ratio = minAngle / dimpleAngleThreshold;
+            const depth = maxDepressionDepth * Math.pow(Math.cos(ratio * (Math.PI / 2)), 2);
+            v.sub(vNorm.multiplyScalar(depth));
+            pos.setXYZ(i, v.x, v.y, v.z);
+            ao = 0.76 + 0.24 * ratio;
+        }
+        
+        colors.push(ao, ao, ao);
+    }
+    
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
+function createGolfBallTexture() {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    
+    // Crisp glossy white cover
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, size, size);
+    
+    // Equator seam line (faint)
+    ctx.strokeStyle = 'rgba(210, 220, 230, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, size / 2);
+    ctx.lineTo(size, size / 2);
+    ctx.stroke();
+    
+    // Putting Alignment Arrow Stamp: ◄—— PRACTICE ——►
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('◄—— PRACTICE ——►', size / 2, size / 2 - 32);
+    
+    // Tournament Player Number (Red '1' in tour style)
+    ctx.fillStyle = '#dc2626';
+    ctx.font = 'bold 38px sans-serif';
+    ctx.fillText('1', size / 2, size / 2 + 28);
+    
+    // Secondary alignment dots
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath();
+    ctx.arc(size / 2 - 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
+    ctx.arc(size / 2 + 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
 function createTourHittingStation(scene) {
     const stationGroup = new THREE.Group();
     
@@ -73,34 +167,84 @@ function createTourHittingStation(scene) {
     rightRail.receiveShadow = true;
     stationGroup.add(rightRail);
     
-    // Tour Practice Ball Tray / Pyramid (Offset to the right, matching dr.jpg)
+    // Tour Practice Ball Pyramid (4-Tier Stacking with authentic Close-Packing Geometry)
+    const ballRadius = 0.043; // Standard golf ball radius ~42.7mm
+    const ballDiameter = ballRadius * 2;
+    const pyramidX = 1.15;
+    const pyramidZ = 0.40;
+    const trayY = 0.012;
+    
+    // 1. Tour Pyramid Tray (Matte Slate / Dark Metal Base)
+    const trayWidth = ballDiameter * 4 + 0.035;
+    const trayGeo = new THREE.BoxGeometry(trayWidth, 0.02, trayWidth);
+    const trayMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+    const tray = new THREE.Mesh(trayGeo, trayMat);
+    tray.position.set(pyramidX, trayY, pyramidZ);
+    tray.receiveShadow = true;
+    tray.castShadow = true;
+    stationGroup.add(tray);
+    
+    // Tray Beveled Inner Lip / Rim
+    const rimGeo = new THREE.BoxGeometry(trayWidth + 0.015, 0.028, trayWidth + 0.015);
+    const rimMat = new THREE.MeshStandardMaterial({
+        color: 0x0f172a,
+        roughness: 0.7,
+        metalness: 0.3
+    });
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.position.set(pyramidX, trayY + 0.004, pyramidZ);
+    stationGroup.add(rim);
+    
+    // 2. High-Detail Dimpled Golf Ball Geometry & Material
+    const ballGeo = createDimpledBallGeometry(ballRadius, 48);
+    const ballTex = createGolfBallTexture();
     const ballMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.3,
+        map: ballTex,
+        vertexColors: true,
+        roughness: 0.18,
         metalness: 0.05
     });
-    const ballGeo = new THREE.SphereGeometry(0.045, 12, 12);
     
-    const pyramidPositions = [
-        // Base Layer (3x3)
-        [0.98, 0.045, 0.4], [1.08, 0.045, 0.4], [1.18, 0.045, 0.4],
-        [0.98, 0.045, 0.5], [1.08, 0.045, 0.5], [1.18, 0.045, 0.5],
-        [0.98, 0.045, 0.6], [1.08, 0.045, 0.6], [1.18, 0.045, 0.6],
-        // Second Layer (2x2)
-        [1.03, 0.11, 0.45], [1.13, 0.11, 0.45],
-        [1.03, 0.11, 0.55], [1.13, 0.11, 0.55],
-        // Top Ball
-        [1.08, 0.17, 0.50],
-        // Loose balls nearby
-        [0.92, 0.045, 0.25], [1.22, 0.045, 0.28]
-    ];
+    // 3. Compute Close-Packed Stacking Coordinates (4x4 -> 3x3 -> 2x2 -> 1x1 = 30 balls)
+    const ballTransforms = [];
+    const layers = [4, 3, 2, 1];
+    const verticalStep = ballDiameter * 0.7071; // Close-packing vertical delta
     
-    pyramidPositions.forEach(p => {
-        const b = new THREE.Mesh(ballGeo, ballMat);
-        b.position.set(p[0], p[1], p[2]);
-        b.castShadow = true;
-        stationGroup.add(b);
+    layers.forEach((gridSize, layerIndex) => {
+        const layerY = trayY + 0.014 + ballRadius + layerIndex * verticalStep;
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                const posX = pyramidX + (i - (gridSize - 1) / 2) * ballDiameter;
+                const posZ = pyramidZ + (j - (gridSize - 1) / 2) * ballDiameter;
+                ballTransforms.push({ x: posX, y: layerY, z: posZ });
+            }
+        }
     });
+    
+    // 4. Instanced Mesh for all Balls (1 Single GPU Draw Call with Random Organic Rotations)
+    const instancedBalls = new THREE.InstancedMesh(ballGeo, ballMat, ballTransforms.length);
+    instancedBalls.castShadow = true;
+    instancedBalls.receiveShadow = true;
+    
+    const dummy = new THREE.Object3D();
+    ballTransforms.forEach((pos, idx) => {
+        dummy.position.set(pos.x, pos.y, pos.z);
+        // Realistic random 3D orientation for alignment stamps and numbers
+        dummy.rotation.set(
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2
+        );
+        dummy.updateMatrix();
+        instancedBalls.setMatrixAt(idx, dummy.matrix);
+    });
+    
+    instancedBalls.instanceMatrix.needsUpdate = true;
+    stationGroup.add(instancedBalls);
     
     scene.add(stationGroup);
 }

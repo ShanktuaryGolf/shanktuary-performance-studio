@@ -1,159 +1,181 @@
-// Realistic Multi-Layer 3D Foliage System (Pine, Maple, Birch & Dense Forest Undergrowth)
+// Realistic Perimeter Boundary Tree Wall (Fir, Birch & Maple 3D Models)
 
 export function setupFoliage(scene) {
     const treeGroup = new THREE.Group();
-    
-    // 1. Materials for Multi-Species Forest
-    const barkDarkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.95 });
-    const barkBirchMat = new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.85 });
-    
-    // Foliage Materials with realistic variation
-    const pineLeavesMat = new THREE.MeshStandardMaterial({ color: 0x1a3d1c, roughness: 0.8 });
-    const mapleLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e5c1e, roughness: 0.75 });
-    const birchLeavesMat = new THREE.MeshStandardMaterial({ color: 0x487a27, roughness: 0.75 });
-    const bushMat = new THREE.MeshStandardMaterial({ color: 0x244f19, roughness: 0.85 });
-    
-    // 2. Realistic 3D Tree Prototype Builders
-    function buildPineTree(scale) {
-        const group = new THREE.Group();
-        // Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.25 * scale, 0.45 * scale, 4 * scale, 8);
-        const trunk = new THREE.Mesh(trunkGeo, barkDarkMat);
-        trunk.position.y = 2 * scale;
-        trunk.castShadow = true;
-        group.add(trunk);
-        
-        // 4 Staggered Layered Needle Tiers
-        const tiers = [
-            { y: 3.2 * scale, r: 2.8 * scale, h: 3.0 * scale },
-            { y: 5.0 * scale, r: 2.2 * scale, h: 2.8 * scale },
-            { y: 6.8 * scale, r: 1.6 * scale, h: 2.4 * scale },
-            { y: 8.2 * scale, r: 0.9 * scale, h: 2.0 * scale }
-        ];
-        
-        tiers.forEach(t => {
-            const foliageGeo = new THREE.ConeGeometry(t.r, t.h, 7);
-            const foliage = new THREE.Mesh(foliageGeo, pineLeavesMat);
-            foliage.position.y = t.y;
-            foliage.castShadow = true;
-            group.add(foliage);
-        });
-        
-        return group;
-    }
-    
-    function buildMapleTree(scale) {
-        const group = new THREE.Group();
-        // Gnarled Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.35 * scale, 0.55 * scale, 4.5 * scale, 8);
-        const trunk = new THREE.Mesh(trunkGeo, barkDarkMat);
-        trunk.position.y = 2.25 * scale;
-        trunk.castShadow = true;
-        group.add(trunk);
-        
-        // Multi-Cluster Broadleaf Canopy
-        const canopyPositions = [
-            { x: 0, y: 5.2 * scale, z: 0, r: 2.5 * scale },
-            { x: 1.2 * scale, y: 4.8 * scale, z: 0.6 * scale, r: 1.9 * scale },
-            { x: -1.1 * scale, y: 4.6 * scale, z: -0.5 * scale, r: 1.8 * scale },
-            { x: 0.3 * scale, y: 6.3 * scale, z: -0.8 * scale, r: 1.7 * scale },
-            { x: -0.4 * scale, y: 5.8 * scale, z: 1.0 * scale, r: 1.6 * scale }
-        ];
-        
-        canopyPositions.forEach(c => {
-            const clusterGeo = new THREE.DodecahedronGeometry(c.r, 1);
-            const cluster = new THREE.Mesh(clusterGeo, mapleLeavesMat);
-            cluster.position.set(c.x, c.y, c.z);
-            cluster.castShadow = true;
-            group.add(cluster);
-        });
-        
-        return group;
-    }
-    
-    function buildBirchTree(scale) {
-        const group = new THREE.Group();
-        // Slender White Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.18 * scale, 0.28 * scale, 5 * scale, 8);
-        const trunk = new THREE.Mesh(trunkGeo, barkBirchMat);
-        trunk.position.y = 2.5 * scale;
-        trunk.castShadow = true;
-        group.add(trunk);
-        
-        // Weeping Birch Foliage Clusters
-        const clusters = [
-            { x: 0, y: 5.5 * scale, z: 0, r: 2.0 * scale },
-            { x: 0.8 * scale, y: 4.8 * scale, z: 0.4 * scale, r: 1.4 * scale },
-            { x: -0.7 * scale, y: 4.5 * scale, z: -0.3 * scale, r: 1.3 * scale },
-            { x: 0.2 * scale, y: 6.4 * scale, z: -0.5 * scale, r: 1.2 * scale }
-        ];
-        
-        clusters.forEach(c => {
-            const cGeo = new THREE.DodecahedronGeometry(c.r, 1);
-            const cMesh = new THREE.Mesh(cGeo, birchLeavesMat);
-            cMesh.position.set(c.x, c.y, c.z);
-            cMesh.castShadow = true;
-            group.add(cMesh);
-        });
-        
-        return group;
-    }
-    
-    function buildBushCluster(scale) {
-        const group = new THREE.Group();
-        const clusterCoords = [
-            { x: 0, y: 0.6 * scale, z: 0, r: 0.8 * scale },
-            { x: 0.5 * scale, y: 0.5 * scale, z: 0.3 * scale, r: 0.6 * scale },
-            { x: -0.4 * scale, y: 0.4 * scale, z: -0.2 * scale, r: 0.55 * scale }
-        ];
-        clusterCoords.forEach(c => {
-            const bGeo = new THREE.DodecahedronGeometry(c.r, 1);
-            const bMesh = new THREE.Mesh(bGeo, bushMat);
-            bMesh.position.set(c.x, c.y, c.z);
-            bMesh.castShadow = true;
-            group.add(bMesh);
-        });
-        return group;
-    }
-    
-    // 3. Populate Left & Right Tree Lines along Driving Range Perimeter
-    const treeTypes = [buildPineTree, buildMapleTree, buildBirchTree];
-    
-    // Left Boundary (X = -45 to -90, Z = +20 to -400)
-    for (let z = 20; z > -400; z -= 12) {
-        const xOffset = -42 - Math.random() * 30;
-        const scale = 0.85 + Math.random() * 0.45;
-        const typeIndex = Math.floor(Math.random() * treeTypes.length);
-        const tree = treeTypes[typeIndex](scale);
-        tree.position.set(xOffset, 0, z + (Math.random() * 6 - 3));
-        tree.rotation.y = Math.random() * Math.PI * 2;
-        treeGroup.add(tree);
-        
-        // Add Undergrowth Bush
-        if (Math.random() > 0.4) {
-            const bush = buildBushCluster(0.9 + Math.random() * 0.5);
-            bush.position.set(xOffset + (Math.random() * 6 - 3), 0, z + (Math.random() * 6 - 3));
-            treeGroup.add(bush);
-        }
-    }
-    
-    // Right Boundary (X = +45 to +90, Z = +20 to -400)
-    for (let z = 20; z > -400; z -= 12) {
-        const xOffset = 42 + Math.random() * 30;
-        const scale = 0.85 + Math.random() * 0.45;
-        const typeIndex = Math.floor(Math.random() * treeTypes.length);
-        const tree = treeTypes[typeIndex](scale);
-        tree.position.set(xOffset, 0, z + (Math.random() * 6 - 3));
-        tree.rotation.y = Math.random() * Math.PI * 2;
-        treeGroup.add(tree);
-        
-        // Add Undergrowth Bush
-        if (Math.random() > 0.4) {
-            const bush = buildBushCluster(0.9 + Math.random() * 0.5);
-            bush.position.set(xOffset + (Math.random() * 6 - 3), 0, z + (Math.random() * 6 - 3));
-            treeGroup.add(bush);
-        }
-    }
-    
     scene.add(treeGroup);
+
+    // List of Sketchfab Tree Model Packs
+    const modelSources = [
+        {
+            url: '/range/models/trees/realistic_fir_trees_pack_lods_gameready.glb',
+            targetHeight: 14.0,
+            extract: (gltf) => {
+                const candidates = [];
+                gltf.scene.traverse(child => {
+                    if (child.name && (child.name.includes('Christmas tree_LOD0') || child.name.includes('Christmas tree_2_LOD0') || child.name.includes('Christmas tree_3_LOD0') || child.name.includes('Christmas tree_LOD1'))) {
+                        candidates.push(child);
+                    }
+                });
+                return candidates.length > 0 ? candidates : [gltf.scene];
+            }
+        },
+        {
+            url: '/range/models/trees/five_birch_trees_pack_lowpoly_lods.glb',
+            targetHeight: 12.0,
+            extract: (gltf) => {
+                const candidates = [];
+                gltf.scene.traverse(child => {
+                    if (child.name && child.name.startsWith('Birch ') && !child.name.includes('LOD')) {
+                        candidates.push(child);
+                    }
+                });
+                return candidates.length > 0 ? candidates : [gltf.scene];
+            }
+        },
+        {
+            url: '/range/models/trees/maple_trees_pack_lowpoly_game_ready_lods.glb',
+            targetHeight: 11.0,
+            extract: (gltf) => {
+                const candidates = [];
+                gltf.scene.traverse(child => {
+                    if (child.name && (child.name.includes('Acer_large_1') || child.name.includes('Acer_large_2') || child.name.includes('Acer_medium_1') || child.name.includes('Acer_small_1')) && !child.name.includes('Billboard')) {
+                        candidates.push(child);
+                    }
+                });
+                return candidates.length > 0 ? candidates : [gltf.scene];
+            }
+        }
+    ];
+
+    const treePrototypes = [];
+
+    function normalizePrototype(node, targetHeight) {
+        const cloned = node.clone(true);
+        
+        // 1. Ensure two-sided materials and shadows
+        cloned.traverse(child => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                if (child.material) {
+                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                    mats.forEach(m => {
+                        m.side = THREE.DoubleSide;
+                        m.shadowSide = THREE.DoubleSide;
+                        if (m.roughness !== undefined) {
+                            m.roughness = Math.max(0.75, m.roughness);
+                        }
+                    });
+                }
+            }
+        });
+
+        // 2. Compute bounding box and fix orientation if height was modeled on Z axis
+        let box = new THREE.Box3().setFromObject(cloned);
+        let size = box.getSize(new THREE.Vector3());
+
+        if (size.z > size.y * 1.4) {
+            // Up-axis is Z (e.g. from 3ds Max / Blender raw FBX) -> rotate to +Y
+            cloned.rotation.x = -Math.PI / 2;
+            box = new THREE.Box3().setFromObject(cloned);
+            size = box.getSize(new THREE.Vector3());
+        } else if (box.max.y <= 0.05 && box.min.y < -1) {
+            // Inverted Y -> rotate upright
+            cloned.rotation.x = Math.PI;
+            box = new THREE.Box3().setFromObject(cloned);
+            size = box.getSize(new THREE.Vector3());
+        }
+
+        const center = box.getCenter(new THREE.Vector3());
+        const currentHeight = size.y > 0.5 ? size.y : targetHeight;
+        const scaleFactor = targetHeight / currentHeight;
+
+        // 3. Anchor wrapper: Bottom of trunk at Y=0, centered at (0,0) in X/Z
+        const wrapper = new THREE.Group();
+        cloned.position.set(-center.x, -box.min.y, -center.z);
+        wrapper.add(cloned);
+        wrapper.scale.set(scaleFactor, scaleFactor, scaleFactor);
+        return wrapper;
+    }
+
+    function populateOuterBoundaryWalls() {
+        if (treePrototypes.length === 0) return;
+        
+        console.log(`[+] Building Outer Boundary Tree Walls (reduced count, 180yd center corridor clear)...`);
+        
+        // 1. Left Outer Boundary Wall (X: -95 to -145, Z: +20 to -450, stride: 18yd)
+        for (let z = 20; z > -450; z -= 18) {
+            const count = 1 + (Math.random() > 0.5 ? 1 : 0);
+            for (let r = 0; r < count; r++) {
+                const xOffset = -95 - (r * 22) - Math.random() * 18;
+                const proto = treePrototypes[Math.floor(Math.random() * treePrototypes.length)];
+                const instance = proto.clone(true);
+                const s = 0.85 + Math.random() * 0.35;
+                instance.scale.multiplyScalar(s);
+                instance.position.set(xOffset, 0, z + (Math.random() * 8 - 4));
+                instance.rotation.y = Math.random() * Math.PI * 2;
+                treeGroup.add(instance);
+            }
+        }
+
+        // 2. Right Outer Boundary Wall (X: +95 to +145, Z: +20 to -450, stride: 18yd)
+        for (let z = 20; z > -450; z -= 18) {
+            const count = 1 + (Math.random() > 0.5 ? 1 : 0);
+            for (let r = 0; r < count; r++) {
+                const xOffset = 95 + (r * 22) + Math.random() * 18;
+                const proto = treePrototypes[Math.floor(Math.random() * treePrototypes.length)];
+                const instance = proto.clone(true);
+                const s = 0.85 + Math.random() * 0.35;
+                instance.scale.multiplyScalar(s);
+                instance.position.set(xOffset, 0, z + (Math.random() * 8 - 4));
+                instance.rotation.y = Math.random() * Math.PI * 2;
+                treeGroup.add(instance);
+            }
+        }
+
+        // 3. Deep Mountain Base Boundary (Z: -450 to -480, strictly outside center view |X| > 85)
+        for (let x = -160; x <= 160; x += 18) {
+            if (Math.abs(x) < 85) continue; // Keep 170yd center fairway and all target flags 100% unobstructed
+            const proto = treePrototypes[Math.floor(Math.random() * treePrototypes.length)];
+            const instance = proto.clone(true);
+            const s = 1.0 + Math.random() * 0.5;
+            instance.scale.multiplyScalar(s);
+            instance.position.set(x + (Math.random() * 6 - 3), 0, -450 - Math.random() * 30);
+            instance.rotation.y = Math.random() * Math.PI * 2;
+            treeGroup.add(instance);
+        }
+    }
+
+    if (typeof THREE.GLTFLoader === 'function') {
+        const loader = new THREE.GLTFLoader();
+        let loadedPacks = 0;
+
+        modelSources.forEach(source => {
+            loader.load(
+                source.url,
+                (gltf) => {
+                    const extractedNodes = source.extract(gltf);
+                    extractedNodes.forEach(node => {
+                        const normalized = normalizePrototype(node, source.targetHeight);
+                        treePrototypes.push(normalized);
+                    });
+                    loadedPacks++;
+                    if (loadedPacks === modelSources.length) {
+                        populateOuterBoundaryWalls();
+                    }
+                },
+                undefined,
+                (err) => {
+                    console.warn(`[!] Failed loading tree model from ${source.url}:`, err);
+                    loadedPacks++;
+                    if (loadedPacks === modelSources.length && treePrototypes.length > 0) {
+                        populateOuterBoundaryWalls();
+                    }
+                }
+            );
+        });
+    }
 }
+
+
+
