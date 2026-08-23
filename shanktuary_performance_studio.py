@@ -23,6 +23,7 @@ Controls:
 import socket
 import base64
 import os
+import sys
 import struct
 import json
 import time
@@ -1916,7 +1917,7 @@ class ShanktuaryApp:
 
         # 2. Segmented Mode Pills (Center between status box and right utility buttons)
         mode_tabs = [
-            (1, "Delivery"),
+            (1, "Quad View"),
             (2, "3D Range"),
             (3, "Dispersion"),
             (4, "Table"),
