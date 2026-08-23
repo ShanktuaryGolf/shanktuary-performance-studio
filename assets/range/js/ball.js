@@ -132,17 +132,36 @@ export class GolfBall {
     canvas.height = size;
     const ctx = canvas.getContext('2d');
     
-    ctx.fillStyle = '#ffffff';
+    // Crisp glossy white cover
+    ctx.fillStyle = '#f8fafc';
     ctx.fillRect(0, 0, size, size);
     
-    ctx.fillStyle = '#111111';
-    ctx.fillRect(size / 2 - 3, 0, 6, size);
+    // Equator seam line (faint)
+    ctx.strokeStyle = 'rgba(210, 220, 230, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, size / 2);
+    ctx.lineTo(size, size / 2);
+    ctx.stroke();
     
-    ctx.fillStyle = '#e11d48';
-    ctx.font = 'bold 44px sans-serif';
+    // Tour Putting Alignment Stamp: ◄—— PRO V1 ——►
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 22px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('1', size / 2 + 50, size / 2);
+    ctx.fillText('◄—— PRO V1 ——►', size / 2, size / 2 - 32);
+    
+    // Tournament Player Number
+    ctx.fillStyle = '#dc2626';
+    ctx.font = 'bold 38px sans-serif';
+    ctx.fillText('1', size / 2, size / 2 + 28);
+    
+    // Secondary alignment dots
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath();
+    ctx.arc(size / 2 - 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
+    ctx.arc(size / 2 + 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
+    ctx.fill();
     
     const texture = new THREE.CanvasTexture(canvas);
     return texture;

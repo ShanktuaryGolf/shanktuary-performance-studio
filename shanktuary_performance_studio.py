@@ -30,6 +30,7 @@ import math
 import threading
 import queue
 import webbrowser
+from datetime import datetime
 import tkinter as tk
 from PIL import Image, ImageTk, ImageDraw, ImageOps
 import obs_server
@@ -38,10 +39,58 @@ import obs_server
 FALLBACK_NOVA_HOST = "192.168.40.249"
 FALLBACK_NOVA_PORT = 2920
 
-SESSION_LOG_PATH = "/home/sean/shanktuary_session_history.json"
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    DATA_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = BUNDLE_DIR
+
+SCRIPT_DIR = BUNDLE_DIR
+SESSION_LOG_PATH = os.path.join(DATA_DIR, "shanktuary_session_history.json")
+
+DEFAULT_CLUBS = ["Driver", "3 Wood", "5 Wood", "3 Hybrid", "4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "GW", "SW", "LW", "Putter"]
+
+BAG_CATEGORIES = [
+    "Woods & Drivers",
+    "Hybrids & Utilities",
+    "Irons",
+    "Wedges",
+    "Putter"
+]
+
+DEFAULT_BAG = [
+    {"name": "Driver", "category": "Woods & Drivers", "brand": "Generic", "model": "Driver", "loft_deg": 10.5, "shaft": "Stiff"},
+    {"name": "3 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 15.0, "shaft": "Stiff"},
+    {"name": "5 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 18.0, "shaft": "Stiff"},
+    {"name": "3 Hybrid", "category": "Hybrids & Utilities", "brand": "Generic", "model": "Hybrid", "loft_deg": 19.0, "shaft": "Stiff"},
+    {"name": "4 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 21.0, "shaft": "Steel S"},
+    {"name": "5 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 24.0, "shaft": "Steel S"},
+    {"name": "6 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 27.0, "shaft": "Steel S"},
+    {"name": "7 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 31.0, "shaft": "Steel S"},
+    {"name": "8 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 35.0, "shaft": "Steel S"},
+    {"name": "9 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 40.0, "shaft": "Steel S"},
+    {"name": "PW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 45.0, "shaft": "Wedge Flex"},
+    {"name": "GW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 50.0, "shaft": "Wedge Flex"},
+    {"name": "SW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 54.0, "shaft": "Wedge Flex"},
+    {"name": "LW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 58.0, "shaft": "Wedge Flex"},
+    {"name": "Putter", "category": "Putter", "brand": "Generic", "model": "Blade", "loft_deg": 3.0, "shaft": "Standard"}
+]
+
+def infer_club_category(club_name):
+    name_lower = club_name.lower()
+    if "putter" in name_lower or "blade" in name_lower or "mallet" in name_lower:
+        return "Putter"
+    elif "driver" in name_lower or "wood" in name_lower or "mini" in name_lower:
+        return "Woods & Drivers"
+    elif "hybrid" in name_lower or "rescue" in name_lower or "utility" in name_lower or "driving iron" in name_lower:
+        return "Hybrids & Utilities"
+    elif any(w in name_lower for w in ["pw", "gw", "sw", "lw", "wedge", "°", "deg", "pitching", "gap", "sand", "lob"]):
+        return "Wedges"
+    else:
+        return "Irons"
 
 # Club Image Assets
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OVERHEAD_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_overhead.png")
 FACE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_face.png")
 SIDE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_side.png")
@@ -214,51 +263,266 @@ class ShanktuaryApp:
         self.fullscreen = False
         self.view_mode = 1  # 1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite
 
-        self.session_shots = []
+        # Multi-Session & Shot Management (Nova & Uneekor style)
+        self.sessions = [
+            {
+                "id": f"sess_{int(time.time())}",
+                "name": "Session 1 - 7 Iron",
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "shots": []
+            }
+        ]
+        self.active_session_index = 0
         self.selected_shot_index = -1
-        self.sidebar_width = 250  # User resizable sidebar width
-        self.is_dragging_sidebar = False
+        self.club_filter = "ALL"  # "ALL" or specific club like "7 Iron"
+        self.sidebar_collapsed = False
+        self.sidebar_width = 270
+        self.sidebar_scroll_offset = 0
 
-        # Hit testing regions for clicks in Mode 3
-        self.shot_list_item_rects = [] # (y1, y2, index)
-        self.land_dot_coords = [] # (x, y, index)
-        self.inspect_btn_rect = None # (x1, y1, x2, y2)
-        self.clear_btn_rect = None # (x1, y1, x2, y2)
-        self.btn_3d_range_rect = None # (x1, y1, x2, y2)
+        # Bag Club Management
+        self.clubs = list(DEFAULT_CLUBS)
+        self.current_club = "7 Iron"
+        
+        # Overlay & Dropdown states
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
+        self.show_club_menu = False
+        self.show_tools_menu = False
+        self.copy_feedback = None
+        self.nova_connected = False
+
+        # Hit testing regions for top header & interactive menus
+        self.sidebar_toggle_rect = None       # Hamburger [ ☰ ] or collapse [ ◀ ]
+        self.sidebar_session_btn_rect = None  # [ 📂 Session Name ▼ ]
+        self.sidebar_rename_sess_btn_rect = None # [ ✏️ ]
+        self.sidebar_new_sess_btn_rect = None # [ ＋ ]
+        self.sidebar_filter_btn_rect = None   # [ 🎯 Filter: All Clubs ▼ ]
+        self.sidebar_clear_btn_rect = None    # [ 🗑️ Clear Session ]
+        self.sidebar_shot_card_rects = []     # (x1, y1, x2, y2, shot_idx_in_session)
+        self.session_menu_items = []          # (x1, y1, x2, y2, sess_idx)
+        self.filter_menu_items = []           # (x1, y1, x2, y2, club_name)
+
+        self.mode_pill_rects = {}             # mode_id -> (x1, y1, x2, y2)
+        self.club_btn_rect = None             # (x1, y1, x2, y2)
+        self.tools_btn_rect = None            # (x1, y1, x2, y2)
+        self.fullscreen_btn_rect = None       # (x1, y1, x2, y2)
+        self.club_menu_items = []             # (x1, y1, x2, y2, club_name)
+        self.tools_menu_items = []            # (x1, y1, x2, y2, action_key)
+        self.land_dot_coords = []             # (x, y, index)
+
+        # Mode 4: Table Viewport State
+        self.table_sort_col = "index"
+        self.table_sort_asc = True
+        self.table_scroll_offset = 0
+        self.table_row_rects = []             # (x1, y1, x2, y2, shot_idx)
+        self.table_header_rects = []          # (x1, y1, x2, y2, col_key)
+        self.table_checkbox_rects = []        # (x1, y1, x2, y2, shot_idx)
+
+        # Mode 3: Dispersion Viewport State
+        self.dispersion_selected_club = "ALL"
+        self.dispersion_view_submode = "split" # "split", "topdown", "side"
+        self.dispersion_submode_rects = []     # (x1, y1, x2, y2, submode_key)
+        self.dispersion_club_chip_rects = []  # (x1, y1, x2, y2, club_name)
+        self.dispersion_dot_rects = []        # (x, y, shot_idx)
+        self.dispersion_splitter_ratio = 0.62 # Proportion for left charts (0.25 to 0.85)
+        self.dispersion_splitter_dragging = False
+        self.dispersion_splitter_rect = None  # (x1, y1, x2, y2)
+
+        # In-Canvas Custom Club Modal State
+        self.show_custom_club_modal = False
+        self.custom_club_input_text = ""
+        self.custom_club_modal_box_rect = None
+        self.custom_club_modal_add_rect = None
+        self.custom_club_modal_cancel_rect = None
+
+        # Mode 6: My Bag Viewport State
+        self.bag = []
+        self.bag_scope = "session"            # "session" or "all_time"
+        self.bag_scroll_offset = 0
+        self.bag_scope_session_rect = None
+        self.bag_scope_all_rect = None
+        self.bag_add_club_btn_rect = None
+        self.bag_club_card_rects = []         # (x1, y1, x2, y2, club_name)
+        self.bag_edit_btn_rects = []          # (x1, y1, x2, y2, club_name)
+        self.bag_move_up_rects = []           # (x1, y1, x2, y2, club_name)
+        self.bag_move_down_rects = []         # (x1, y1, x2, y2, club_name)
+
+        # In-Canvas Spec Editor Modal State
+        self.show_spec_editor_modal = False
+        self.spec_editor_orig_name = ""
+        self.spec_editor_club_name = ""
+        self.spec_editor_category = "Irons"
+        self.spec_editor_brand = ""
+        self.spec_editor_model = ""
+        self.spec_editor_loft = ""
+        self.spec_editor_shaft = ""
+        self.spec_editor_active_field = "brand" # "name", "category", "brand", "model", "loft", "shaft"
+        self.spec_editor_box_rect = None
+        self.spec_editor_save_rect = None
+        self.spec_editor_delete_rect = None
+        self.spec_editor_cancel_rect = None
+        self.spec_editor_cat_chips = []       # (x1, y1, x2, y2, cat_name)
+        self.spec_editor_field_rects = {}     # field_name -> (x1, y1, x2, y2)
+
+        # Mode 2: 3D Range Viewport State
+        self.range_launch_web_rect = None
 
         # Load Assets
-        self.overhead_img = load_image_asset(OVERHEAD_PATH, target_h=210, mirror=True)
-        self.face_img = load_image_asset(FACE_PATH, target_h=140, mirror=False)
-        self.side_img = load_image_asset(SIDE_PATH, target_h=150, mirror=False)
+        self.overhead_img = load_image_asset(OVERHEAD_PATH, target_h=150, mirror=True)
+        self.face_img = load_image_asset(FACE_PATH, target_h=115, mirror=False)
+        self.side_img = load_image_asset(SIDE_PATH, target_h=110, mirror=False)
 
         self.img_cache = {}
 
         self.canvas = tk.Canvas(root, bg="#101114", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Keybindings
-        self.root.bind("<Escape>", lambda e: self.root.destroy())
-        self.root.bind("<F11>", self.toggle_fullscreen)
-        self.root.bind("<f>", self.toggle_fullscreen)
-        self.root.bind("<m>", self.cycle_mode)
-        self.root.bind("<M>", self.cycle_mode)
-        self.root.bind("<Tab>", self.cycle_mode)
-        self.root.bind("1", lambda e: self.set_mode(1))
-        self.root.bind("2", lambda e: self.set_mode(2))
-        self.root.bind("3", lambda e: self.set_mode(3))
-        self.root.bind("4", lambda e: self.launch_3d_range())
-        self.root.bind("<c>", lambda e: self.clear_session())
-        self.root.bind("<C>", lambda e: self.clear_session())
+        # Centralized Keyboard Handler (Modal & Global Hotkeys)
+        self.root.bind("<Key>", self.handle_key_press)
 
-        # Mouse Events for Sidebar Resizing & Selection Clicks
+        # Mouse & Scroll Events
         self.canvas.bind("<Motion>", self.handle_mouse_hover)
         self.canvas.bind("<Button-1>", self.handle_mouse_press)
         self.canvas.bind("<B1-Motion>", self.handle_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.handle_mouse_release)
+        self.canvas.bind("<MouseWheel>", self.handle_mouse_wheel)
+        self.canvas.bind("<Button-4>", lambda e: self.handle_scroll_delta(-1))
+        self.canvas.bind("<Button-5>", lambda e: self.handle_scroll_delta(1))
         self.canvas.bind("<Configure>", lambda e: self.draw_screen())
 
         self.current_shot = None
+        self.load_session_history()
         self.root.after(100, self.poll_queue)
+
+    def get_active_session(self):
+        if not self.sessions:
+            self.create_new_session("Default Session")
+        if self.active_session_index >= len(self.sessions):
+            self.active_session_index = max(0, len(self.sessions) - 1)
+        return self.sessions[self.active_session_index]
+
+    @property
+    def session_shots(self):
+        return self.get_active_session().get("shots", [])
+
+    def get_filtered_shots(self):
+        """Returns list of (shot_idx_in_session, shot_dict) matching active club filter."""
+        shots = self.session_shots
+        if self.club_filter == "ALL":
+            return list(enumerate(shots))
+        return [(idx, s) for idx, s in enumerate(shots) if s.get("club") == self.club_filter]
+
+    def create_new_session(self, name=None):
+        idx = len(self.sessions) + 1
+        if not name:
+            name = f"Session {idx} - {self.current_club}"
+        new_sess = {
+            "id": f"sess_{int(time.time())}_{idx}",
+            "name": name,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "shots": []
+        }
+        self.sessions.append(new_sess)
+        self.active_session_index = len(self.sessions) - 1
+        self.selected_shot_index = -1
+        self.current_shot = None
+        self.show_session_dropdown = False
+        self.save_session_to_file()
+        self.draw_screen()
+
+    def rename_active_session(self, new_name=None):
+        sess = self.get_active_session()
+        if not sess:
+            return
+        if new_name is None:
+            curr = sess.get("name", "Session")
+            try:
+                from tkinter import simpledialog
+                res = simpledialog.askstring("Rename Session", "Enter new name for active session:", initialvalue=curr, parent=self.root)
+                if res is not None and res.strip():
+                    new_name = res.strip()
+                else:
+                    return
+            except Exception as e:
+                print(f"[!] Simpledialog failed: {e}")
+                return
+
+        sess["name"] = new_name
+        self.show_session_dropdown = False
+        self.save_session_to_file()
+        self.copy_feedback = f"Renamed to '{new_name}'"
+        self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def switch_session(self, session_idx):
+        if 0 <= session_idx < len(self.sessions):
+            self.active_session_index = session_idx
+            shots = self.session_shots
+            if shots:
+                self.selected_shot_index = len(shots) - 1
+                self.current_shot = shots[-1]
+            else:
+                self.selected_shot_index = -1
+                self.current_shot = None
+            self.show_session_dropdown = False
+            self.draw_screen()
+
+    def clear_session(self):
+        sess = self.get_active_session()
+        sess["shots"].clear()
+        self.current_shot = None
+        self.selected_shot_index = -1
+        self.save_session_to_file()
+        self.draw_screen()
+
+    def toggle_sidebar(self):
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
+        self.draw_screen()
+
+    def handle_mouse_wheel(self, event):
+        delta = -1 if event.delta > 0 else 1
+        self.handle_scroll_delta(delta, mouse_x=event.x)
+
+    def handle_scroll_delta(self, delta, mouse_x=None):
+        if mouse_x is None:
+            mouse_x = self.canvas.winfo_pointerx() - self.canvas.winfo_rootx() if self.canvas.winfo_exists() else 0
+        
+        # If hovering over sidebar
+        if not self.sidebar_collapsed and mouse_x <= self.sidebar_width:
+            self.scroll_sidebar(delta)
+        elif self.view_mode == 4: # Table view
+            max_offset = max(0, len(self.session_shots) - 8)
+            self.table_scroll_offset = max(0, min(max_offset, self.table_scroll_offset + delta))
+            self.draw_screen()
+        elif self.view_mode == 6: # My Bag view
+            max_offset = max(0, len(self.bag) * 72 - 300)
+            self.bag_scroll_offset = max(0, min(max_offset, self.bag_scroll_offset + delta * 30))
+            self.draw_screen()
+        else:
+            self.scroll_sidebar(delta)
+
+    def scroll_sidebar(self, delta):
+        filtered_count = len(self.get_filtered_shots())
+        max_offset = max(0, filtered_count - 3)
+        self.sidebar_scroll_offset = max(0, min(max_offset, self.sidebar_scroll_offset + delta))
+        self.draw_screen()
+
+    def copy_to_clipboard(self, text):
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()
+            self.copy_feedback = "Copied to clipboard!"
+            self.root.after(2000, self.clear_copy_feedback)
+            self.draw_screen()
+        except Exception as e:
+            print(f"[!] Clipboard error: {e}")
+
+    def clear_copy_feedback(self):
+        self.copy_feedback = None
+        self.draw_screen()
 
     def toggle_fullscreen(self, event=None):
         self.fullscreen = not self.fullscreen
@@ -266,35 +530,657 @@ class ShanktuaryApp:
         self.draw_screen()
 
     def cycle_mode(self, event=None):
-        self.view_mode = (self.view_mode % 3) + 1
-        self.draw_screen()
+        next_mode = self.view_mode + 1
+        if next_mode > 6 or next_mode < 1:
+            next_mode = 1
+        self.set_mode(next_mode)
 
     def set_mode(self, mode):
         self.view_mode = mode
         self.draw_screen()
 
-    def clear_session(self):
-        self.current_shot = None
-        self.session_shots.clear()
-        self.selected_shot_index = -1
-        self.draw_screen()
-
     def launch_3d_range(self, event=None):
         webbrowser.open("http://localhost:9321/range")
 
+    def load_session_history(self):
+        if not os.path.exists(SESSION_LOG_PATH):
+            if not self.bag:
+                self.init_default_bag()
+            return
+        try:
+            with open(SESSION_LOG_PATH, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                if data:
+                    self.sessions = data
+            elif isinstance(data, dict):
+                loaded_sess = data.get("sessions", [])
+                if loaded_sess:
+                    self.sessions = loaded_sess
+                loaded_bag = data.get("bag", [])
+                if loaded_bag:
+                    self.bag = loaded_bag
+                for c in data.get("custom_clubs", []):
+                    if c and c not in self.clubs:
+                        self.clubs.append(c)
+            if not self.bag:
+                self.init_default_bag()
+            for club_item in self.bag:
+                c_name = club_item.get("name")
+                if c_name and c_name not in self.clubs:
+                    self.clubs.append(c_name)
+        except Exception as e:
+            print(f"[!] Error loading session history: {e}")
+            if not self.bag:
+                self.init_default_bag()
+
     def save_session_to_file(self):
         try:
+            custom_clubs = [c for c in self.clubs if c not in DEFAULT_CLUBS]
+            payload = {
+                "sessions": self.sessions,
+                "custom_clubs": custom_clubs,
+                "bag": self.bag
+            }
             with open(SESSION_LOG_PATH, "w") as f:
-                json.dump(self.session_shots, f, indent=2)
+                json.dump(payload, f, indent=2)
         except Exception as e:
             print(f"[!] Error saving session: {e}")
+
+    def init_default_bag(self):
+        self.bag = [dict(c) for c in DEFAULT_BAG]
+
+    def get_bag_club(self, club_name):
+        for c in self.bag:
+            if c.get("name") == club_name:
+                return c
+        return None
+
+    def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None):
+        c = self.get_bag_club(club_name)
+        if c:
+            if brand is not None: c["brand"] = str(brand)
+            if model is not None: c["model"] = str(model)
+            if loft_deg is not None:
+                try:
+                    c["loft_deg"] = float(loft_deg)
+                except (ValueError, TypeError):
+                    c["loft_deg"] = 0.0
+            if shaft is not None: c["shaft"] = str(shaft)
+            if category is not None: c["category"] = str(category)
+            if new_name is not None and new_name.strip():
+                clean_name = new_name.strip()
+                old_name = c["name"]
+                c["name"] = clean_name
+                if old_name in self.clubs:
+                    self.clubs[self.clubs.index(old_name)] = clean_name
+                elif clean_name not in self.clubs:
+                    self.clubs.append(clean_name)
+                if self.current_club == old_name:
+                    self.current_club = clean_name
+            self.save_session_to_file()
+            self.draw_screen()
+
+    def add_club_to_bag(self, name, category=None, brand="", model="", loft_deg=0.0, shaft=""):
+        clean_name = name.strip() if name else ""
+        if not clean_name:
+            return
+        if not category:
+            category = infer_club_category(clean_name)
+        try:
+            loft_val = float(loft_deg) if loft_deg else 0.0
+        except (ValueError, TypeError):
+            loft_val = 0.0
+
+        existing = self.get_bag_club(clean_name)
+        if existing:
+            self.update_club_specs(clean_name, brand=brand, model=model, loft_deg=loft_val, shaft=shaft, category=category)
+            return
+        club_dict = {
+            "name": clean_name,
+            "category": category,
+            "brand": brand,
+            "model": model,
+            "loft_deg": loft_val,
+            "shaft": shaft
+        }
+        self.bag.append(club_dict)
+        if clean_name not in self.clubs:
+            self.clubs.append(clean_name)
+        self.current_club = clean_name
+        self.save_session_to_file()
+        self.copy_feedback = f"✓ Added {clean_name} to Bag"
+        self.root.after(2500, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def remove_club_from_bag(self, club_name):
+        self.bag = [c for c in self.bag if c.get("name") != club_name]
+        if self.current_club == club_name:
+            if self.bag:
+                self.current_club = self.bag[0].get("name", "Driver")
+            elif self.clubs:
+                self.current_club = self.clubs[0]
+        self.save_session_to_file()
+        self.copy_feedback = f"✓ Removed {club_name}"
+        self.root.after(2500, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def reorder_bag_club(self, club_name, direction="up"):
+        idx = next((i for i, c in enumerate(self.bag) if c.get("name") == club_name), -1)
+        if idx == -1:
+            return
+        if direction == "up" and idx > 0:
+            self.bag[idx], self.bag[idx - 1] = self.bag[idx - 1], self.bag[idx]
+        elif direction == "down" and idx < len(self.bag) - 1:
+            self.bag[idx], self.bag[idx + 1] = self.bag[idx + 1], self.bag[idx]
+        self.save_session_to_file()
+        self.draw_screen()
+
+    def set_bag_scope(self, scope):
+        if scope in ("session", "all_time"):
+            self.bag_scope = scope
+            self.draw_screen()
+
+    def get_bag_club_stats(self, club_name, scope="session"):
+        if scope == "session":
+            shots = [s for s in self.session_shots if s.get("club") == club_name and not s.get("excluded", False)]
+        else:
+            shots = []
+            for sess in self.sessions:
+                for s in sess.get("shots", []):
+                    if s.get("club") == club_name and not s.get("excluded", False):
+                        shots.append(s)
+        
+        count = len(shots)
+        if count == 0:
+            return {
+                "shot_count": 0,
+                "avg_carry": 0.0, "min_carry": 0.0, "max_carry": 0.0, "std_carry": 0.0,
+                "avg_total": 0.0,
+                "avg_ball_speed": 0.0, "avg_club_speed": 0.0,
+                "avg_smash": 0.0,
+                "avg_launch": 0.0,
+                "avg_spin": 0.0,
+                "avg_offline": 0.0
+            }
+        
+        carries = [float(s.get("carry", 0.0)) for s in shots]
+        totals = [float(s.get("total", 0.0)) for s in shots]
+        bspeeds = [float(s.get("ball_speed", 0.0)) for s in shots]
+        cspeeds = [float(s.get("club_speed", 0.0)) for s in shots]
+        smashes = [float(s.get("smash", 0.0)) for s in shots]
+        launches = [float(s.get("launch_angle", 0.0)) for s in shots]
+        spins = [float(s.get("total_spin", 0.0)) for s in shots]
+        offlines = [float(s.get("offline", 0.0)) for s in shots]
+
+        avg_c = sum(carries) / count
+        min_c = min(carries)
+        max_c = max(carries)
+        std_c = (sum((x - avg_c) ** 2 for x in carries) / count) ** 0.5 if count > 1 else 0.0
+
+        return {
+            "shot_count": count,
+            "avg_carry": avg_c,
+            "min_carry": min_c,
+            "max_carry": max_c,
+            "std_carry": std_c,
+            "avg_total": sum(totals) / count,
+            "avg_ball_speed": sum(bspeeds) / count,
+            "avg_club_speed": sum(cspeeds) / count,
+            "avg_smash": sum(smashes) / count,
+            "avg_launch": sum(launches) / count,
+            "avg_spin": sum(spins) / count,
+            "avg_offline": sum(offlines) / count
+        }
+
+    def calculate_bag_gapping(self, scope="session"):
+        club_stats_list = []
+        for c in self.bag:
+            name = c.get("name")
+            stats = self.get_bag_club_stats(name, scope=scope)
+            if stats["shot_count"] > 0:
+                club_stats_list.append({
+                    "name": name,
+                    "category": c.get("category", "Irons"),
+                    "color": self.get_club_color(name),
+                    "loft_deg": c.get("loft_deg", 0.0),
+                    **stats
+                })
+        
+        # Sort descending by carry distance
+        club_stats_list.sort(key=lambda x: x["avg_carry"], reverse=True)
+
+        steps = []
+        for i in range(len(club_stats_list) - 1):
+            upper = club_stats_list[i]
+            lower = club_stats_list[i + 1]
+            delta = upper["avg_carry"] - lower["avg_carry"]
+            
+            # Classification
+            if delta < 7.0:
+                status = "collision"
+                status_text = f"Collision ({delta:.1f}y)"
+                color = "#FF3366"
+            elif delta > 18.0:
+                status = "wide"
+                status_text = f"Wide Gap (+{delta:.1f}y)"
+                color = "#FFCC00"
+            else:
+                status = "healthy"
+                status_text = f"+{delta:.1f}y gap"
+                color = "#00FF66"
+            
+            steps.append({
+                "from_club": upper["name"],
+                "to_club": lower["name"],
+                "delta": delta,
+                "status": status,
+                "status_text": status_text,
+                "color": color
+            })
+
+        # Calculate consistency grade
+        if len(steps) >= 3:
+            deltas = [s["delta"] for s in steps]
+            mean_gap = sum(deltas) / len(deltas)
+            var_gap = sum((d - mean_gap) ** 2 for d in deltas) / len(deltas)
+            std_gap = var_gap ** 0.5
+            if std_gap <= 3.5:
+                grade = "A (Optimal Gapping)"
+                grade_color = "#00FF66"
+            elif std_gap <= 6.0:
+                grade = "B (Good Gapping)"
+                grade_color = "#00E5FF"
+            elif std_gap <= 9.0:
+                grade = "C (Variable Gapping)"
+                grade_color = "#FFCC00"
+            else:
+                grade = "D (Irregular Steps)"
+                grade_color = "#FF3366"
+        else:
+            mean_gap = sum(s["delta"] for s in steps) / len(steps) if steps else 0.0
+            grade = "Insufficient Data"
+            grade_color = "#8E94A5"
+
+        return {
+            "clubs": club_stats_list,
+            "steps": steps,
+            "mean_gap": mean_gap,
+            "consistency_grade": grade,
+            "consistency_color": grade_color
+        }
+
+    def open_custom_club_modal(self):
+        self.show_club_menu = False
+        self.show_tools_menu = False
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
+        self.custom_club_input_text = ""
+        self.show_custom_club_modal = True
+        self.draw_screen()
+
+    def draw_custom_club_modal(self, w, h):
+        # 1. Semi-transparent dark overlay
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="", stipple="gray75")
+
+        # 2. Centered Modal Box
+        modal_w = 480
+        modal_h = 220
+        cx = w // 2
+        cy = h // 2
+        x1 = cx - modal_w // 2
+        x2 = cx + modal_w // 2
+        y1 = cy - modal_h // 2
+        y2 = cy + modal_h // 2
+
+        self.custom_club_modal_box_rect = (x1, y1, x2, y2)
+
+        # Shadow & Box Border
+        self.canvas.create_rectangle(x1 + 6, y1 + 6, x2 + 6, y2 + 6, fill="#020305", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#12151F", outline="#00E5FF", width=2)
+
+        # Header
+        self.canvas.create_text(cx, y1 + 28, text="🏌️ ADD CUSTOM CLUB TO BAG", fill="#00E5FF", font=("Helvetica", 12, "bold"))
+        self.canvas.create_text(cx, y1 + 52, text="Type custom club name (e.g. 2 Hybrid, 7 Wood, 64° Wedge):", fill="#8E94A5", font=("Helvetica", 9))
+
+        # Input Text Box
+        in_x1 = cx - 180
+        in_x2 = cx + 180
+        in_y1 = y1 + 75
+        in_y2 = in_y1 + 42
+        self.canvas.create_rectangle(in_x1, in_y1, in_x2, in_y2, fill="#0A0C12", outline="#00FF66", width=2)
+
+        if self.custom_club_input_text:
+            display_text = self.custom_club_input_text + " |"
+            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text=display_text, fill="#FFFFFF", font=("Consolas", 14, "bold"))
+        else:
+            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text="Type club name here... |", fill="#464E62", font=("Consolas", 12, "italic"))
+
+        # Buttons
+        btn_y1 = in_y2 + 20
+        btn_y2 = btn_y1 + 32
+        btn_w = 140
+
+        # Add Button (Left)
+        add_x1 = cx - btn_w - 10
+        add_x2 = cx - 10
+        self.custom_club_modal_add_rect = (add_x1, btn_y1, add_x2, btn_y2)
+        self.canvas.create_rectangle(add_x1, btn_y1, add_x2, btn_y2, fill="#00FF66", outline="")
+        self.canvas.create_text((add_x1 + add_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Add Club", fill="#08090C", font=("Helvetica", 9, "bold"))
+
+        # Cancel Button (Right)
+        can_x1 = cx + 10
+        can_x2 = cx + btn_w + 10
+        self.custom_club_modal_cancel_rect = (can_x1, btn_y1, can_x2, btn_y2)
+        self.canvas.create_rectangle(can_x1, btn_y1, can_x2, btn_y2, fill="#212636", outline="#323B50")
+        self.canvas.create_text((can_x1 + can_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel (<Esc>)", fill="#D0D5DD", font=("Helvetica", 9, "bold"))
+
+        # Footer shortcut hint
+        self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill="#5A6175", font=("Helvetica", 8))
+
+    def handle_key_press(self, event):
+        if self.show_spec_editor_modal:
+            if event.keysym == "Escape":
+                self.show_spec_editor_modal = False
+                self.draw_screen()
+                return "break"
+            elif event.keysym in ("Return", "KP_Enter"):
+                self.save_spec_editor_values()
+                return "break"
+            elif event.keysym == "Tab":
+                fields = ["name", "brand", "model", "loft", "shaft"]
+                if self.spec_editor_active_field in fields:
+                    curr_i = fields.index(self.spec_editor_active_field)
+                    self.spec_editor_active_field = fields[(curr_i + 1) % len(fields)]
+                else:
+                    self.spec_editor_active_field = "name"
+                self.draw_screen()
+                return "break"
+            elif event.keysym == "BackSpace":
+                f = self.spec_editor_active_field
+                if f == "name": self.spec_editor_club_name = self.spec_editor_club_name[:-1]
+                elif f == "brand": self.spec_editor_brand = self.spec_editor_brand[:-1]
+                elif f == "model": self.spec_editor_model = self.spec_editor_model[:-1]
+                elif f == "loft": self.spec_editor_loft = self.spec_editor_loft[:-1]
+                elif f == "shaft": self.spec_editor_shaft = self.spec_editor_shaft[:-1]
+                self.draw_screen()
+                return "break"
+            elif event.char and event.char.isprintable() and len(event.char) == 1:
+                f = self.spec_editor_active_field
+                if f == "name" and len(self.spec_editor_club_name) < 25: self.spec_editor_club_name += event.char
+                elif f == "brand" and len(self.spec_editor_brand) < 25: self.spec_editor_brand += event.char
+                elif f == "model" and len(self.spec_editor_model) < 25: self.spec_editor_model += event.char
+                elif f == "loft" and len(self.spec_editor_loft) < 8: self.spec_editor_loft += event.char
+                elif f == "shaft" and len(self.spec_editor_shaft) < 25: self.spec_editor_shaft += event.char
+                self.draw_screen()
+                return "break"
+            return "break"
+
+        if self.show_custom_club_modal:
+            if event.keysym == "Escape":
+                self.show_custom_club_modal = False
+                self.draw_screen()
+                return "break"
+            elif event.keysym in ("Return", "KP_Enter"):
+                val = self.custom_club_input_text.strip()
+                self.show_custom_club_modal = False
+                if val:
+                    self.add_custom_club(val)
+                else:
+                    self.draw_screen()
+                return "break"
+            elif event.keysym == "BackSpace":
+                self.custom_club_input_text = self.custom_club_input_text[:-1]
+                self.draw_screen()
+                return "break"
+            elif event.char and event.char.isprintable() and len(self.custom_club_input_text) < 25:
+                self.custom_club_input_text += event.char
+                self.draw_screen()
+                return "break"
+            return "break"
+
+        # Global Hotkeys when modal is closed
+        if event.keysym == "Escape":
+            self.root.destroy()
+        elif event.keysym == "F11" or (event.char and event.char in ("f", "F")):
+            self.toggle_fullscreen()
+        elif (event.char and event.char in ("m", "M")) or event.keysym == "Tab":
+            self.cycle_mode()
+        elif event.char == "1":
+            self.set_mode(1)
+        elif event.char == "2":
+            self.set_mode(2)
+        elif event.char == "3":
+            self.set_mode(3)
+        elif event.char == "4":
+            self.set_mode(4)
+        elif event.char == "5":
+            self.set_mode(5)
+        elif event.char in ("6", "b", "B"):
+            self.set_mode(6)
+        elif event.char in ("0", "p", "P"):
+            self.set_mode(0)
+        elif event.char in ("s", "S"):
+            self.toggle_sidebar()
+        elif event.char in ("r", "R"):
+            self.rename_active_session()
+        elif event.char in ("c", "C"):
+            self.clear_session()
+
+    def add_custom_club(self, club_name=None):
+        if not club_name:
+            self.open_custom_club_modal()
+            return
+        clean_name = club_name.strip()
+        if clean_name:
+            if clean_name not in self.clubs:
+                self.clubs.append(clean_name)
+            self.current_club = clean_name
+            self.show_club_menu = False
+            self.show_custom_club_modal = False
+            self.save_session_to_file()
+            self.copy_feedback = f"✓ Added & Selected '{clean_name}'"
+            self.root.after(2500, self.clear_copy_feedback)
+            self.draw_screen()
+
+    def open_club_spec_editor(self, club_name=None):
+        self.show_club_menu = False
+        self.show_tools_menu = False
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
+        self.show_custom_club_modal = False
+
+        if club_name and self.get_bag_club(club_name):
+            c = self.get_bag_club(club_name)
+            self.spec_editor_orig_name = club_name
+            self.spec_editor_club_name = club_name
+            self.spec_editor_category = c.get("category", infer_club_category(club_name))
+            self.spec_editor_brand = c.get("brand", "")
+            self.spec_editor_model = c.get("model", "")
+            loft = c.get("loft_deg", 0.0)
+            self.spec_editor_loft = f"{loft:.1f}" if loft else ""
+            self.spec_editor_shaft = c.get("shaft", "")
+            self.spec_editor_active_field = "brand"
+        else:
+            self.spec_editor_orig_name = ""
+            self.spec_editor_club_name = ""
+            self.spec_editor_category = "Irons"
+            self.spec_editor_brand = ""
+            self.spec_editor_model = ""
+            self.spec_editor_loft = ""
+            self.spec_editor_shaft = ""
+            self.spec_editor_active_field = "name"
+
+        self.show_spec_editor_modal = True
+        self.draw_screen()
+
+    def save_spec_editor_values(self):
+        name = self.spec_editor_club_name.strip()
+        if not name:
+            self.show_spec_editor_modal = False
+            self.draw_screen()
+            return
+        
+        try:
+            loft_val = float(self.spec_editor_loft) if self.spec_editor_loft else 0.0
+        except (ValueError, TypeError):
+            loft_val = 0.0
+
+        if self.spec_editor_orig_name:
+            self.update_club_specs(
+                self.spec_editor_orig_name,
+                brand=self.spec_editor_brand.strip(),
+                model=self.spec_editor_model.strip(),
+                loft_deg=loft_val,
+                shaft=self.spec_editor_shaft.strip(),
+                category=self.spec_editor_category,
+                new_name=name
+            )
+        else:
+            self.add_club_to_bag(
+                name=name,
+                category=self.spec_editor_category,
+                brand=self.spec_editor_brand.strip(),
+                model=self.spec_editor_model.strip(),
+                loft_deg=loft_val,
+                shaft=self.spec_editor_shaft.strip()
+            )
+        self.show_spec_editor_modal = False
+        self.copy_feedback = f"✓ Saved {name} Specs"
+        self.root.after(2500, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def draw_club_spec_editor_modal(self, w, h):
+        # 1. Backdrop
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="", stipple="gray75")
+
+        # 2. Centered Modal Box
+        modal_w = 540
+        modal_h = 420
+        cx = w // 2
+        cy = h // 2
+        x1 = cx - modal_w // 2
+        x2 = cx + modal_w // 2
+        y1 = cy - modal_h // 2
+        y2 = cy + modal_h // 2
+
+        self.spec_editor_box_rect = (x1, y1, x2, y2)
+
+        # Shadow & Card
+        self.canvas.create_rectangle(x1 + 6, y1 + 6, x2 + 6, y2 + 6, fill="#020305", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#12151F", outline="#00E5FF", width=2)
+
+        # Title
+        title = f"EDIT CLUB SPECS: {self.spec_editor_orig_name}" if self.spec_editor_orig_name else "ADD NEW CLUB TO BAG"
+        self.canvas.create_text(cx, y1 + 24, text=title, fill="#00E5FF", font=("Helvetica", 11, "bold"))
+        self.canvas.create_text(cx, y1 + 44, text="Configure your club profile, category, and equipment specs", fill="#8E94A5", font=("Helvetica", 8))
+
+        self.spec_editor_cat_chips.clear()
+        self.spec_editor_field_rects.clear()
+
+        # Category Chips Row (y1 + 58 to y1 + 86)
+        cat_y1 = y1 + 58
+        cat_y2 = cat_y1 + 26
+        chip_w = 98
+        chip_gap = 4
+        total_chips_w = len(BAG_CATEGORIES) * chip_w + (len(BAG_CATEGORIES) - 1) * chip_gap
+        start_chip_x = cx - total_chips_w // 2
+
+        for i, cat in enumerate(BAG_CATEGORIES):
+            cx1 = start_chip_x + i * (chip_w + chip_gap)
+            cx2 = cx1 + chip_w
+            self.spec_editor_cat_chips.append((cx1, cat_y1, cx2, cat_y2, cat))
+            is_cat_sel = (self.spec_editor_category == cat)
+            self.canvas.create_rectangle(cx1, cat_y1, cx2, cat_y2, fill="#0E2A38" if is_cat_sel else "#1A1E2B", outline="#00E5FF" if is_cat_sel else "#2C3446")
+            
+            chip_label = "Woods" if cat == "Woods & Drivers" else ("Hybrids" if cat == "Hybrids & Utilities" else cat)
+            self.canvas.create_text((cx1 + cx2) // 2, (cat_y1 + cat_y2) // 2, text=chip_label, fill="#00E5FF" if is_cat_sel else "#A0A7B8", font=("Helvetica", 8, "bold" if is_cat_sel else "normal"))
+
+        # Input Form Grid
+        fields = [
+            ("name", "Club Name (e.g. 7 Iron, 60° Wedge):", self.spec_editor_club_name),
+            ("brand", "Manufacturer / Brand (e.g. TaylorMade, Titleist):", self.spec_editor_brand),
+            ("model", "Clubhead Model (e.g. Qi10, T150, SM10):", self.spec_editor_model),
+            ("loft", "Loft Angle (°):", self.spec_editor_loft),
+            ("shaft", "Shaft Specs (e.g. Ventus Black 6X, KBS Tour):", self.spec_editor_shaft),
+        ]
+
+        curr_fy = y1 + 94
+        for f_key, f_label, f_val in fields:
+            self.canvas.create_text(x1 + 35, curr_fy, text=f_label, fill="#8E94A5", font=("Helvetica", 8, "bold"), anchor="w")
+            
+            box_x1 = x1 + 35
+            box_x2 = x2 - 35
+            box_y1 = curr_fy + 12
+            box_y2 = box_y1 + 26
+            self.spec_editor_field_rects[f_key] = (box_x1, box_y1, box_x2, box_y2)
+
+            is_f_active = (self.spec_editor_active_field == f_key)
+            self.canvas.create_rectangle(box_x1, box_y1, box_x2, box_y2, fill="#0A0C12", outline="#00FF66" if is_f_active else "#282F42", width=1.5 if is_f_active else 1)
+
+            val_display = (f_val + " |") if is_f_active else (f_val if f_val else "")
+            val_color = "#FFFFFF" if f_val else ("#00FF66" if is_f_active else "#485065")
+            val_text = val_display if val_display else "Click to enter..."
+            self.canvas.create_text(box_x1 + 10, (box_y1 + box_y2) // 2, text=val_text, fill=val_color, font=("Consolas", 9, "bold" if is_f_active else "normal"), anchor="w")
+
+            curr_fy += 44
+
+        # Action Buttons
+        btn_y1 = y2 - 46
+        btn_y2 = btn_y1 + 28
+
+        # Save Button
+        save_x1 = cx - 180
+        save_x2 = cx - 40
+        self.spec_editor_save_rect = (save_x1, btn_y1, save_x2, btn_y2)
+        self.canvas.create_rectangle(save_x1, btn_y1, save_x2, btn_y2, fill="#00FF66", outline="")
+        self.canvas.create_text((save_x1 + save_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Save Specs", fill="#08090C", font=("Helvetica", 9, "bold"))
+
+        # Cancel Button
+        cancel_x1 = cx - 30
+        cancel_x2 = cx + 70
+        self.spec_editor_cancel_rect = (cancel_x1, btn_y1, cancel_x2, btn_y2)
+        self.canvas.create_rectangle(cancel_x1, btn_y1, cancel_x2, btn_y2, fill="#212636", outline="#323B50")
+        self.canvas.create_text((cancel_x1 + cancel_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel", fill="#D0D5DD", font=("Helvetica", 9, "bold"))
+
+        # Delete Button (if existing club)
+        if self.spec_editor_orig_name:
+            del_x1 = cx + 80
+            del_x2 = cx + 180
+            self.spec_editor_delete_rect = (del_x1, btn_y1, del_x2, btn_y2)
+            self.canvas.create_rectangle(del_x1, btn_y1, del_x2, btn_y2, fill="#3A141E", outline="#FF3366")
+            self.canvas.create_text((del_x1 + del_x2) // 2, (btn_y1 + btn_y2) // 2, text="🗑️ Remove", fill="#FF3366", font=("Helvetica", 9, "bold"))
+        else:
+            self.spec_editor_delete_rect = None
+
+        # Footer Hint
+        self.canvas.create_text(cx, y2 - 8, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill="#5A6175", font=("Helvetica", 8))
+
+    def get_club_color(self, club_name):
+        standard = {
+            "Driver": "#FF3366", "3 Wood": "#FF8800", "5 Wood": "#FFCC00",
+            "3 Hybrid": "#FFEA00", "4 Iron": "#AEEA00", "5 Iron": "#64DD17",
+            "6 Iron": "#00E676", "7 Iron": "#00E5FF", "8 Iron": "#00B0FF",
+            "9 Iron": "#2979FF", "PW": "#651FFF", "GW": "#AA00FF",
+            "SW": "#FF4081", "LW": "#F50057"
+        }
+        if club_name in standard:
+            return standard[club_name]
+        palette = ["#FF5722", "#E91E63", "#9C27B0", "#00BCD4", "#8BC34A", "#FFC107", "#009688", "#3F51B5", "#F06292", "#4DD0E1"]
+        h = sum(ord(c) for c in str(club_name))
+        return palette[h % len(palette)]
 
     def poll_queue(self):
         try:
             while True:
                 msg = shot_queue.get_nowait()
-                self.session_shots.append(msg)
-                self.selected_shot_index = len(self.session_shots) - 1
+                msg["club"] = self.current_club
+                msg["timestamp"] = datetime.now().strftime("%I:%M %p")
+                self.nova_connected = True
+                
+                sess = self.get_active_session()
+                sess["shots"].append(msg)
+                self.selected_shot_index = len(sess["shots"]) - 1
                 self.current_shot = msg
                 self.save_session_to_file()
                 
@@ -317,151 +1203,904 @@ class ShanktuaryApp:
         return nx, ny
 
     def handle_mouse_hover(self, event):
-        if self.btn_3d_range_rect and self.btn_3d_range_rect[0] <= event.x <= self.btn_3d_range_rect[2] and self.btn_3d_range_rect[1] <= event.y <= self.btn_3d_range_rect[3]:
-            self.canvas.config(cursor="hand2")
+        # 0. In-Canvas Spec Editor Modal Hover
+        if self.show_spec_editor_modal:
+            for cx1, cy1, cx2, cy2, _ in self.spec_editor_cat_chips:
+                if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for f_key, (bx1, by1, bx2, by2) in self.spec_editor_field_rects.items():
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    self.canvas.config(cursor="xterm")
+                    return
+            if self.spec_editor_save_rect and self.spec_editor_save_rect[0] <= event.x <= self.spec_editor_save_rect[2] and self.spec_editor_save_rect[1] <= event.y <= self.spec_editor_save_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.spec_editor_cancel_rect and self.spec_editor_cancel_rect[0] <= event.x <= self.spec_editor_cancel_rect[2] and self.spec_editor_cancel_rect[1] <= event.y <= self.spec_editor_cancel_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.spec_editor_delete_rect and self.spec_editor_delete_rect[0] <= event.x <= self.spec_editor_delete_rect[2] and self.spec_editor_delete_rect[1] <= event.y <= self.spec_editor_delete_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            self.canvas.config(cursor="")
             return
 
-        if self.view_mode == 3:
-            w = self.canvas.winfo_width()
-            sb_x1 = w - self.sidebar_width - 15
-
-            # Hover near divider line
-            if abs(event.x - sb_x1) <= 8:
-                self.canvas.config(cursor="sb_h_double_arrow")
-                return
-            
-            # Hover over clickable elements
-            if self.inspect_btn_rect and self.inspect_btn_rect[0] <= event.x <= self.inspect_btn_rect[2] and self.inspect_btn_rect[1] <= event.y <= self.inspect_btn_rect[3]:
+        # 0b. In-Canvas Custom Club Modal Hover
+        if self.show_custom_club_modal:
+            if self.custom_club_modal_add_rect and self.custom_club_modal_add_rect[0] <= event.x <= self.custom_club_modal_add_rect[2] and self.custom_club_modal_add_rect[1] <= event.y <= self.custom_club_modal_add_rect[3]:
                 self.canvas.config(cursor="hand2")
                 return
-
-            if self.clear_btn_rect and self.clear_btn_rect[0] <= event.x <= self.clear_btn_rect[2] and self.clear_btn_rect[1] <= event.y <= self.clear_btn_rect[3]:
+            if self.custom_club_modal_cancel_rect and self.custom_club_modal_cancel_rect[0] <= event.x <= self.custom_club_modal_cancel_rect[2] and self.custom_club_modal_cancel_rect[1] <= event.y <= self.custom_club_modal_cancel_rect[3]:
                 self.canvas.config(cursor="hand2")
                 return
+            self.canvas.config(cursor="")
+            return
 
-            for y1, y2, idx in self.shot_list_item_rects:
-                if sb_x1 <= event.x <= w and y1 <= event.y <= y2:
+        # 1. Overlay Menus Hover
+        if self.show_session_dropdown:
+            for x1, y1, x2, y2, _ in self.session_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+        if self.show_filter_dropdown:
+            for x1, y1, x2, y2, _ in self.filter_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+        if self.show_tools_menu:
+            for x1, y1, x2, y2, _ in self.tools_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+        if self.show_club_menu:
+            for x1, y1, x2, y2, _ in self.club_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
                     self.canvas.config(cursor="hand2")
                     return
 
-            for dx, dy, idx in self.land_dot_coords:
+        # 2. Sidebar Elements Hover
+        if not self.sidebar_collapsed:
+            if self.sidebar_toggle_rect and self.sidebar_toggle_rect[0] <= event.x <= self.sidebar_toggle_rect[2] and self.sidebar_toggle_rect[1] <= event.y <= self.sidebar_toggle_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.sidebar_session_btn_rect and self.sidebar_session_btn_rect[0] <= event.x <= self.sidebar_session_btn_rect[2] and self.sidebar_session_btn_rect[1] <= event.y <= self.sidebar_session_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.sidebar_rename_sess_btn_rect and self.sidebar_rename_sess_btn_rect[0] <= event.x <= self.sidebar_rename_sess_btn_rect[2] and self.sidebar_rename_sess_btn_rect[1] <= event.y <= self.sidebar_rename_sess_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.sidebar_new_sess_btn_rect and self.sidebar_new_sess_btn_rect[0] <= event.x <= self.sidebar_new_sess_btn_rect[2] and self.sidebar_new_sess_btn_rect[1] <= event.y <= self.sidebar_new_sess_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.sidebar_filter_btn_rect and self.sidebar_filter_btn_rect[0] <= event.x <= self.sidebar_filter_btn_rect[2] and self.sidebar_filter_btn_rect[1] <= event.y <= self.sidebar_filter_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.sidebar_clear_btn_rect and self.sidebar_clear_btn_rect[0] <= event.x <= self.sidebar_clear_btn_rect[2] and self.sidebar_clear_btn_rect[1] <= event.y <= self.sidebar_clear_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            for x1, y1, x2, y2, _ in self.sidebar_shot_card_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+        else:
+            if self.sidebar_toggle_rect and self.sidebar_toggle_rect[0] <= event.x <= self.sidebar_toggle_rect[2] and self.sidebar_toggle_rect[1] <= event.y <= self.sidebar_toggle_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+
+        # 3. Header Buttons Hover
+        for mode_id, (x1, y1, x2, y2) in self.mode_pill_rects.items():
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.canvas.config(cursor="hand2")
+                return
+
+        if self.club_btn_rect and self.club_btn_rect[0] <= event.x <= self.club_btn_rect[2] and self.club_btn_rect[1] <= event.y <= self.club_btn_rect[3]:
+            self.canvas.config(cursor="hand2")
+            return
+
+        if self.tools_btn_rect and self.tools_btn_rect[0] <= event.x <= self.tools_btn_rect[2] and self.tools_btn_rect[1] <= event.y <= self.tools_btn_rect[3]:
+            self.canvas.config(cursor="hand2")
+            return
+
+        if self.fullscreen_btn_rect and self.fullscreen_btn_rect[0] <= event.x <= self.fullscreen_btn_rect[2] and self.fullscreen_btn_rect[1] <= event.y <= self.fullscreen_btn_rect[3]:
+            self.canvas.config(cursor="hand2")
+            return
+
+        # 4. Viewport Interactive Elements Hover
+        if self.view_mode == 2:
+            if self.range_launch_web_rect and self.range_launch_web_rect[0] <= event.x <= self.range_launch_web_rect[2] and self.range_launch_web_rect[1] <= event.y <= self.range_launch_web_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+
+        if self.view_mode == 3:
+            if self.dispersion_splitter_rect and self.dispersion_splitter_rect[0] <= event.x <= self.dispersion_splitter_rect[2] and self.dispersion_splitter_rect[1] <= event.y <= self.dispersion_splitter_rect[3]:
+                self.canvas.config(cursor="sb_h_double_arrow")
+                return
+            for x1, y1, x2, y2, _ in self.dispersion_submode_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.dispersion_club_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for dx, dy, _ in self.dispersion_dot_rects:
                 if abs(event.x - dx) <= 10 and abs(event.y - dy) <= 10:
+                    self.canvas.config(cursor="hand2")
+                    return
+
+        if self.view_mode == 4:
+            for x1, y1, x2, y2, _ in self.table_header_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.table_checkbox_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.table_row_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+
+        if self.view_mode == 6:
+            if self.bag_scope_session_rect and self.bag_scope_session_rect[0] <= event.x <= self.bag_scope_session_rect[2] and self.bag_scope_session_rect[1] <= event.y <= self.bag_scope_session_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.bag_scope_all_rect and self.bag_scope_all_rect[0] <= event.x <= self.bag_scope_all_rect[2] and self.bag_scope_all_rect[1] <= event.y <= self.bag_scope_all_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            if self.bag_add_club_btn_rect and self.bag_add_club_btn_rect[0] <= event.x <= self.bag_add_club_btn_rect[2] and self.bag_add_club_btn_rect[1] <= event.y <= self.bag_add_club_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            for x1, y1, x2, y2, _ in self.bag_edit_btn_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.bag_move_up_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.bag_move_down_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.bag_club_card_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
                     self.canvas.config(cursor="hand2")
                     return
 
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
-        if self.btn_3d_range_rect and self.btn_3d_range_rect[0] <= event.x <= self.btn_3d_range_rect[2] and self.btn_3d_range_rect[1] <= event.y <= self.btn_3d_range_rect[3]:
-            self.launch_3d_range()
+        # 0. In-Canvas Spec Editor Modal Click Handling
+        if self.show_spec_editor_modal:
+            for cx1, cy1, cx2, cy2, cat in self.spec_editor_cat_chips:
+                if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
+                    self.spec_editor_category = cat
+                    self.draw_screen()
+                    return
+            for f_key, (bx1, by1, bx2, by2) in self.spec_editor_field_rects.items():
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    self.spec_editor_active_field = f_key
+                    self.draw_screen()
+                    return
+            if self.spec_editor_save_rect and self.spec_editor_save_rect[0] <= event.x <= self.spec_editor_save_rect[2] and self.spec_editor_save_rect[1] <= event.y <= self.spec_editor_save_rect[3]:
+                self.save_spec_editor_values()
+                return
+            if self.spec_editor_cancel_rect and self.spec_editor_cancel_rect[0] <= event.x <= self.spec_editor_cancel_rect[2] and self.spec_editor_cancel_rect[1] <= event.y <= self.spec_editor_cancel_rect[3]:
+                self.show_spec_editor_modal = False
+                self.draw_screen()
+                return
+            if self.spec_editor_delete_rect and self.spec_editor_delete_rect[0] <= event.x <= self.spec_editor_delete_rect[2] and self.spec_editor_delete_rect[1] <= event.y <= self.spec_editor_delete_rect[3]:
+                if self.spec_editor_orig_name:
+                    self.remove_club_from_bag(self.spec_editor_orig_name)
+                self.show_spec_editor_modal = False
+                self.draw_screen()
+                return
+            if self.spec_editor_box_rect:
+                bx1, by1, bx2, by2 = self.spec_editor_box_rect
+                if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
+                    self.show_spec_editor_modal = False
+                    self.draw_screen()
+                    return
             return
 
-        if self.view_mode == 3:
-            w = self.canvas.winfo_width()
-            sb_x1 = w - self.sidebar_width - 15
+        # 0b. In-Canvas Custom Club Modal Click Handling
+        if self.show_custom_club_modal:
+            if self.custom_club_modal_add_rect and self.custom_club_modal_add_rect[0] <= event.x <= self.custom_club_modal_add_rect[2] and self.custom_club_modal_add_rect[1] <= event.y <= self.custom_club_modal_add_rect[3]:
+                val = self.custom_club_input_text.strip()
+                self.show_custom_club_modal = False
+                if val:
+                    self.add_custom_club(val)
+                else:
+                    self.draw_screen()
+                return
+            elif self.custom_club_modal_cancel_rect and self.custom_club_modal_cancel_rect[0] <= event.x <= self.custom_club_modal_cancel_rect[2] and self.custom_club_modal_cancel_rect[1] <= event.y <= self.custom_club_modal_cancel_rect[3]:
+                self.show_custom_club_modal = False
+                self.draw_screen()
+                return
+            if self.custom_club_modal_box_rect:
+                bx1, by1, bx2, by2 = self.custom_club_modal_box_rect
+                if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
+                    self.show_custom_club_modal = False
+                    self.draw_screen()
+                    return
+            return
 
-            # Check divider drag
-            if abs(event.x - sb_x1) <= 10:
-                self.is_dragging_sidebar = True
+        # 1. Floating Dropdowns Clicks
+        if self.show_session_dropdown:
+            for x1, y1, x2, y2, s_idx in self.session_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if s_idx == -1:
+                        self.create_new_session()
+                    elif s_idx == -2:
+                        self.rename_active_session()
+                    else:
+                        self.switch_session(s_idx)
+                    return
+            self.show_session_dropdown = False
+            self.draw_screen()
+            return
+
+        if self.show_filter_dropdown:
+            for x1, y1, x2, y2, club_name in self.filter_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.club_filter = club_name
+                    self.sidebar_scroll_offset = 0
+                    self.show_filter_dropdown = False
+                    self.draw_screen()
+                    return
+            self.show_filter_dropdown = False
+            self.draw_screen()
+            return
+
+        if self.show_tools_menu:
+            for x1, y1, x2, y2, action in self.tools_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if action == "open_config":
+                        webbrowser.open(f"http://localhost:{obs_server.OBS_PORT}/config")
+                    elif action == "copy_obs_url":
+                        self.copy_to_clipboard(f"http://localhost:{obs_server.OBS_PORT}")
+                    elif action == "copy_divot_url":
+                        self.copy_to_clipboard(f"http://localhost:{obs_server.OBS_PORT}/divot")
+                    elif action == "open_divot":
+                        webbrowser.open(f"http://localhost:{obs_server.OBS_PORT}/divot")
+                    elif action == "open_range":
+                        self.launch_3d_range()
+                    elif action == "set_mode_2" or action == "set_mode_0":
+                        self.set_mode(0)
+                    elif action == "clear_session":
+                        self.clear_session()
+                    break
+            self.show_tools_menu = False
+            self.draw_screen()
+            return
+
+        if self.show_club_menu:
+            for x1, y1, x2, y2, club_name in self.club_menu_items:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if club_name == "__add_custom__":
+                        self.open_custom_club_modal()
+                        return
+                    else:
+                        self.current_club = club_name
+                    break
+            self.show_club_menu = False
+            self.draw_screen()
+            return
+
+        # 2. Sidebar Interactive Clicks
+        if self.sidebar_toggle_rect and self.sidebar_toggle_rect[0] <= event.x <= self.sidebar_toggle_rect[2] and self.sidebar_toggle_rect[1] <= event.y <= self.sidebar_toggle_rect[3]:
+            self.toggle_sidebar()
+            return
+
+        if not self.sidebar_collapsed and event.x <= self.sidebar_width:
+            if self.sidebar_session_btn_rect and self.sidebar_session_btn_rect[0] <= event.x <= self.sidebar_session_btn_rect[2] and self.sidebar_session_btn_rect[1] <= event.y <= self.sidebar_session_btn_rect[3]:
+                self.show_session_dropdown = not self.show_session_dropdown
+                self.show_filter_dropdown = False
+                self.draw_screen()
                 return
 
-            # Check Inspect Button click
-            if self.inspect_btn_rect and self.inspect_btn_rect[0] <= event.x <= self.inspect_btn_rect[2] and self.inspect_btn_rect[1] <= event.y <= self.inspect_btn_rect[3]:
-                if 0 <= self.selected_shot_index < len(self.session_shots):
-                    self.current_shot = self.session_shots[self.selected_shot_index]
-                    self.set_mode(1)
+            if self.sidebar_rename_sess_btn_rect and self.sidebar_rename_sess_btn_rect[0] <= event.x <= self.sidebar_rename_sess_btn_rect[2] and self.sidebar_rename_sess_btn_rect[1] <= event.y <= self.sidebar_rename_sess_btn_rect[3]:
+                self.rename_active_session()
                 return
 
-            # Check Clear Button click
-            if self.clear_btn_rect and self.clear_btn_rect[0] <= event.x <= self.clear_btn_rect[2] and self.clear_btn_rect[1] <= event.y <= self.clear_btn_rect[3]:
+            if self.sidebar_new_sess_btn_rect and self.sidebar_new_sess_btn_rect[0] <= event.x <= self.sidebar_new_sess_btn_rect[2] and self.sidebar_new_sess_btn_rect[1] <= event.y <= self.sidebar_new_sess_btn_rect[3]:
+                self.create_new_session()
+                return
+
+            if self.sidebar_filter_btn_rect and self.sidebar_filter_btn_rect[0] <= event.x <= self.sidebar_filter_btn_rect[2] and self.sidebar_filter_btn_rect[1] <= event.y <= self.sidebar_filter_btn_rect[3]:
+                self.show_filter_dropdown = not self.show_filter_dropdown
+                self.show_session_dropdown = False
+                self.draw_screen()
+                return
+
+            if self.sidebar_clear_btn_rect and self.sidebar_clear_btn_rect[0] <= event.x <= self.sidebar_clear_btn_rect[2] and self.sidebar_clear_btn_rect[1] <= event.y <= self.sidebar_clear_btn_rect[3]:
                 self.clear_session()
                 return
 
-            # Check Sidebar Shot List click
-            for y1, y2, idx in self.shot_list_item_rects:
-                if sb_x1 <= event.x <= w and y1 <= event.y <= y2:
-                    self.selected_shot_index = idx
-                    self.current_shot = self.session_shots[idx]
+            # Check Shot Card Clicks
+            for x1, y1, x2, y2, shot_idx in self.sidebar_shot_card_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if 0 <= shot_idx < len(self.session_shots):
+                        self.selected_shot_index = shot_idx
+                        self.current_shot = self.session_shots[shot_idx]
+                        self.draw_screen()
+                        return
+
+        # 3. Header Buttons Clicks
+        for mode_id, (x1, y1, x2, y2) in self.mode_pill_rects.items():
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.set_mode(mode_id)
+                return
+
+        if self.club_btn_rect and self.club_btn_rect[0] <= event.x <= self.club_btn_rect[2] and self.club_btn_rect[1] <= event.y <= self.club_btn_rect[3]:
+            self.show_club_menu = not self.show_club_menu
+            self.show_tools_menu = False
+            self.draw_screen()
+            return
+
+        if self.tools_btn_rect and self.tools_btn_rect[0] <= event.x <= self.tools_btn_rect[2] and self.tools_btn_rect[1] <= event.y <= self.tools_btn_rect[3]:
+            self.show_tools_menu = not self.show_tools_menu
+            self.show_club_menu = False
+            self.draw_screen()
+            return
+
+        if self.fullscreen_btn_rect and self.fullscreen_btn_rect[0] <= event.x <= self.fullscreen_btn_rect[2] and self.fullscreen_btn_rect[1] <= event.y <= self.fullscreen_btn_rect[3]:
+            self.toggle_fullscreen()
+            return
+
+        # 4. Viewport Interactive Clicks
+        if self.view_mode == 2:
+            if self.range_launch_web_rect and self.range_launch_web_rect[0] <= event.x <= self.range_launch_web_rect[2] and self.range_launch_web_rect[1] <= event.y <= self.range_launch_web_rect[3]:
+                self.launch_3d_range()
+                return
+
+        if self.view_mode == 3:
+            if self.dispersion_splitter_rect and self.dispersion_splitter_rect[0] <= event.x <= self.dispersion_splitter_rect[2] and self.dispersion_splitter_rect[1] <= event.y <= self.dispersion_splitter_rect[3]:
+                self.dispersion_splitter_dragging = True
+                self.draw_screen()
+                return
+
+            for x1, y1, x2, y2, sub_key in self.dispersion_submode_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.dispersion_view_submode = sub_key
                     self.draw_screen()
                     return
 
-            # Check Dispersion Landing Dot click
-            for dx, dy, idx in self.land_dot_coords:
+            for x1, y1, x2, y2, club_name in self.dispersion_club_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.dispersion_selected_club = club_name
+                    self.draw_screen()
+                    return
+            for dx, dy, idx in self.dispersion_dot_rects:
                 if abs(event.x - dx) <= 10 and abs(event.y - dy) <= 10:
-                    self.selected_shot_index = idx
-                    self.current_shot = self.session_shots[idx]
+                    if 0 <= idx < len(self.session_shots):
+                        self.selected_shot_index = idx
+                        self.current_shot = self.session_shots[idx]
+                        self.draw_screen()
+                        return
+
+        if self.view_mode == 4:
+            # Checkbox click
+            for x1, y1, x2, y2, shot_idx in self.table_checkbox_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if 0 <= shot_idx < len(self.session_shots):
+                        cur_ex = self.session_shots[shot_idx].get("excluded", False)
+                        self.session_shots[shot_idx]["excluded"] = not cur_ex
+                        self.save_session_to_file()
+                        self.draw_screen()
+                        return
+            # Column header sort click
+            for x1, y1, x2, y2, col_key in self.table_header_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if self.table_sort_col == col_key:
+                        self.table_sort_asc = not self.table_sort_asc
+                    else:
+                        self.table_sort_col = col_key
+                        self.table_sort_asc = True
+                    self.draw_screen()
+                    return
+            # Row selection click
+            for x1, y1, x2, y2, shot_idx in self.table_row_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    if 0 <= shot_idx < len(self.session_shots):
+                        self.selected_shot_index = shot_idx
+                        self.current_shot = self.session_shots[shot_idx]
+                        self.draw_screen()
+                        return
+
+        if self.view_mode == 6:
+            if self.bag_scope_session_rect and self.bag_scope_session_rect[0] <= event.x <= self.bag_scope_session_rect[2] and self.bag_scope_session_rect[1] <= event.y <= self.bag_scope_session_rect[3]:
+                self.set_bag_scope("session")
+                return
+            if self.bag_scope_all_rect and self.bag_scope_all_rect[0] <= event.x <= self.bag_scope_all_rect[2] and self.bag_scope_all_rect[1] <= event.y <= self.bag_scope_all_rect[3]:
+                self.set_bag_scope("all_time")
+                return
+            if self.bag_add_club_btn_rect and self.bag_add_club_btn_rect[0] <= event.x <= self.bag_add_club_btn_rect[2] and self.bag_add_club_btn_rect[1] <= event.y <= self.bag_add_club_btn_rect[3]:
+                self.open_club_spec_editor(None)
+                return
+            for x1, y1, x2, y2, c_name in self.bag_edit_btn_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.open_club_spec_editor(c_name)
+                    return
+            for x1, y1, x2, y2, c_name in self.bag_move_up_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.reorder_bag_club(c_name, direction="up")
+                    return
+            for x1, y1, x2, y2, c_name in self.bag_move_down_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.reorder_bag_club(c_name, direction="down")
+                    return
+            for x1, y1, x2, y2, c_name in self.bag_club_card_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.current_club = c_name
+                    self.copy_feedback = f"✓ Selected {c_name}"
+                    self.root.after(2000, self.clear_copy_feedback)
                     self.draw_screen()
                     return
 
     def handle_mouse_drag(self, event):
-        if self.is_dragging_sidebar and self.view_mode == 3:
-            w = self.canvas.winfo_width()
-            new_sb_w = max(160, min(450, w - event.x - 15))
-            if new_sb_w != self.sidebar_width:
-                self.sidebar_width = new_sb_w
-                self.draw_screen()
+        if self.view_mode == 3 and self.dispersion_splitter_dragging:
+            offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+            avail_w = max(100, self.canvas.winfo_width() - offset_x)
+            rel_x = event.x - offset_x
+            new_ratio = max(0.20, min(0.85, rel_x / float(avail_w)))
+            self.dispersion_splitter_ratio = new_ratio
+            self.draw_screen()
 
     def handle_mouse_release(self, event):
-        self.is_dragging_sidebar = False
-        self.canvas.config(cursor="")
+        if self.dispersion_splitter_dragging:
+            self.dispersion_splitter_dragging = False
+            self.draw_screen()
 
-    def calculate_session_averages(self):
-        if not self.session_shots:
+    def calculate_session_averages(self, club_filter=None):
+        shots = [s for s in self.session_shots if not s.get("excluded", False)]
+        if club_filter and club_filter != "ALL":
+            shots = [s for s in shots if s.get("club") == club_filter]
+        if not shots:
             return {}
 
-        count = len(self.session_shots)
-        sum_bs = sum_la = sum_spin = sum_carry = sum_total = sum_hl = sum_ss = sum_da = sum_apex = sum_off = 0.0
+        count = len(shots)
+        sum_bs = sum_cs = sum_sm = sum_la = sum_spin = sum_carry = sum_total = sum_hl = sum_ss = sum_sa = sum_cp = sum_fp = sum_da = sum_apex = sum_off = 0.0
 
-        for shot in self.session_shots:
+        for shot in shots:
             ogc = shot.get("open_golf_coach", {})
             us_units = ogc.get("us_customary_units", {})
 
             sum_bs += us_units.get("ball_speed_mph", 0.0)
+            sum_cs += us_units.get("club_speed_mph", 0.0)
+            sum_sm += ogc.get("smash_factor", 1.0)
             sum_la += shot.get("vertical_launch_angle_degrees", 0.0)
             sum_spin += ogc.get("total_spin_rpm", 0.0)
             sum_carry += us_units.get("carry_distance_yards", 0.0)
             sum_total += us_units.get("total_distance_yards", 0.0)
             sum_hl += shot.get("horizontal_launch_angle_degrees", 0.0)
             sum_ss += ogc.get("sidespin_rpm", 0.0)
+            sum_sa += ogc.get("spin_axis_degrees", 0.0)
+            sum_cp += ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
+            sum_fp += ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
             sum_da += ogc.get("descent_angle_degrees", 0.0)
             sum_apex += us_units.get("peak_height_yards", 0.0)
             sum_off += us_units.get("offline_distance_yards", 0.0)
 
         return {
+            "count": count,
             "ball_speed": sum_bs / count,
+            "club_speed": sum_cs / count,
+            "smash": sum_sm / count,
             "launch_angle": sum_la / count,
             "total_spin": sum_spin / count,
             "carry": sum_carry / count,
             "total": sum_total / count,
             "push_pull": sum_hl / count,
             "sidespin": sum_ss / count,
+            "spin_axis": sum_sa / count,
+            "club_path": sum_cp / count,
+            "face_to_path": sum_fp / count,
             "descent": sum_da / count,
             "apex": sum_apex / count,
             "offline": sum_off / count
         }
 
-    def draw_top_metric_toolbar(self, w, ball_speed, club_speed, smash, carry, total, offline, hang_time, eff_pct):
-        bar_h = 60
-        self.canvas.create_rectangle(0, 0, w, bar_h, fill="#181A20", outline="#262933")
+    def draw_left_sidebar(self, w, h):
+        if self.sidebar_collapsed:
+            return
+
+        sb_w = self.sidebar_width
+        # Base container
+        self.canvas.create_rectangle(0, 0, sb_w, h, fill="#12141A", outline="#232734")
+
+        # 1. Header (y: 0 to 52)
+        self.canvas.create_rectangle(0, 0, sb_w, 52, fill="#151822", outline="#232734")
+        self.canvas.create_text(16, 26, text="📁 SHOT LIBRARY", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+        
+        # Collapse button [ ◀ ]
+        coll_x1, coll_y1, coll_x2, coll_y2 = sb_w - 38, 12, sb_w - 10, 40
+        self.sidebar_toggle_rect = (coll_x1, coll_y1, coll_x2, coll_y2)
+        self.canvas.create_rectangle(coll_x1, coll_y1, coll_x2, coll_y2, fill="#1D202C", outline="#2E3547")
+        self.canvas.create_text((coll_x1 + coll_x2) // 2, 26, text="◀", fill="#8E94A5", font=("Helvetica", 9, "bold"))
+
+        # 2. Session Bar (y: 52 to 92)
+        sess_bg = "#181B26"
+        self.canvas.create_rectangle(0, 52, sb_w, 92, fill=sess_bg, outline="#232734")
+        
+        active_sess = self.get_active_session()
+        sess_title = active_sess.get("name", "Session")
+        if len(sess_title) > 13:
+            sess_title = sess_title[:11] + "..."
+
+        btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2 = 10, 58, sb_w - 74, 86
+        self.sidebar_session_btn_rect = (btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2)
+        self.canvas.create_rectangle(btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2, fill="#1F2332", outline="#00E5FF" if self.show_session_dropdown else "#2E374D")
+        self.canvas.create_text(btn_s_x1 + 8, 72, text=f"📂 {sess_title} ▼", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        # Rename Session Button [ ✏️ ]
+        btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2 = sb_w - 68, 58, sb_w - 40, 86
+        self.sidebar_rename_sess_btn_rect = (btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2)
+        self.canvas.create_rectangle(btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2, fill="#181B26", outline="#2E374D")
+        self.canvas.create_text((btn_ren_x1 + btn_ren_x2) // 2, 72, text="✏️", fill="#A0A5B5", font=("Helvetica", 9))
+
+        # New Session Button [ ＋ ]
+        btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2 = sb_w - 36, 58, sb_w - 8, 86
+        self.sidebar_new_sess_btn_rect = (btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2)
+        self.canvas.create_rectangle(btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2, fill="#0E2A38", outline="#00E5FF")
+        self.canvas.create_text((btn_add_x1 + btn_add_x2) // 2, 72, text="＋", fill="#00E5FF", font=("Helvetica", 11, "bold"))
+
+        # 3. Filter Bar (y: 92 to 128)
+        self.canvas.create_rectangle(0, 92, sb_w, 128, fill="#151720", outline="#232734")
+        
+        filt_x1, filt_y1, filt_x2, filt_y2 = 10, 97, sb_w - 82, 123
+        self.sidebar_filter_btn_rect = (filt_x1, filt_y1, filt_x2, filt_y2)
+        filt_label = f"🎯 {self.club_filter} ▼"
+        self.canvas.create_rectangle(filt_x1, filt_y1, filt_x2, filt_y2, fill="#1B1E2B", outline="#00E5FF" if self.show_filter_dropdown else "#2E374D")
+        self.canvas.create_text(filt_x1 + 8, 110, text=filt_label, fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        filtered_shots = self.get_filtered_shots()
+        count_str = f"{len(filtered_shots)} shots"
+        self.canvas.create_rectangle(sb_w - 76, 97, sb_w - 10, 123, fill="#181A24", outline="#262B3B")
+        self.canvas.create_text(sb_w - 43, 110, text=count_str, fill="#8E94A5", font=("Consolas", 8))
+
+        # 4. Shot Card Stream (y: 132 to h - 42)
+        card_stream_y1 = 132
+        card_stream_y2 = h - 42
+        card_h = 56
+        card_gap = 6
+
+        self.sidebar_shot_card_rects.clear()
+
+        if not filtered_shots:
+            self.canvas.create_text(sb_w // 2, 220, text="NO SHOTS RECORDED", fill="#353A4B", font=("Helvetica", 10, "bold"))
+            self.canvas.create_text(sb_w // 2, 245, text="Hit a shot with Nova or\nchange active club filter.", fill="#606678", font=("Helvetica", 8), justify="center")
+        else:
+            avail_h = card_stream_y2 - card_stream_y1
+            max_cards = max(1, avail_h // (card_h + card_gap))
+            
+            # Display reverse chronological (latest shots on top)
+            rev_shots = list(reversed(filtered_shots))
+            visible_shots = rev_shots[self.sidebar_scroll_offset : self.sidebar_scroll_offset + max_cards]
+
+            for i, (real_idx, shot) in enumerate(visible_shots):
+                cy1 = card_stream_y1 + i * (card_h + card_gap)
+                cy2 = cy1 + card_h
+                if cy2 > card_stream_y2:
+                    break
+
+                self.sidebar_shot_card_rects.append((10, cy1, sb_w - 10, cy2, real_idx))
+                is_selected = (real_idx == self.selected_shot_index)
+
+                card_bg = "#2C2A0A" if is_selected else ("#191C26" if i % 2 == 0 else "#151720")
+                card_border = "#FFEA00" if is_selected else "#282D3D"
+                border_w = 2 if is_selected else 1
+
+                self.canvas.create_rectangle(10, cy1, sb_w - 10, cy2, fill=card_bg, outline=card_border, width=border_w)
+
+                ogc = shot.get("open_golf_coach", {})
+                us = ogc.get("us_customary_units", {})
+                carry = us.get("carry_distance_yards", 0.0)
+                bspeed = us.get("ball_speed_mph", 0.0)
+                smash = ogc.get("smash_factor", 1.0)
+                s_name = ogc.get("shot_name", {}).get("right_handed", "Shot")
+                c_tag = shot.get("club", "Club")
+                t_stamp = shot.get("timestamp", "--:--")
+
+                # Line 1: #N  [Club]  Carry
+                num_txt = f"#{real_idx + 1}"
+                self.canvas.create_text(18, cy1 + 12, text=num_txt, fill="#FFEA00" if is_selected else "#FFFFFF", font=("Consolas", 9, "bold"), anchor="w")
+                self.canvas.create_text(52, cy1 + 12, text=f"[{c_tag}]", fill="#00E5FF", font=("Consolas", 8, "bold"), anchor="w")
+                self.canvas.create_text(sb_w - 18, cy1 + 12, text=f"{carry:.1f} yds", fill="#00FF66" if is_selected else "#FFFFFF", font=("Consolas", 9, "bold"), anchor="e")
+
+                # Line 2: Speed & Shot Name
+                self.canvas.create_text(18, cy1 + 28, text=f"{bspeed:.1f} mph  •  {s_name}", fill="#00E5FF" if is_selected else "#AAB0C0", font=("Helvetica", 8), anchor="w")
+
+                # Line 3: Timestamp & Smash
+                self.canvas.create_text(18, cy1 + 44, text=f"{t_stamp}  •  Smash {smash:.2f}", fill="#6B7285", font=("Consolas", 8), anchor="w")
+
+        # 5. Footer (y: h - 42 to h)
+        clear_y1, clear_y2 = h - 38, h - 8
+        self.sidebar_clear_btn_rect = (10, clear_y1, sb_w - 10, clear_y2)
+        self.canvas.create_rectangle(10, clear_y1, sb_w - 10, clear_y2, fill="#231318", outline="#4A1E2A")
+        self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="🗑️ Clear Current Session", fill="#FF4081", font=("Helvetica", 8, "bold"))
+
+    def draw_session_dropdown(self, w, h):
+        box_w = self.sidebar_width - 20
+        x1, y1 = 10, 88
+        item_h = 28
+        total_items = len(self.sessions) + 2  # +1 for Rename, +1 for + New Session
+        box_h = total_items * item_h + 10
+        x2, y2 = x1 + box_w, y1 + box_h
+
+        self.canvas.create_rectangle(x1 + 3, y1 + 3, x2 + 3, y2 + 3, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
+        
+        self.session_menu_items.clear()
+        for idx, sess in enumerate(self.sessions):
+            iy1 = y1 + 5 + (idx * item_h)
+            iy2 = iy1 + item_h - 2
+            self.session_menu_items.append((x1 + 4, iy1, x2 - 4, iy2, idx))
+
+            is_sel = (idx == self.active_session_index)
+            bg = "#0E2A38" if is_sel else ("#1C1F2B" if idx % 2 == 0 else "#161822")
+            s_name = sess.get("name", f"Session {idx+1}")
+            shot_cnt = len(sess.get("shots", []))
+
+            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
+            self.canvas.create_text(x1 + 10, (iy1 + iy2) // 2, text=f"📂 {s_name}", fill="#00E5FF" if is_sel else "#D0D5DD", font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+            self.canvas.create_text(x2 - 10, (iy1 + iy2) // 2, text=f"{shot_cnt}s", fill="#70788C", font=("Consolas", 8), anchor="e")
+
+        # ✏️ Rename Active Session item
+        ren_iy1 = y1 + 5 + (len(self.sessions) * item_h)
+        ren_iy2 = ren_iy1 + item_h - 2
+        self.session_menu_items.append((x1 + 4, ren_iy1, x2 - 4, ren_iy2, -2))
+        self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill="#1C2130", outline="#2E374D")
+        self.canvas.create_text(x1 + 10, (ren_iy1 + ren_iy2) // 2, text="✏️  Rename Active Session", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        # + Add New Session item
+        add_iy1 = y1 + 5 + ((len(self.sessions) + 1) * item_h)
+        add_iy2 = add_iy1 + item_h - 2
+        self.session_menu_items.append((x1 + 4, add_iy1, x2 - 4, add_iy2, -1))
+        self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2, fill="#0D2A1C", outline="#00FF66")
+        self.canvas.create_text(x1 + 10, (add_iy1 + add_iy2) // 2, text="＋  Create New Session", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+
+    def draw_filter_dropdown(self, w, h):
+        box_w = 180
+        x1, y1 = 10, 125
+        options = ["ALL"] + self.clubs
+        item_h = 22
+        box_h = min(360, len(options) * item_h + 10)
+        x2, y2 = x1 + box_w, y1 + box_h
+
+        self.canvas.create_rectangle(x1 + 3, y1 + 3, x2 + 3, y2 + 3, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
+
+        self.filter_menu_items.clear()
+        for idx, club_opt in enumerate(options[:15]):
+            iy1 = y1 + 5 + (idx * item_h)
+            iy2 = iy1 + item_h - 2
+            self.filter_menu_items.append((x1 + 4, iy1, x2 - 4, iy2, club_opt))
+
+            is_sel = (club_opt == self.club_filter)
+            bg = "#0E2A38" if is_sel else ("#1C1F2B" if idx % 2 == 0 else "#161822")
+            label = "All Clubs (No Filter)" if club_opt == "ALL" else f"🏌️ {club_opt}"
+
+            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
+            self.canvas.create_text(x1 + 10, (iy1 + iy2) // 2, text=label, fill="#00E5FF" if is_sel else "#D0D5DD", font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+
+    def draw_top_header(self, w, h, offset_x=0):
+        header_h = 52
+        # Header Background & Bottom Border
+        self.canvas.create_rectangle(offset_x, 0, w, header_h, fill="#12141A", outline="#242834")
+
+        # 1. Drawer Hamburger Toggle & Branding
+        if self.sidebar_collapsed:
+            hamb_x1, hamb_y1, hamb_x2, hamb_y2 = 10, 10, 42, 42
+            self.sidebar_toggle_rect = (hamb_x1, hamb_y1, hamb_x2, hamb_y2)
+            self.canvas.create_rectangle(hamb_x1, hamb_y1, hamb_x2, hamb_y2, fill="#181A24", outline="#00E5FF")
+            self.canvas.create_text(26, 26, text="☰", fill="#00E5FF", font=("Helvetica", 12, "bold"), anchor="center")
+            brand_x = 54
+        else:
+            brand_x = offset_x + 16
+
+        brand_id = self.canvas.create_text(brand_x, 26, text="SHANKTUARY STUDIO", fill="#00E5FF", font=("Helvetica", 11, "bold"), anchor="w")
+        brand_bbox = self.canvas.bbox(brand_id)
+        if brand_bbox and isinstance(brand_bbox, (tuple, list)) and len(brand_bbox) >= 4 and isinstance(brand_bbox[2], (int, float)):
+            brand_right = int(brand_bbox[2])
+        else:
+            brand_right = brand_x + 180
+        
+        status_text = "● Nova Ready" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
+        status_x1 = brand_right + 14
+        status_x2 = status_x1 + 95
+        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill="#0D2618", outline="#00FF66")
+        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+
+        # 2. Segmented Mode Pills (Center between status box and right utility buttons)
+        mode_tabs = [
+            (1, "Delivery"),
+            (2, "3D Range"),
+            (3, "Dispersion"),
+            (4, "Table"),
+            (5, "Big Numbers"),
+            (6, "My Bag")
+        ]
+        tab_w = 90
+        tab_gap = 5
+        total_tab_w = len(mode_tabs) * tab_w + (len(mode_tabs) - 1) * tab_gap
+        right_margin = w - 245
+        avail_center = (status_x2 + 14 + right_margin) // 2
+        start_tab_x = max(status_x2 + 10, min(right_margin - total_tab_w, avail_center - (total_tab_w // 2)))
+
+        for i, (m_id, label) in enumerate(mode_tabs):
+            x1 = start_tab_x + i * (tab_w + tab_gap)
+            x2 = x1 + tab_w
+            y1, y2 = 10, 42
+            self.mode_pill_rects[m_id] = (x1, y1, x2, y2)
+
+            is_active = (self.view_mode == m_id)
+            bg_col = "#0E2A38" if is_active else "#181A22"
+            border_col = "#00E5FF" if is_active else "#282C3A"
+            txt_col = "#00E5FF" if is_active else "#8E94A5"
+            txt_font = ("Helvetica", 8, "bold") if is_active else ("Helvetica", 8)
+
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col)
+            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=label, fill=txt_col, font=txt_font, anchor="center")
+
+        # 3. Right Utility Pills
+        club_x1 = w - 235
+        club_x2 = w - 130
+        self.club_btn_rect = (club_x1, 10, club_x2, 42)
+        c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
+        c_border = "#00E5FF" if self.show_club_menu else "#2E3342"
+        self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
+        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="center")
+
+        # Tools Menu Button
+        tools_x1 = w - 122
+        tools_x2 = w - 48
+        self.tools_btn_rect = (tools_x1, 10, tools_x2, 42)
+        t_bg = "#0E2A38" if self.show_tools_menu else "#181A22"
+        t_border = "#00E5FF" if self.show_tools_menu else "#2E3342"
+        self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
+        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="center")
+
+        # Fullscreen Toggle Button
+        fs_x1 = w - 40
+        fs_x2 = w - 10
+        self.fullscreen_btn_rect = (fs_x1, 10, fs_x2, 42)
+        self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill="#181A22", outline="#2E3342")
+        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill="#A0A5B5", font=("Helvetica", 11, "bold"), anchor="center")
+
+    def draw_top_metric_toolbar(self, avail_w, ball_speed, club_speed, smash, carry, total, offline, hang_time, eff_pct, offset_x=0):
+        top_y = 52
+        bar_h = 56
+        bot_y = top_y + bar_h
+        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, bot_y, fill="#15171F", outline="#232632")
+
+        off_abs = abs(offline)
+        off_dir = "L" if offline < 0 else "R"
+        off_str = f"{off_abs:.1f} {off_dir} YDS" if off_abs > 0.1 else "0.0 STRAIGHT"
 
         metrics = [
-            ("BALL SPEED", f"{ball_speed:.1f} MPH"),
-            ("CLUB SPEED", f"{club_speed:.1f} MPH"),
-            ("SMASH FACTOR", f"{smash:.2f}"),
-            ("CARRY", f"{carry:.1f} YDS"),
-            ("TOTAL", f"{total:.1f} YDS"),
-            ("OFFLINE", f"{abs(offline):.1f} {'L' if offline < 0 else 'R'} YDS"),
-            ("HANG TIME", f"{hang_time:.1f} SEC"),
-            ("EFFICIENCY", f"{eff_pct:.0f}%")
+            ("BALL SPEED", f"{ball_speed:.1f} MPH", "#FFFFFF"),
+            ("CLUB SPEED", f"{club_speed:.1f} MPH", "#FFFFFF"),
+            ("SMASH FACTOR", f"{smash:.2f}", "#00E5FF"),
+            ("CARRY", f"{carry:.1f} YDS", "#00FF66"),
+            ("TOTAL", f"{total:.1f} YDS", "#FFFFFF"),
+            ("OFFLINE", off_str, "#00E5FF" if off_abs <= 4.0 else ("#FFEA00" if off_abs <= 12.0 else "#FF4081")),
+            ("HANG TIME", f"{hang_time:.1f} SEC", "#A0A5B5"),
+            ("EFFICIENCY", f"{eff_pct:.0f}%", "#00E5FF")
         ]
 
-        col_w = w / len(metrics)
-        for i, (label, val) in enumerate(metrics):
-            cx = int(i * col_w + col_w / 2)
-            self.canvas.create_text(cx, 16, text=label, fill="#7E8496", font=("Helvetica", 9, "bold"))
-            self.canvas.create_text(cx, 38, text=val, fill="#FFFFFF", font=("Consolas", 14, "bold"))
+        col_w = avail_w / len(metrics)
+        for i, (label, val, val_col) in enumerate(metrics):
+            cx = int(offset_x + i * col_w + col_w / 2)
+            self.canvas.create_text(cx, top_y + 16, text=label, fill="#7E8496", font=("Helvetica", 8, "bold"))
+            self.canvas.create_text(cx, top_y + 37, text=val, fill=val_col, font=("Consolas", 12, "bold"))
             if i < len(metrics) - 1:
-                self.canvas.create_line(int((i + 1) * col_w), 10, int((i + 1) * col_w), bar_h - 10, fill="#2A2E3B")
+                self.canvas.create_line(int(offset_x + (i + 1) * col_w), top_y + 10, int(offset_x + (i + 1) * col_w), bot_y - 10, fill="#232632")
+
+    def draw_club_dropdown(self, w, h):
+        box_w = 180
+        x1 = w - 245
+        x2 = x1 + box_w
+        y1 = 48
+        item_h = 24
+        custom_btn_h = 28
+        total_items = len(self.clubs)
+        box_h = total_items * item_h + custom_btn_h + 16
+        y2 = y1 + box_h
+
+        self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
+        self.canvas.create_text(x1 + 14, y1 + 12, text="SELECT ACTIVE CLUB", fill="#7E8496", font=("Helvetica", 8, "bold"), anchor="w")
+
+        self.club_menu_items.clear()
+        for idx, club_name in enumerate(self.clubs):
+            iy1 = y1 + 22 + (idx * item_h)
+            iy2 = iy1 + item_h - 2
+            self.club_menu_items.append((x1 + 6, iy1, x2 - 6, iy2, club_name))
+
+            is_sel = (club_name == self.current_club)
+            bg = "#0E2A38" if is_sel else ("#1D202B" if idx % 2 == 0 else "#161822")
+            txt_col = "#00E5FF" if is_sel else "#D0D5DD"
+            
+            self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
+            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=f"🏌️  {club_name}", fill=txt_col, font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+
+        # Divider & Add Custom Club Action
+        div_y = y1 + 22 + (total_items * item_h) + 2
+        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill="#282E40", width=1)
+
+        btn_y1 = div_y + 4
+        btn_y2 = btn_y1 + 22
+        self.club_menu_items.append((x1 + 6, btn_y1, x2 - 6, btn_y2, "__add_custom__"))
+        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill="#142C24", outline="#00FF66", width=1)
+        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋ Add Custom Club...", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+
+    def draw_tools_flyout_menu(self, w, h):
+        box_w = 320
+        x2 = w - 16
+        x1 = x2 - box_w
+        y1 = 48
+        y2 = y1 + 395
+
+        self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161922", outline="#00E5FF", width=2)
+
+        self.tools_menu_items.clear()
+        curr_y = y1 + 14
+
+        self.canvas.create_text(x1 + 14, curr_y, text="⚙️ STUDIO TOOLS & STREAMING", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+        curr_y += 24
+
+        # Section 1: Broadcast & Overlays
+        self.canvas.create_text(x1 + 14, curr_y, text="🎥 BROADCAST & OVERLAYS", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 14
+
+        btn1_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], "open_config"))
+        self.canvas.create_rectangle(btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn1_rect[1] + btn1_rect[3]) // 2, text="🎛️ OBS Overlay Config (/config)", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 32
+
+        btn2_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], "copy_obs_url"))
+        self.canvas.create_rectangle(btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn2_rect[1] + btn2_rect[3]) // 2, text="📋 Copy Full Overlay URL (OBS)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 32
+
+        btn3_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], "open_range"))
+        self.canvas.create_rectangle(btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn3_rect[1] + btn3_rect[3]) // 2, text="⛳ Open 3D Range Source (/range)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 36
+
+        # Section 2: Floor Projection & Virtual Divot
+        self.canvas.create_text(x1 + 14, curr_y, text="🎯 FLOOR PROJECTION & VIRTUAL DIVOT", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 14
+
+        btn4_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], "copy_divot_url"))
+        self.canvas.create_rectangle(btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn4_rect[1] + btn4_rect[3]) // 2, text="📋 Copy Virtual Divot URL (/divot)", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 32
+
+        btn5_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], "open_divot"))
+        self.canvas.create_rectangle(btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn5_rect[1] + btn5_rect[3]) // 2, text="🎯 Open Virtual Divot (/divot)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 32
+
+        btn6_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], "set_mode_2"))
+        self.canvas.create_rectangle(btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn6_rect[1] + btn6_rect[3]) // 2, text="🎚️ Switch App to Divot Mode (2)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 36
+
+        # Section 3: Hardware
+        self.canvas.create_text(x1 + 14, curr_y, text="📡 NOVA & HARDWARE", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 16
+        self.canvas.create_text(x1 + 18, curr_y, text="Host: 192.168.40.249:2920 (mDNS Ready)", fill="#8E94A5", font=("Consolas", 8), anchor="w")
 
     def draw_screen(self):
         self.canvas.delete("all")
@@ -470,19 +2109,8 @@ class ShanktuaryApp:
         if w <= 10 or h <= 10:
             w, h = 1150, 780
 
-        self.shot_list_item_rects.clear()
         self.land_dot_coords.clear()
-        self.inspect_btn_rect = None
-        self.clear_btn_rect = None
-
-        self.btn_3d_range_rect = None
-
-        foot_text = f"[M/Tab] Mode (1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite) | [4] 3D Range | [F] Fullscreen | [C] Clear ({len(self.session_shots)} shots) | [Esc] Exit"
-        self.canvas.create_text(w // 2, h - 14, text=foot_text, fill="#4E5363", font=("Helvetica", 9))
-
-        if not self.current_shot and self.view_mode != 3:
-            self.canvas.create_text(w // 2, h // 2, text="READY FOR SHOT", fill="#2C303B", font=("Helvetica", 36, "bold"))
-            return
+        self.mode_pill_rects.clear()
 
         # Extract Current Shot Metrics
         if self.current_shot:
@@ -518,232 +2146,796 @@ class ShanktuaryApp:
             shot_name = "Ready"
             shot_rank = "-"
 
+        # Layout Geometry Offset
+        offset_x = self.sidebar_width if not self.sidebar_collapsed else 0
+        avail_w = w - offset_x
+
+        # 1. Left Shot Library Sidebar
+        self.draw_left_sidebar(w, h)
+
+        # 2. Top Navigation Bar
+        self.draw_top_header(w, h, offset_x=offset_x)
+
+        # 3. Workspace View Routing
         if self.view_mode == 1:
-            self.draw_top_metric_toolbar(w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct)
-            self.draw_4_quadrant_studio(w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash)
+            # Mode 1: Delivery (4-Quadrant Studio)
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            if self.current_shot:
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
+            else:
+                self.canvas.create_text(offset_x + avail_w // 2, (h + 108) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
         elif self.view_mode == 2:
-            self.draw_divot_focus(w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name)
+            # Mode 2: 3D Range Viewport
+            self.draw_3d_range_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, peak_height_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=offset_x)
+        elif self.view_mode == 3:
+            # Mode 3: Dispersion & Club Gapping Viewport
+            self.draw_dispersion_and_gapping(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 4:
+            # Mode 4: Sortable Shot Table Matrix
+            self.draw_shot_table_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 5:
+            # Mode 5: High-Contrast Big Numbers Sim Grid
+            self.draw_big_numbers_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, smash, vert_launch, total_spin, spin_axis, club_path, face_to_path, peak_height_yds, offline_yds, offset_x=offset_x)
+        elif self.view_mode == 6:
+            # Mode 6: My Bag Mapping & Gapping Matrix
+            self.draw_my_bag_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 0:
+            # Mode 0: Floor Divot Focus Projector
+            self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
         else:
-            self.draw_performance_suite(w, h)
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            if self.current_shot:
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
 
-        # Draw Global 3D Range Button
-        self.btn_3d_range_rect = (w - 110, 15, w - 15, 45)
-        self.canvas.create_rectangle(self.btn_3d_range_rect[0], self.btn_3d_range_rect[1], self.btn_3d_range_rect[2], self.btn_3d_range_rect[3], fill="#00E5FF", outline="")
-        self.canvas.create_text(w - 62, 30, text="🏔️ 3D RANGE", fill="#101114", font=("Helvetica", 9, "bold"))
+        # 4. Floating Overlay Menus (Top Layer)
+        if self.show_session_dropdown:
+            self.draw_session_dropdown(w, h)
+        elif self.show_filter_dropdown:
+            self.draw_filter_dropdown(w, h)
+        elif self.show_club_menu:
+            self.draw_club_dropdown(w, h)
+        elif self.show_tools_menu:
+            self.draw_tools_flyout_menu(w, h)
 
-    def draw_performance_suite(self, w, h):
-        table_h = 85
-        self.canvas.create_rectangle(0, 0, w, table_h, fill="#14151B", outline="#262933")
+        # 5. In-Canvas Modal Dialog (Top-most Modal Layer)
+        if self.show_spec_editor_modal:
+            self.draw_club_spec_editor_modal(w, h)
+        elif self.show_custom_club_modal:
+            self.draw_custom_club_modal(w, h)
 
-        avgs = self.calculate_session_averages()
+        # 6. Toast Notification
+        if self.copy_feedback:
+            toast_w = 220
+            self.canvas.create_rectangle((w - toast_w) // 2, h - 50, (w + toast_w) // 2, h - 18, fill="#0E2A1B", outline="#00FF66", width=2)
+            self.canvas.create_text(w // 2, h - 34, text=f"✓ {self.copy_feedback}", fill="#00FF66", font=("Helvetica", 9, "bold"))
 
-        if 0 <= self.selected_shot_index < len(self.session_shots):
-            active_shot = self.session_shots[self.selected_shot_index]
-        else:
-            active_shot = self.current_shot
+    def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
+        self.range_launch_web_rect = None
+        top_y = 52
+        horizon_y = top_y + int((h - top_y) * 0.28)
+        ground_y = h - 25
 
-        cols = [
-            ("SPEED", "ball_speed_mph", "{:.1f}", "MPH"),
-            ("LAUNCH ANGLE", "vertical_launch_angle_degrees", "{:.1f}°", "DEG"),
-            ("TOTAL SPIN", "total_spin_rpm", "{:.0f}", "RPM"),
-            ("CARRY", "carry_distance_yards", "{:.1f}", "YDS"),
-            ("TOTAL", "total_distance_yards", "{:.1f}", "YDS"),
-            ("PUSH/PULL", "horizontal_launch_angle_degrees", "{:+.1f}°", "DEG"),
-            ("SIDESPIN", "sidespin_rpm", "{:+.0f}", "RPM"),
-            ("DESCENT ANGLE", "descent_angle_degrees", "{:.1f}°", "DEG"),
-            ("PEAK HEIGHT", "peak_height_yards", "{:.1f}", "YDS"),
-            ("OFFLINE", "offline_distance_yards", "{:+.1f}", "YDS")
+        # 1. Sky Gradient Background
+        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, horizon_y, fill="#0B0F19", outline="")
+        self.canvas.create_rectangle(offset_x, horizon_y - 2, offset_x + avail_w, horizon_y + 2, fill="#182338", outline="")
+
+        # Distant Mountain Silhouettes
+        mtn_pts = [
+            offset_x, horizon_y,
+            offset_x + int(avail_w * 0.15), horizon_y - 28,
+            offset_x + int(avail_w * 0.30), horizon_y - 12,
+            offset_x + int(avail_w * 0.50), horizon_y - 35,
+            offset_x + int(avail_w * 0.70), horizon_y - 18,
+            offset_x + int(avail_w * 0.88), horizon_y - 30,
+            offset_x + avail_w, horizon_y
         ]
+        self.canvas.create_polygon(mtn_pts, fill="#0F1624", outline="#192336")
 
-        sb_w = self.sidebar_width
-        margin_x = 70
-        chart_w = max(380, w - margin_x - sb_w - 30)
+        # 2. Ground & Perspective Fairway
+        self.canvas.create_rectangle(offset_x, horizon_y, offset_x + avail_w, h, fill="#09140C", outline="")
 
-        col_w = (w - 120) / len(cols)
+        fx1 = offset_x + int(avail_w * 0.32)
+        fx2 = offset_x + int(avail_w * 0.68)
+        bx1 = offset_x + 30
+        bx2 = offset_x + avail_w - 30
 
-        row_label_text = f"SHOT #{self.selected_shot_index + 1}" if self.selected_shot_index >= 0 else "LAST"
-        self.canvas.create_text(15, 42, text=row_label_text, fill="#FFEA00", font=("Helvetica", 9, "bold"), anchor="w")
-        self.canvas.create_text(15, 65, text="AVERAGE", fill="#7E8496", font=("Helvetica", 9, "bold"), anchor="w")
+        fairway_poly = [fx1, horizon_y, fx2, horizon_y, bx2, ground_y, bx1, ground_y]
+        self.canvas.create_polygon(fairway_poly, fill="#122518", outline="#1D3E28", width=2)
 
-        for i, (col_name, field, fmt, unit) in enumerate(cols):
-            cx = int(100 + i * col_w + col_w / 2)
-            self.canvas.create_text(cx, 18, text=col_name, fill="#8E94A5", font=("Helvetica", 8, "bold"))
+        # Center target line
+        cx_top = (fx1 + fx2) // 2
+        cx_bot = (bx1 + bx2) // 2
+        self.canvas.create_line(cx_bot, ground_y, cx_top, horizon_y, fill="#00FF66", width=2, dash=(6, 4))
 
-            if active_shot:
-                ogc = active_shot.get("open_golf_coach", {})
-                us = ogc.get("us_customary_units", {})
-                v_last = us.get(field, active_shot.get(field, ogc.get(field, 0.0)))
-                val_last_str = fmt.format(v_last)
-            else:
-                val_last_str = "-"
-            self.canvas.create_text(cx, 42, text=val_last_str, fill="#FFFFFF", font=("Consolas", 12, "bold"))
+        # Yardage Arcs & Pins
+        yardages = [50, 100, 150, 200, 250, 300, 350]
+        pin_colors = {100: "#FF1744", 150: "#FFFFFF", 200: "#2979FF", 250: "#FFD600", 300: "#00E676"}
+        
+        for yds in yardages:
+            frac = yds / 380.0
+            arc_y = ground_y - int((ground_y - horizon_y) * (frac ** 0.74))
+            w_at_y = (bx2 - bx1) + ((fx2 - fx1) - (bx2 - bx1)) * ((ground_y - arc_y) / (ground_y - horizon_y))
+            ax1 = cx_bot - int(w_at_y * 0.46)
+            ax2 = cx_bot + int(w_at_y * 0.46)
+            
+            # Arc curve
+            self.canvas.create_line(ax1, arc_y, ax2, arc_y, fill="#23422C", width=1, dash=(3, 3))
+            
+            # Distance Signboard
+            self.canvas.create_rectangle(cx_bot - 18, arc_y - 8, cx_bot + 18, arc_y + 8, fill="#0E2114", outline="#00FF66" if yds == 150 else "#254830")
+            self.canvas.create_text(cx_bot, arc_y, text=str(yds), fill="#00FF66" if yds == 150 else "#8E9F94", font=("Consolas", 8, "bold"))
 
-            if avgs:
-                mapping = {
-                    "ball_speed_mph": avgs.get("ball_speed", 0.0),
-                    "vertical_launch_angle_degrees": avgs.get("launch_angle", 0.0),
-                    "total_spin_rpm": avgs.get("total_spin", 0.0),
-                    "carry_distance_yards": avgs.get("carry", 0.0),
-                    "total_distance_yards": avgs.get("total", 0.0),
-                    "horizontal_launch_angle_degrees": avgs.get("push_pull", 0.0),
-                    "sidespin_rpm": avgs.get("sidespin", 0.0),
-                    "descent_angle_degrees": avgs.get("descent", 0.0),
-                    "peak_height_yards": avgs.get("apex", 0.0),
-                    "offline_distance_yards": avgs.get("offline", 0.0)
-                }
-                val_avg_str = fmt.format(mapping.get(field, 0.0))
-            else:
-                val_avg_str = "-"
-            self.canvas.create_text(cx, 65, text=val_avg_str, fill="#AAB0C0", font=("Consolas", 11))
+            # Pin Flag
+            if yds in pin_colors:
+                p_col = pin_colors[yds]
+                pin_x = cx_bot + (35 if yds % 2 == 0 else -35)
+                pin_y = arc_y
+                self.canvas.create_line(pin_x, pin_y, pin_x, pin_y - 18, fill="#FFFFFF", width=2)
+                self.canvas.create_polygon(pin_x, pin_y - 18, pin_x + 10, pin_y - 13, pin_x, pin_y - 8, fill=p_col, outline="")
 
-            if i < len(cols) - 1:
-                self.canvas.create_line(int(100 + (i + 1) * col_w), 10, int(100 + (i + 1) * col_w), table_h - 10, fill="#232632")
+        # 3. Multi-Shot Tracer History & Active Shot
+        for s in self.session_shots[:-1]:
+            if s.get("excluded", False):
+                continue
+            s_ogc = s.get("open_golf_coach", {})
+            s_us = s_ogc.get("us_customary_units", {})
+            s_c = s_us.get("carry_distance_yards", 0.0)
+            s_off = s_us.get("offline_distance_yards", 0.0)
+            s_ap = s_us.get("peak_height_yards", 25.0)
+            if s_c > 0:
+                past_pts = []
+                for step in range(0, 101, 5):
+                    tf = step / 100.0
+                    cdist = s_c * tf
+                    coff = s_off * tf
+                    calt = math.sin(tf * math.pi) * s_ap
+                    gfrac = min(1.0, cdist / 380.0)
+                    gy = ground_y - int((ground_y - horizon_y) * (gfrac ** 0.74))
+                    gw = (bx2 - bx1) + ((fx2 - fx1) - (bx2 - bx1)) * ((ground_y - gy) / (ground_y - horizon_y))
+                    gx = cx_bot + int((coff / 50.0) * (gw * 0.45))
+                    ty = gy - int(calt * 3.6 * (1.0 - 0.45 * gfrac))
+                    past_pts.extend([gx, ty])
+                if len(past_pts) >= 4:
+                    self.canvas.create_line(past_pts, fill="#244B36", width=1, smooth=True)
 
-        plot_y1 = table_h + 20
-        plot_h = (h - table_h - 60) // 2
-        plot_y2 = plot_y1 + plot_h
+        # Draw Active Shot Tracer & Curtain
+        if carry_yds > 0:
+            traj_pts = []
+            ground_pts = []
+            apex_pt = None
+            max_alt = -1
 
-        self.canvas.create_rectangle(margin_x, plot_y1, margin_x + chart_w, plot_y2, fill="#16171E", outline="#252834")
+            for step in range(0, 101, 3):
+                tf = step / 100.0
+                cdist = carry_yds * tf
+                coff = (horiz_launch * 0.6 * (1.0 - tf)) + (offline_yds * tf)
+                calt = math.sin(tf * math.pi) * apex_yds
+                
+                gfrac = min(1.0, cdist / 380.0)
+                gy = ground_y - int((ground_y - horizon_y) * (gfrac ** 0.74))
+                gw = (bx2 - bx1) + ((fx2 - fx1) - (bx2 - bx1)) * ((ground_y - gy) / (ground_y - horizon_y))
+                gx = cx_bot + int((coff / 50.0) * (gw * 0.45))
+                
+                alt_px = int(calt * 3.8 * (1.0 - 0.45 * gfrac))
+                ty = gy - alt_px
+                traj_pts.append((gx, ty))
+                ground_pts.append((gx, gy))
 
-        max_x_yds = 350
-        ticks = [0, 25, 75, 125, 175, 225, 275, 325]
+                if alt_px > max_alt:
+                    max_alt = alt_px
+                    apex_pt = (gx, ty, apex_yds)
+
+            # Shadow Curtain dropped to ground
+            curtain_poly = []
+            for p in traj_pts:
+                curtain_poly.extend([p[0], p[1]])
+            for p in reversed(ground_pts):
+                curtain_poly.extend([p[0], p[1]])
+            if len(curtain_poly) >= 6:
+                self.canvas.create_polygon(curtain_poly, fill="#00E5FF", outline="", stipple="gray25")
+
+            # Ground landing path
+            flat_pts = []
+            for p in ground_pts:
+                flat_pts.extend([p[0], p[1]])
+            self.canvas.create_line(flat_pts, fill="#008855", width=2, dash=(4, 2))
+
+            # Neon flight tracer line
+            flight_pts = []
+            for p in traj_pts:
+                flight_pts.extend([p[0], p[1]])
+            self.canvas.create_line(flight_pts, fill="#00FF66", width=3, smooth=True)
+
+            # Landing impact circle
+            lx, ly = ground_pts[-1]
+            self.canvas.create_oval(lx - 12, ly - 6, lx + 12, ly + 6, fill="", outline="#00FF66", width=2)
+            self.canvas.create_oval(lx - 4, ly - 2, lx + 4, ly + 2, fill="#00FF66", outline="")
+            
+            # Carry Flag Tag
+            self.canvas.create_rectangle(lx - 34, ly - 28, lx + 34, ly - 10, fill="#0C2515", outline="#00FF66", width=2)
+            self.canvas.create_text(lx, ly - 19, text=f"{carry_yds:.1f} YDS", fill="#00FF66", font=("Consolas", 8, "bold"))
+
+            # Floating Apex Badge
+            if apex_pt:
+                ax, ay, a_val = apex_pt
+                self.canvas.create_rectangle(ax - 32, ay - 20, ax + 32, ay - 4, fill="#0E2838", outline="#00E5FF")
+                self.canvas.create_text(ax, ay - 12, text=f"▲ {a_val:.1f} yds", fill="#00E5FF", font=("Consolas", 8, "bold"))
+        else:
+            self.canvas.create_text(cx_bot, horizon_y + 80, text="READY FOR SHOT", fill="#1C3827", font=("Helvetica", 24, "bold"))
+
+        # 4. Top Floating HUD Tiles
+        hud_h = 48
+        hud_y1 = top_y + 10
+        hud_y2 = hud_y1 + hud_h
+        
+        off_dir = "L" if offline_yds < 0 else "R"
+        off_str = f"{abs(offline_yds):.1f} {off_dir} YDS" if abs(offline_yds) > 0.1 else "0.0 STRAIGHT"
+
+        hud_cards = [
+            ("CARRY", f"{carry_yds:.1f} YDS", "#00FF66"),
+            ("TOTAL", f"{total_yds:.1f} YDS", "#FFFFFF"),
+            ("BALL SPEED", f"{ball_speed:.1f} MPH", "#FFFFFF"),
+            ("CLUB SPEED", f"{club_speed:.1f} MPH", "#FFFFFF"),
+            ("LAUNCH", f"{vert_launch:.1f}°", "#00E5FF"),
+            ("TOTAL SPIN", f"{int(total_spin)} RPM", "#FFEA00"),
+            ("APEX", f"{apex_yds:.1f} YDS", "#00E5FF"),
+            ("OFFLINE", off_str, "#00E5FF" if abs(offline_yds) <= 5.0 else "#FF4081")
+        ]
+        
+        card_w = (avail_w - 30) // len(hud_cards)
+        for i, (h_title, h_val, h_col) in enumerate(hud_cards):
+            hx1 = offset_x + 15 + i * card_w
+            hx2 = hx1 + card_w - 6
+            self.canvas.create_rectangle(hx1, hud_y1, hx2, hud_y2, fill="#121622", outline="#242B3B")
+            self.canvas.create_text((hx1 + hx2) // 2, hud_y1 + 13, text=h_title, fill="#7E8799", font=("Helvetica", 7, "bold"))
+            self.canvas.create_text((hx1 + hx2) // 2, hud_y1 + 33, text=h_val, fill=h_col, font=("Consolas", 10, "bold"))
+
+        # 5. WebGPU Launch Button (Bottom Right)
+        btn_w, btn_h = 240, 32
+        bx2 = offset_x + avail_w - 15
+        bx1 = bx2 - btn_w
+        by2 = h - 12
+        by1 = by2 - btn_h
+        self.range_launch_web_rect = (bx1, by1, bx2, by2)
+        self.canvas.create_rectangle(bx1, by1, bx2, by2, fill="#0E2838", outline="#00E5FF", width=2)
+        self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="⛳ Open 3D WebGPU Range (/range) ↗", fill="#00E5FF", font=("Helvetica", 8, "bold"))
+
+    def draw_dispersion_and_gapping(self, avail_w, h, offset_x=0):
+        self.dispersion_club_chip_rects.clear()
+        self.dispersion_dot_rects.clear()
+        self.dispersion_submode_rects.clear()
+
+        top_y = 58
+        bot_y = h - 14
+
+        # Left Fairway / Trajectory Area vs Right Gapping Panel (Resizable Splitter)
+        plot_w = int(avail_w * self.dispersion_splitter_ratio)
+        plot_w = max(220, min(avail_w - 180, plot_w))
+        
+        split_x1 = offset_x + plot_w + 3
+        split_x2 = split_x1 + 8
+        self.dispersion_splitter_rect = (split_x1 - 4, top_y, split_x2 + 4, bot_y)
+
+        gap_x1 = split_x2 + 6
+        gap_w = (offset_x + avail_w) - gap_x1 - 12
+
+        # 1. Sub-View Navigation Pills at top of Left Area
+        submodes = [
+            ("split", "🔀 Split View (Both)"),
+            ("topdown", "🎯 Overhead Dispersion"),
+            ("side", "📈 Trajectory Side-View")
+        ]
+        sub_x = offset_x + 10
+        for sm_key, sm_label in submodes:
+            sm_w = len(sm_label) * 6 + 22
+            sm_rect = (sub_x, top_y, sub_x + sm_w, top_y + 24)
+            self.dispersion_submode_rects.append((sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], sm_key))
+            is_active = (self.dispersion_view_submode == sm_key)
+            self.canvas.create_rectangle(sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], fill="#0E2838" if is_active else "#161922", outline="#00E5FF" if is_active else "#282E40")
+            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill="#00E5FF" if is_active else "#8E94A5", font=("Helvetica", 8, "bold" if is_active else "normal"))
+            sub_x += sm_w + 8
+
+        # Filter session shots
+        grouped_shots = {}
+        for idx, shot in enumerate(self.session_shots):
+            if shot.get("excluded", False):
+                continue
+            c_name = shot.get("club", "7 Iron")
+            if self.dispersion_selected_club != "ALL" and c_name != self.dispersion_selected_club:
+                continue
+            if c_name not in grouped_shots:
+                grouped_shots[c_name] = []
+            grouped_shots[c_name].append((idx, shot))
+
+        content_top = top_y + 30
+        content_h = bot_y - content_top
+        plot_x1 = offset_x + 10
+        plot_x2 = offset_x + plot_w
+        chart_w = max(100, plot_x2 - plot_x1 - 50)
+        margin_x = plot_x1 + 45
+        max_x_yds = 350.0
+
+        # Draw Left Area Charts according to submode
+        if self.dispersion_view_submode == "split":
+            # Stacked: Top = Side View Trajectory Profile, Bottom = Top-Down Overhead Dispersion
+            side_h = int(content_h * 0.44)
+            side_y1 = content_top
+            side_y2 = side_y1 + side_h
+
+            disp_y1 = side_y2 + 12
+            disp_y2 = bot_y
+
+            self._draw_side_trajectory_chart(plot_x1, side_y1, plot_x2, side_y2, margin_x, chart_w, max_x_yds, grouped_shots)
+            self._draw_topdown_dispersion_chart(plot_x1, disp_y1, plot_x2, disp_y2, max_x_yds, grouped_shots)
+
+        elif self.dispersion_view_submode == "side":
+            # Full Height Side View Trajectory Profile
+            self._draw_side_trajectory_chart(plot_x1, content_top, plot_x2, bot_y, margin_x, chart_w, max_x_yds, grouped_shots)
+
+        else: # "topdown"
+            # Full Height Overhead Dispersion
+            self._draw_topdown_dispersion_chart(plot_x1, content_top, plot_x2, bot_y, max_x_yds, grouped_shots)
+
+        # Draw Vertical Draggable Splitter Bar Handle
+        is_dragging = self.dispersion_splitter_dragging
+        self.canvas.create_rectangle(split_x1, top_y, split_x2, bot_y, fill="#00E5FF" if is_dragging else "#161924", outline="#00E5FF" if is_dragging else "#252B3B")
+        mid_y = (top_y + bot_y) // 2
+        for dy in [-16, -8, 0, 8, 16]:
+            self.canvas.create_line(split_x1 + 2, mid_y + dy, split_x2 - 2, mid_y + dy, fill="#FFFFFF" if is_dragging else "#50586D", width=1)
+
+        # 2. Right Gapping & Distribution Panel
+        self.canvas.create_rectangle(gap_x1, top_y, gap_x1 + gap_w, bot_y, fill="#12141D", outline="#232736")
+        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="📊 CLUB GAPPING & SPREAD", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+
+        # Club Filter Chips along top of right panel
+        chip_y1 = top_y + 30
+        chip_y2 = chip_y1 + 22
+        all_chip_rect = (gap_x1 + 10, chip_y1, gap_x1 + 55, chip_y2)
+        self.dispersion_club_chip_rects.append((all_chip_rect[0], all_chip_rect[1], all_chip_rect[2], all_chip_rect[3], "ALL"))
+        is_all = (self.dispersion_selected_club == "ALL")
+        self.canvas.create_rectangle(all_chip_rect[0], all_chip_rect[1], all_chip_rect[2], all_chip_rect[3], fill="#0E2838" if is_all else "#181B26", outline="#00E5FF" if is_all else "#282E40")
+        self.canvas.create_text((all_chip_rect[0] + all_chip_rect[2]) // 2, (chip_y1 + chip_y2) // 2, text="ALL", fill="#00E5FF" if is_all else "#8E94A5", font=("Helvetica", 8, "bold"))
+
+        # Gapping Cards per club
+        card_start_y = top_y + 60
+        card_h = 70
+        card_gap = 8
+
+        session_clubs = []
+        for s in self.session_shots:
+            c = s.get("club", "7 Iron")
+            if c not in session_clubs:
+                session_clubs.append(c)
+
+        if not session_clubs:
+            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 150, text="NO SHOTS RECORDED", fill="#353B4D", font=("Helvetica", 10, "bold"))
+        else:
+            prev_avg_carry = None
+            for i, c_name in enumerate(session_clubs[:6]):
+                cy1 = card_start_y + i * (card_h + card_gap)
+                cy2 = cy1 + card_h
+                if cy2 > bot_y:
+                    break
+
+                c_color = self.get_club_color(c_name)
+                c_shots = [s for s in self.session_shots if s.get("club") == c_name and not s.get("excluded", False)]
+                c_carries = [s.get("open_golf_coach", {}).get("us_customary_units", {}).get("carry_distance_yards", 0.0) for s in c_shots]
+                c_carries = [x for x in c_carries if x > 0]
+                c_offs = [s.get("open_golf_coach", {}).get("us_customary_units", {}).get("offline_distance_yards", 0.0) for s in c_shots]
+
+                if c_carries:
+                    avg_c = sum(c_carries) / len(c_carries)
+                    min_c, max_c = min(c_carries), max(c_carries)
+                    std_c = (sum((x - avg_c) ** 2 for x in c_carries) / len(c_carries)) ** 0.5
+                    avg_off = sum(c_offs) / len(c_offs) if c_offs else 0.0
+                    off_dir = "R" if avg_off >= 0 else "L"
+                else:
+                    avg_c = min_c = max_c = std_c = avg_off = 0.0
+                    off_dir = "R"
+
+                # Card background
+                self.canvas.create_rectangle(gap_x1 + 10, cy1, gap_x1 + gap_w - 10, cy2, fill="#161924", outline="#252A3B")
+                # Left accent color strip
+                self.canvas.create_rectangle(gap_x1 + 10, cy1, gap_x1 + 15, cy2, fill=c_color, outline="")
+
+                # Line 1: Club Name & Shot Count
+                self.canvas.create_text(gap_x1 + 22, cy1 + 14, text=f"🏌️ {c_name}", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="w")
+                self.canvas.create_text(gap_x1 + gap_w - 18, cy1 + 14, text=f"{len(c_shots)} shots", fill="#8E94A5", font=("Consolas", 8), anchor="e")
+
+                # Line 2: Average Carry with Std Dev & Gap Delta
+                gap_str = f"({avg_c - prev_avg_carry:+.1f}y gap)" if (prev_avg_carry is not None and avg_c > 0) else ""
+                self.canvas.create_text(gap_x1 + 22, cy1 + 34, text=f"Carry: {avg_c:.1f} yds (±{std_c:.1f}y)  {gap_str}", fill=c_color, font=("Consolas", 9, "bold"), anchor="w")
+
+                # Line 3: Min-Max window & Offline Dispersion
+                self.canvas.create_text(gap_x1 + 22, cy1 + 52, text=f"Window: {min_c:.0f}–{max_c:.0f}y  •  Lateral: {abs(avg_off):.1f}y {off_dir}", fill="#8E94A5", font=("Helvetica", 8), anchor="w")
+
+                if avg_c > 0:
+                    prev_avg_carry = avg_c
+
+    def _draw_side_trajectory_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, margin_x, chart_w, max_x_yds, grouped_shots):
+        self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill="#13151D", outline="#232736")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="📈 TRAJECTORY PROFILE (ELEVATION & APEX)", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+
+        base_y = plot_y2 - 20
+        chart_h = base_y - (plot_y1 + 28)
+        max_h_yds = 60.0
+
+        # X distance grid ticks
+        ticks = [0, 50, 100, 150, 200, 250, 300, 350]
         for t in ticks:
             tx = margin_x + int((t / max_x_yds) * chart_w)
-            self.canvas.create_line(tx, plot_y1, tx, plot_y2, fill="#222530", width=1, dash=(2, 2))
-            self.canvas.create_text(tx, plot_y2 + 12, text=str(t), fill="#62687A", font=("Consolas", 9))
+            self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill="#1D202C", width=1, dash=(2, 2))
+            self.canvas.create_text(tx, base_y + 10, text=str(t), fill="#5A6174", font=("Consolas", 7))
 
-        max_h_yds = 60
-        for hy in range(0, 61, 20):
-            ty = plot_y2 - int((hy / max_h_yds) * plot_h)
-            self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill="#222530", width=1, dash=(2, 2))
-            self.canvas.create_text(margin_x - 20, ty, text=f"{hy}y", fill="#62687A", font=("Consolas", 9))
+        # Y height grid lines
+        for hy in [0, 20, 40, 60]:
+            ty = base_y - int((hy / max_h_yds) * chart_h)
+            self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill="#1D202C", width=1, dash=(2, 2))
+            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill="#5A6174", font=("Consolas", 7))
 
-        for idx, shot in enumerate(self.session_shots):
-            ogc = shot.get("open_golf_coach", {})
-            us = ogc.get("us_customary_units", {})
-            c_yds = us.get("carry_distance_yards", 0.0)
-            apex_y = us.get("peak_height_yards", 0.0)
+        # Ground baseline
+        self.canvas.create_line(margin_x, base_y, margin_x + chart_w, base_y, fill="#00FF66", width=1)
+
+        # Plot flight arcs for each shot
+        for c_name, items in grouped_shots.items():
+            c_color = self.get_club_color(c_name)
+            for real_idx, shot in items:
+                ogc = shot.get("open_golf_coach", {})
+                us = ogc.get("us_customary_units", {})
+                c_yds = us.get("carry_distance_yards", 0.0)
+                apex_y = us.get("peak_height_yards", 25.0)
+                if c_yds <= 0:
+                    continue
+
+                is_sel = (real_idx == self.selected_shot_index)
+                arc_col = "#FFEA00" if is_sel else c_color
+                line_w = 3 if is_sel else 1
+
+                pts = []
+                for step in range(0, 101, 4):
+                    frac = step / 100.0
+                    curr_x = c_yds * frac
+                    curr_h = math.sin(frac * math.pi) * apex_y
+                    cx_px = margin_x + int((curr_x / max_x_yds) * chart_w)
+                    cy_px = base_y - int((curr_h / max_h_yds) * chart_h)
+                    pts.extend([cx_px, cy_px])
+
+                if len(pts) >= 4:
+                    self.canvas.create_line(pts, fill=arc_col, width=line_w, smooth=True)
+
+                land_x = margin_x + int((c_yds / max_x_yds) * chart_w)
+                self.dispersion_dot_rects.append((land_x, base_y, real_idx))
+                self.canvas.create_oval(land_x - (4 if is_sel else 2), base_y - (4 if is_sel else 2), land_x + (4 if is_sel else 2), base_y + (4 if is_sel else 2), fill="#FFEA00" if is_sel else c_color, outline="")
+
+    def _draw_topdown_dispersion_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, max_range_yds, grouped_shots):
+        self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill="#12141D", outline="#232736")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="🎯 OVERHEAD DISPERSION & COVARIANCE ELLIPSES", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        plot_w = plot_x2 - plot_x1
+        cx = (plot_x1 + plot_x2) // 2
+        tee_y = plot_y2 - 16
+        plot_h = tee_y - plot_y1 - 26
+        max_lat_yds = 45.0
+
+        # Centerline
+        self.canvas.create_line(cx, tee_y, cx, plot_y1 + 22, fill="#2B3142", width=2, dash=(6, 4))
+
+        # Lateral deviation guides
+        for lat in [-30, -15, 15, 30]:
+            lx = cx + int((lat / max_lat_yds) * (plot_w * 0.45))
+            self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill="#1C202C", width=1, dash=(2, 4))
+            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill="#5A6175", font=("Consolas", 7))
+
+        # Concentric distance arcs
+        for yds in [50, 100, 150, 200, 250, 300, 350]:
+            frac = yds / max_range_yds
+            arc_y = tee_y - int(frac * plot_h)
+            self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill="#1E2332", width=1, dash=(3, 3))
+            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill="#6B7285", font=("Consolas", 7))
+
+        # Render Ellipses & Dots
+        for c_name, items in grouped_shots.items():
+            c_color = self.get_club_color(c_name)
+            carries = []
+            offs = []
+            for real_idx, s in items:
+                ogc = s.get("open_golf_coach", {})
+                us = ogc.get("us_customary_units", {})
+                c_yds = us.get("carry_distance_yards", 0.0)
+                o_yds = us.get("offline_distance_yards", 0.0)
+                if c_yds > 0:
+                    carries.append(c_yds)
+                    offs.append(o_yds)
+
+            if len(carries) >= 2:
+                mu_c = sum(carries) / len(carries)
+                mu_o = sum(offs) / len(offs)
+                std_c = max(3.0, (sum((x - mu_c) ** 2 for x in carries) / len(carries)) ** 0.5)
+                std_o = max(2.0, (sum((x - mu_o) ** 2 for x in offs) / len(offs)) ** 0.5)
+
+                cen_x = cx + int((mu_o / max_lat_yds) * (plot_w * 0.45))
+                cen_y = tee_y - int((mu_c / max_range_yds) * plot_h)
+                rx1 = int((std_o / max_lat_yds) * (plot_w * 0.45))
+                ry1 = int((std_c / max_range_yds) * plot_h)
+
+                # 2-Sigma outer dashed
+                self.canvas.create_oval(cen_x - rx1 * 2, cen_y - ry1 * 2, cen_x + rx1 * 2, cen_y + ry1 * 2, fill="", outline=c_color, width=1, dash=(4, 4))
+                # 1-Sigma inner solid
+                self.canvas.create_oval(cen_x - rx1, cen_y - ry1, cen_x + rx1, cen_y + ry1, fill=c_color, outline=c_color, width=2, stipple="gray25")
+                # Mean marker
+                self.canvas.create_line(cen_x - 5, cen_y, cen_x + 5, cen_y, fill="#FFFFFF", width=2)
+                self.canvas.create_line(cen_x, cen_y - 5, cen_x, cen_y + 5, fill="#FFFFFF", width=2)
+                self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y", fill=c_color, font=("Helvetica", 7, "bold"))
+
+            # Draw dots
+            for real_idx, s in items:
+                ogc = s.get("open_golf_coach", {})
+                us = ogc.get("us_customary_units", {})
+                c_yds = us.get("carry_distance_yards", 0.0)
+                o_yds = us.get("offline_distance_yards", 0.0)
+                if c_yds <= 0:
+                    continue
+
+                dx = cx + int((o_yds / max_lat_yds) * (plot_w * 0.45))
+                dy = tee_y - int((c_yds / max_range_yds) * plot_h)
+                self.dispersion_dot_rects.append((dx, dy, real_idx))
+
+                is_sel = (real_idx == self.selected_shot_index)
+                r = 5 if is_sel else 3
+                self.canvas.create_oval(dx - r, dy - r, dx + r, dy + r, fill="#FFEA00" if is_sel else c_color, outline="#FFFFFF" if is_sel else "")
+
+
+    def draw_shot_table_viewport(self, avail_w, h, offset_x=0):
+        self.table_row_rects.clear()
+        self.table_header_rects.clear()
+        self.table_checkbox_rects.clear()
+
+        top_y = 58
+        table_x1 = offset_x + 10
+        table_x2 = offset_x + avail_w - 10
+
+        # 1. Pinned Summary Averages Banner (y: 58 to 98)
+        avg_y1 = top_y
+        avg_y2 = avg_y1 + 42
+        self.canvas.create_rectangle(table_x1, avg_y1, table_x2, avg_y2, fill="#0C2534", outline="#00E5FF", width=2)
+        
+        avgs = self.calculate_session_averages()
+        active_count = avgs.get("count", 0)
+        self.canvas.create_text(table_x1 + 14, (avg_y1 + avg_y2) // 2, text=f"📊 SESSION AVERAGES ({active_count} active shots):", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+        
+        if avgs:
+            avg_metrics = (
+                f"Carry: {avgs.get('carry', 0.0):.1f}y  |  "
+                f"Ball Spd: {avgs.get('ball_speed', 0.0):.1f}mph  |  "
+                f"Club Spd: {avgs.get('club_speed', 0.0):.1f}mph  |  "
+                f"Smash: {avgs.get('smash', 1.0):.2f}  |  "
+                f"Launch: {avgs.get('launch_angle', 0.0):.1f}°  |  "
+                f"Spin: {int(avgs.get('total_spin', 0.0))}rpm  |  "
+                f"Apex: {avgs.get('apex', 0.0):.1f}y  |  "
+                f"Offline: {avgs.get('offline', 0.0):+.1f}y"
+            )
+            self.canvas.create_text(table_x1 + 270, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", 9, "bold"), anchor="w")
+
+        # 2. Interactive Column Headers (y: 104 to 132)
+        head_y1 = 104
+        head_y2 = 132
+        self.canvas.create_rectangle(table_x1, head_y1, table_x2, head_y2, fill="#161822", outline="#262A3B")
+
+        cols = [
+            ("index", "#", 40, "c"),
+            ("excluded", "Excl", 44, "c"),
+            ("club", "Club", 68, "w"),
+            ("carry", "Carry", 68, "e"),
+            ("total", "Total", 68, "e"),
+            ("ball_speed", "Ball Spd", 74, "e"),
+            ("club_speed", "Club Spd", 74, "e"),
+            ("smash", "Smash", 60, "e"),
+            ("launch", "Launch", 64, "e"),
+            ("push_pull", "Push/Pull", 72, "e"),
+            ("spin", "Spin", 68, "e"),
+            ("sidespin", "Sidespin", 72, "e"),
+            ("axis", "Axis", 64, "e"),
+            ("path", "Path", 64, "e"),
+            ("face", "Face", 64, "e"),
+            ("apex", "Apex", 62, "e"),
+            ("descent", "Descent", 64, "e"),
+            ("offline", "Offline", 72, "e")
+        ]
+
+        curr_x = table_x1
+        for col_key, col_title, col_w, align in cols:
+            cx2 = min(table_x2, curr_x + col_w)
+            self.table_header_rects.append((curr_x, head_y1, cx2, head_y2, col_key))
             
-            if c_yds <= 0:
-                continue
+            is_sorted = (self.table_sort_col == col_key)
+            sort_arrow = (" ▲" if self.table_sort_asc else " ▼") if is_sorted else ""
+            txt_col = "#00E5FF" if is_sorted else "#8E94A5"
+            
+            if align == "c":
+                tx = (curr_x + cx2) // 2
+            elif align == "e":
+                tx = cx2 - 8
+            else:
+                tx = curr_x + 8
 
-            is_selected = (idx == self.selected_shot_index)
-            curve_color = "#FFEA00" if is_selected else "#505866"
-            line_w = 3 if is_selected else 1
+            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=("Helvetica", 8, "bold"), anchor=align)
+            curr_x = cx2
 
-            pts = []
-            for step in range(0, 101, 4):
-                frac = step / 100.0
-                curr_x = c_yds * frac
-                curr_h = math.sin(frac * math.pi) * apex_y
-                
-                cx_pixel = margin_x + int((curr_x / max_x_yds) * chart_w)
-                cy_pixel = plot_y2 - int((curr_h / max_h_yds) * plot_h)
-                pts.extend([cx_pixel, cy_pixel])
+        # 3. Sortable Data Rows
+        data_y1 = 134
+        row_h = 28
+        avail_rows = max(1, (h - data_y1 - 15) // row_h)
+        
+        raw_items = list(enumerate(self.session_shots))
 
-            if len(pts) >= 4:
-                self.canvas.create_line(pts, fill=curve_color, width=line_w, smooth=True)
-
-            land_x = margin_x + int((c_yds / max_x_yds) * chart_w)
-            dot_color = "#FFEA00" if is_selected else "#7E8496"
-            self.canvas.create_oval(land_x - (4 if is_selected else 2), plot_y2 - (4 if is_selected else 2), land_x + (4 if is_selected else 2), plot_y2 + (4 if is_selected else 2), fill=dot_color, outline="")
-
-        disp_y1 = plot_y2 + 35
-        disp_h = (h - disp_y1 - 35)
-        disp_y2 = disp_y1 + disp_h
-        center_y = disp_y1 + (disp_h // 2)
-
-        self.canvas.create_rectangle(margin_x, disp_y1, margin_x + chart_w, disp_y2, fill="#16171E", outline="#252834")
-        self.canvas.create_line(margin_x, center_y, margin_x + chart_w, center_y, fill="#2C3040", width=2, dash=(6, 4))
-
-        land_coords = []
-        for idx, shot in enumerate(self.session_shots):
-            ogc = shot.get("open_golf_coach", {})
+        def get_sort_val(item):
+            idx, s = item
+            ogc = s.get("open_golf_coach", {})
             us = ogc.get("us_customary_units", {})
-            c_yds = us.get("carry_distance_yards", 0.0)
-            off_yds = us.get("offline_distance_yards", 0.0)
+            if self.table_sort_col == "index": return idx
+            elif self.table_sort_col == "excluded": return 1 if s.get("excluded", False) else 0
+            elif self.table_sort_col == "club": return s.get("club", "")
+            elif self.table_sort_col == "carry": return us.get("carry_distance_yards", 0.0)
+            elif self.table_sort_col == "total": return us.get("total_distance_yards", 0.0)
+            elif self.table_sort_col == "ball_speed": return us.get("ball_speed_mph", 0.0)
+            elif self.table_sort_col == "club_speed": return us.get("club_speed_mph", 0.0)
+            elif self.table_sort_col == "smash": return ogc.get("smash_factor", 1.0)
+            elif self.table_sort_col == "launch": return s.get("vertical_launch_angle_degrees", 0.0)
+            elif self.table_sort_col == "push_pull": return s.get("horizontal_launch_angle_degrees", 0.0)
+            elif self.table_sort_col == "spin": return ogc.get("total_spin_rpm", 0.0)
+            elif self.table_sort_col == "sidespin": return ogc.get("sidespin_rpm", 0.0)
+            elif self.table_sort_col == "axis": return ogc.get("spin_axis_degrees", 0.0)
+            elif self.table_sort_col == "path": return ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
+            elif self.table_sort_col == "face": return ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+            elif self.table_sort_col == "apex": return us.get("peak_height_yards", 0.0)
+            elif self.table_sort_col == "descent": return ogc.get("descent_angle_degrees", 0.0)
+            elif self.table_sort_col == "offline": return us.get("offline_distance_yards", 0.0)
+            return idx
 
-            if c_yds <= 0:
-                continue
+        sorted_items = sorted(raw_items, key=get_sort_val, reverse=not self.table_sort_asc)
+        visible_items = sorted_items[self.table_scroll_offset : self.table_scroll_offset + avail_rows]
 
-            dx_pixel = margin_x + int((c_yds / max_x_yds) * chart_w)
-            dy_pixel = center_y + int((off_yds / 50.0) * (disp_h // 2))
+        for r_i, (real_idx, shot) in enumerate(visible_items):
+            ry1 = data_y1 + r_i * row_h
+            ry2 = ry1 + row_h - 2
+            
+            is_sel = (real_idx == self.selected_shot_index)
+            is_ex = shot.get("excluded", False)
+            bg = "#2B280A" if is_sel else ("#191C28" if r_i % 2 == 0 else "#141620")
+            border = "#FFEA00" if is_sel else "#242838"
+            txt_color = "#5A6175" if is_ex else ("#FFFFFF" if not is_sel else "#FFEA00")
 
-            land_coords.append((dx_pixel, dy_pixel))
-            self.land_dot_coords.append((dx_pixel, dy_pixel, idx))
-
-            is_selected = (idx == self.selected_shot_index)
-            dot_fill = "#FFEA00" if is_selected else "#00FF66"
-            dot_r = 6 if is_selected else 3
-            self.canvas.create_oval(dx_pixel - dot_r, dy_pixel - dot_r, dx_pixel + dot_r, dy_pixel + dot_r, fill=dot_fill, outline="#FFFFFF" if is_selected else "")
-
-        if len(land_coords) >= 2:
-            xs = [p[0] for p in land_coords]
-            ys = [p[1] for p in land_coords]
-            min_x, max_x = min(xs) - 15, max(xs) + 15
-            min_y, max_y = min(ys) - 12, max(ys) + 12
-            self.canvas.create_oval(min_x, min_y, max_x, max_y, fill="", outline="#00FF66", width=1, dash=(4, 4))
-
-        sb_x1 = margin_x + chart_w + 15
-        divider_w = 6
-        self.canvas.create_rectangle(sb_x1 - divider_w, plot_y1, sb_x1, disp_y2, fill="#00E5FF" if self.is_dragging_sidebar else "#2A2D3A", outline="")
-
-        self.canvas.create_rectangle(sb_x1, plot_y1, sb_x1 + sb_w, disp_y2, fill="#14151C", outline="#252834")
-
-        title_font_sz = max(9, min(12, int(sb_w / 18)))
-        val_font_sz = max(8, min(11, int(sb_w / 20)))
-
-        self.canvas.create_text(sb_x1 + sb_w // 2, plot_y1 + 18, text="SESSION SHOT LIST", fill="#00E5FF", font=("Helvetica", title_font_sz, "bold"))
-        
-        btn_margin = max(10, int(sb_w * 0.06))
-        btn_y1 = plot_y1 + 38
-        btn_y2 = plot_y1 + 68
-        self.inspect_btn_rect = (sb_x1 + btn_margin, btn_y1, sb_x1 + sb_w - btn_margin, btn_y2)
-        
-        self.canvas.create_rectangle(self.inspect_btn_rect[0], btn_y1, self.inspect_btn_rect[2], btn_y2, fill="#00E5FF", outline="")
-        self.canvas.create_text(sb_x1 + sb_w // 2, (btn_y1 + btn_y2) // 2, text="🔍 INSPECT QUAD VIEW", fill="#101114", font=("Helvetica", max(8, val_font_sz - 1), "bold"))
-
-        list_y1 = plot_y1 + 78
-        list_y2 = disp_y2 - 50
-        max_visible_items = max(3, (list_y2 - list_y1) // 24)
-
-        start_idx = max(0, len(self.session_shots) - max_visible_items)
-        visible_shots = list(enumerate(self.session_shots))[start_idx:]
-
-        for i, (real_idx, shot) in enumerate(visible_shots):
-            item_y1 = list_y1 + i * 24
-            item_y2 = item_y1 + 22
-            if item_y2 > list_y2:
-                break
-
-            self.shot_list_item_rects.append((item_y1, item_y2, real_idx))
-            is_selected = (real_idx == self.selected_shot_index)
-
-            bg_color = "#3A3800" if is_selected else ("#1D2028" if i % 2 == 0 else "#161820")
-            border_color = "#FFEA00" if is_selected else "#282B36"
-            self.canvas.create_rectangle(sb_x1 + 8, item_y1, sb_x1 + sb_w - 8, item_y2, fill=bg_color, outline=border_color)
+            self.canvas.create_rectangle(table_x1, ry1, table_x2, ry2, fill=bg, outline=border, width=2 if is_sel else 1)
+            self.table_row_rects.append((table_x1, ry1, table_x2, ry2, real_idx))
 
             ogc = shot.get("open_golf_coach", {})
             us = ogc.get("us_customary_units", {})
-            c_yds = us.get("carry_distance_yards", 0.0)
-            s_name = ogc.get("shot_name", {}).get("right_handed", "Shot")
+            
+            c_val = us.get("carry_distance_yards", 0.0)
+            tot_val = us.get("total_distance_yards", 0.0)
+            bs_val = us.get("ball_speed_mph", 0.0)
+            cs_val = us.get("club_speed_mph", 0.0)
+            sm_val = ogc.get("smash_factor", 1.0)
+            la_val = shot.get("vertical_launch_angle_degrees", 0.0)
+            hl_val = shot.get("horizontal_launch_angle_degrees", 0.0)
+            sp_val = ogc.get("total_spin_rpm", 0.0)
+            ss_val = ogc.get("sidespin_rpm", 0.0)
+            sa_val = ogc.get("spin_axis_degrees", 0.0)
+            cp_val = ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
+            fp_val = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+            ap_val = us.get("peak_height_yards", 0.0)
+            da_val = ogc.get("descent_angle_degrees", 0.0)
+            off_val = us.get("offline_distance_yards", 0.0)
 
-            item_str = f"#{real_idx + 1}: {c_yds:.1f}y ({s_name})"
-            text_color = "#FFEA00" if is_selected else "#D0D5DD"
-            self.canvas.create_text(sb_x1 + 14, (item_y1 + item_y2) // 2, text=item_str, fill=text_color, font=("Consolas", max(8, val_font_sz - 1), "bold" if is_selected else "normal"), anchor="w")
+            row_data = {
+                "index": f"#{real_idx + 1}",
+                "excluded": "[X]" if is_ex else "[✓]",
+                "club": shot.get("club", "Club"),
+                "carry": f"{c_val:.1f}",
+                "total": f"{tot_val:.1f}",
+                "ball_speed": f"{bs_val:.1f}",
+                "club_speed": f"{cs_val:.1f}",
+                "smash": f"{sm_val:.2f}",
+                "launch": f"{la_val:.1f}°",
+                "push_pull": f"{hl_val:+.1f}°",
+                "spin": f"{int(sp_val)}",
+                "sidespin": f"{int(ss_val):+d}",
+                "axis": f"{sa_val:+.1f}°",
+                "path": f"{cp_val:+.1f}°",
+                "face": f"{fp_val:+.1f}°",
+                "apex": f"{ap_val:.1f}y",
+                "descent": f"{da_val:.1f}°",
+                "offline": f"{off_val:+.1f}y"
+            }
 
-        self.clear_btn_rect = (sb_x1 + btn_margin, disp_y2 - 40, sb_x1 + sb_w - btn_margin, disp_y2 - 12)
-        self.canvas.create_rectangle(self.clear_btn_rect[0], self.clear_btn_rect[1], self.clear_btn_rect[2], self.clear_btn_rect[3], fill="#1F2129", outline="#303442")
-        self.canvas.create_text(sb_x1 + sb_w // 2, (self.clear_btn_rect[1] + self.clear_btn_rect[3]) // 2, text="[C] CLEAR SHOTS", fill="#FF4081", font=("Helvetica", max(8, val_font_sz - 1), "bold"))
+            curr_x = table_x1
+            for col_key, col_title, col_w, align in cols:
+                cx2 = min(table_x2, curr_x + col_w)
+                val_text = row_data.get(col_key, "-")
 
-    def draw_4_quadrant_studio(self, w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash):
-        top_bar_h = 60
-        avail_h = h - top_bar_h - 30
-        mid_x = w // 2
+                if col_key == "excluded":
+                    self.table_checkbox_rects.append((curr_x, ry1, cx2, ry2, real_idx))
+                    chk_color = "#FF4081" if is_ex else "#00FF66"
+                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=("Consolas", 8, "bold"))
+                else:
+                    if align == "c":
+                        tx = (curr_x + cx2) // 2
+                    elif align == "e":
+                        tx = cx2 - 8
+                    else:
+                        tx = curr_x + 8
+                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=("Consolas", 8, "bold" if is_sel else "normal"), anchor=align)
+
+                curr_x = cx2
+
+    def draw_big_numbers_viewport(self, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin, spin_axis, club_path, face_to_path, apex, offline, offset_x=0):
+        top_y = 60
+        bot_y = h - 15
+        grid_w = avail_w - 30
+        grid_h = bot_y - top_y
+
+        off_dir = "L" if offline < 0 else "R"
+        path_dir = "In-Out" if club_path > 0 else "Out-In"
+        face_dir = "Open" if face_to_path > 0 else "Closed"
+        axis_dir = "R" if spin_axis > 0 else "L"
+
+        cards = [
+            ("CARRY DISTANCE", f"{carry:.1f}", "YARDS", "#00FF66", "OPTIMAL" if carry > 150 else ""),
+            ("TOTAL DISTANCE", f"{total:.1f}", "YARDS", "#FFFFFF", ""),
+            ("BALL SPEED", f"{ball_speed:.1f}", "MPH", "#FFFFFF", "TOUR AVG" if ball_speed > 115 else ""),
+            ("CLUB SPEED", f"{club_speed:.1f}", "MPH", "#FFFFFF", ""),
+            ("SMASH FACTOR", f"{smash:.2f}", "RATIO", "#00E5FF", "HIGH" if smash >= 1.35 else ""),
+            ("LAUNCH ANGLE", f"{launch:.1f}°", "DEGREES", "#00E5FF", "OPTIMAL" if 14 <= launch <= 20 else ""),
+            ("TOTAL SPIN", f"{int(spin)}", "RPM", "#FFEA00", "MID SPIN"),
+            ("SPIN AXIS", f"{abs(spin_axis):.1f}° {axis_dir}", "DEGREES", "#FF4081", "DRAW" if spin_axis < 0 else "FADE"),
+            ("CLUB PATH", f"{abs(club_path):.1f}° {path_dir}", "DEGREES", "#00E5FF", ""),
+            ("FACE TO PATH", f"{abs(face_to_path):.1f}° {face_dir}", "DEGREES", "#FFEA00", "SQUARE" if abs(face_to_path) < 1.5 else ""),
+            ("PEAK HEIGHT", f"{apex:.1f}", "YARDS", "#40C4FF", "APEX"),
+            ("OFFLINE", f"{abs(offline):.1f} {off_dir}", "YARDS", "#00FF66" if abs(offline) <= 4.0 else "#FF4081", "ON TARGET" if abs(offline) <= 4.0 else "OFFLINE")
+        ]
+
+        rows = 3
+        cols = 4
+        col_gap = 10
+        row_gap = 10
+        card_w = (grid_w - (cols - 1) * col_gap) // cols
+        card_h = (grid_h - (rows - 1) * row_gap) // rows
+
+        for idx, (c_label, c_val, c_unit, c_color, c_tag) in enumerate(cards):
+            r = idx // cols
+            c = idx % cols
+            
+            x1 = offset_x + 15 + c * (card_w + col_gap)
+            y1 = top_y + r * (card_h + row_gap)
+            x2 = x1 + card_w
+            y2 = y1 + card_h
+
+            # Card Container
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill="#151722", outline="#262C3D", width=2)
+            
+            # Header Label
+            self.canvas.create_text(x1 + 14, y1 + 16, text=c_label, fill="#7E8799", font=("Helvetica", 8, "bold"), anchor="w")
+
+            # Status pill in top right of card
+            if c_tag:
+                tag_w = len(c_tag) * 6 + 10
+                self.canvas.create_rectangle(x2 - tag_w - 10, y1 + 8, x2 - 10, y1 + 24, fill="#0D261A" if ("OPTIMAL" in c_tag or "TOUR" in c_tag or "TARGET" in c_tag or "HIGH" in c_tag or "SQUARE" in c_tag) else "#26151A", outline=c_color)
+                self.canvas.create_text(x2 - 10 - tag_w // 2, y1 + 16, text=c_tag, fill=c_color, font=("Helvetica", 7, "bold"), anchor="center")
+
+            # Giant Primary Value (Centered in card)
+            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=("Consolas", 26, "bold"), anchor="center")
+
+            # Bottom Unit Tag
+            self.canvas.create_text((x1 + x2) // 2, y2 - 12, text=c_unit, fill="#50566A", font=("Helvetica", 7, "bold"), anchor="center")
+
+    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0):
+        top_bar_h = 108
+        avail_h = h - top_bar_h - 10
+        mid_x = offset_x + (avail_w // 2)
         mid_y = top_bar_h + (avail_h // 2)
 
-        self.canvas.create_line(mid_x, top_bar_h, mid_x, h - 25, fill="#232630", width=2)
-        self.canvas.create_line(0, mid_y, w, mid_y, fill="#232630", width=2)
+        self.canvas.create_line(mid_x, top_bar_h, mid_x, h - 10, fill="#232630", width=2)
+        self.canvas.create_line(offset_x, mid_y, offset_x + avail_w, mid_y, fill="#232630", width=2)
 
         # Inspection Banner Header
         if 0 <= self.selected_shot_index < len(self.session_shots):
@@ -751,8 +2943,16 @@ class ShanktuaryApp:
             self.canvas.create_text(mid_x, top_bar_h + 12, text=insp_text, fill="#FFEA00", font=("Helvetica", 9, "bold"))
 
         # Quadrant 1 (Top-Left): Overhead View
-        q1_cx, q1_cy = mid_x // 2, top_bar_h + (avail_h // 4)
-        self.canvas.create_line(q1_cx - 140, q1_cy, q1_cx + 140, q1_cy, fill="#40C4FF", width=1, dash=(4, 4))
+        q1_cx, q1_cy = offset_x + (avail_w // 4), top_bar_h + (avail_h // 4)
+        q1_top = top_bar_h
+        q1_bot = mid_y
+
+        path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path > 0 else 'Out To In'}"
+        face_target_str = f"Face To Target: {abs(face_to_target):.1f}° {'Open' if face_to_target > 0 else 'Closed'}"
+        face_path_str = f"Face To Path: {abs(face_to_path):.1f}° {'Open' if face_to_path > 0 else 'Closed'}"
+
+        self.canvas.create_text(q1_cx, q1_top + 22, text=path_str, fill="#00E5FF", font=("Consolas", 11, "bold"))
+        self.canvas.create_line(q1_cx - 130, q1_cy, q1_cx + 130, q1_cy, fill="#40C4FF", width=1, dash=(4, 4))
         
         if self.overhead_img:
             rotated = self.overhead_img.rotate(-face_to_target, resample=Image.BICUBIC, expand=True)
@@ -760,105 +2960,203 @@ class ShanktuaryApp:
             self.canvas.create_image(q1_cx, q1_cy, image=self.img_cache["q1_overhead"], anchor="c")
 
         path_rad = math.radians(club_path)
-        px1, py1 = self.rotate_point(q1_cx, q1_cy + 80, q1_cx, q1_cy, path_rad)
-        px2, py2 = self.rotate_point(q1_cx, q1_cy - 80, q1_cx, q1_cy, path_rad)
+        px1, py1 = self.rotate_point(q1_cx, q1_cy + 65, q1_cx, q1_cy, path_rad)
+        px2, py2 = self.rotate_point(q1_cx, q1_cy - 65, q1_cx, q1_cy, path_rad)
         self.canvas.create_line(px1, py1, px2, py2, fill="#00E5FF", width=3, arrow=tk.LAST)
 
-        self.canvas.create_oval(q1_cx + 55 - 10, q1_cy - 10, q1_cx + 55 + 10, q1_cy + 10, fill="#FFFFFF", outline="#D0D5DD")
+        self.canvas.create_oval(q1_cx + 45 - 7, q1_cy - 7, q1_cx + 45 + 7, q1_cy + 7, fill="#FFFFFF", outline="#D0D5DD")
 
-        path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path > 0 else 'Out To In'}"
-        face_target_str = f"Face To Target: {abs(face_to_target):.1f}° {'Open' if face_to_target > 0 else 'Closed'}"
-        face_path_str = f"Face To Path: {abs(face_to_path):.1f}° {'Open' if face_to_path > 0 else 'Closed'}"
-        
-        self.canvas.create_text(q1_cx, q1_cy - 110, text=path_str, fill="#00E5FF", font=("Consolas", 12, "bold"))
-        self.canvas.create_text(q1_cx, q1_cy + 95, text=face_target_str, fill="#FFEA00", font=("Consolas", 11, "bold"))
-        self.canvas.create_text(q1_cx, q1_cy + 115, text=face_path_str, fill="#FF4081", font=("Consolas", 11, "bold"))
+        self.canvas.create_text(q1_cx, q1_bot - 34, text=face_target_str, fill="#FFEA00", font=("Consolas", 10, "bold"))
+        self.canvas.create_text(q1_cx, q1_bot - 16, text=face_path_str, fill="#FF4081", font=("Consolas", 10, "bold"))
 
         # Quadrant 2 (Bottom-Left): Trajectory Arc
-        q2_cx, q2_cy = mid_x // 2, mid_y + (avail_h // 4)
-        ground_y = q2_cy + 40
-        self.canvas.create_line(q2_cx - 150, ground_y, q2_cx + 150, ground_y, fill="#3A3F4D", width=2, dash=(4, 4))
+        q2_cx, q2_cy = offset_x + (avail_w // 4), mid_y + (avail_h // 4)
+        q2_top = mid_y
+        q2_bot = h - 10
+        ground_y = q2_cy + 30
+
+        top_elev_str = f"Launch Angle: {vert_launch:.1f}°   |   Apex: {apex_yds:.1f} yds"
+        bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
+
+        self.canvas.create_text(q2_cx, q2_top + 22, text=top_elev_str, fill="#00FF66", font=("Consolas", 10, "bold"))
+        self.canvas.create_line(q2_cx - 140, ground_y, q2_cx + 140, ground_y, fill="#3A3F4D", width=2, dash=(4, 4))
         
         if self.side_img:
             self.img_cache["q2_side"] = ImageTk.PhotoImage(self.side_img)
-            self.canvas.create_image(q2_cx - 90, ground_y - 25, image=self.img_cache["q2_side"], anchor="c")
+            self.canvas.create_image(q2_cx - 85, ground_y - 20, image=self.img_cache["q2_side"], anchor="c")
 
         arc_pts = []
         for t in range(0, 101, 5):
             frac = t / 100.0
-            x_p = (q2_cx - 90) + int(240 * frac)
-            h_p = math.sin(frac * math.pi) * min(65, int(apex_yds * 20))
+            x_p = (q2_cx - 85) + int(220 * frac)
+            h_p = math.sin(frac * math.pi) * min(55, int(apex_yds * 16))
             y_p = ground_y - int(h_p)
             arc_pts.extend([x_p, y_p])
         
         self.canvas.create_line(arc_pts, fill="#00FF66", width=3, smooth=True)
-        self.canvas.create_oval(q2_cx - 90 - 7, ground_y - 7, q2_cx - 90 + 7, ground_y + 7, fill="#FFFFFF")
+        self.canvas.create_oval(q2_cx - 85 - 6, ground_y - 6, q2_cx - 85 + 6, ground_y + 6, fill="#FFFFFF")
 
-        top_elev_str = f"Launch Angle: {vert_launch:.1f}°   |   Apex: {apex_yds:.1f} yds"
-        bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
-        
-        self.canvas.create_text(q2_cx, q2_cy - 85, text=top_elev_str, fill="#00FF66", font=("Consolas", 11, "bold"))
-        self.canvas.create_text(q2_cx, q2_cy + 65, text=bot_elev_str, fill="#E0E0E0", font=("Consolas", 11, "bold"))
+        self.canvas.create_text(q2_cx, q2_bot - 16, text=bot_elev_str, fill="#E0E0E0", font=("Consolas", 10, "bold"))
 
         # Quadrant 3 (Top-Right): 3D Spin Axis
-        q3_cx, q3_cy = mid_x + (mid_x // 2), top_bar_h + (avail_h // 4)
+        q3_cx, q3_cy = offset_x + (3 * avail_w // 4), top_bar_h + (avail_h // 4)
+        q3_top = top_bar_h
+        q3_bot = mid_y
         
         rank_colors = {"A": "#00FF66", "B": "#00E5FF", "C": "#FFC107", "D": "#FF4081"}
         badge_color = rank_colors.get(shot_rank, "#00FF66")
         
-        self.canvas.create_rectangle(q3_cx - 100, q3_cy - 80, q3_cx - 65, q3_cy - 55, fill=badge_color, outline="")
-        self.canvas.create_text(q3_cx - 82, q3_cy - 67, text=shot_rank, fill="#101114", font=("Helvetica", 12, "bold"))
-        self.canvas.create_text(q3_cx - 50, q3_cy - 67, text=shot_name.upper(), fill=badge_color, font=("Helvetica", 14, "bold"), anchor="w")
+        badge_y1 = q3_top + 10
+        badge_y2 = q3_top + 32
+        self.canvas.create_rectangle(q3_cx - 95, badge_y1, q3_cx - 65, badge_y2, fill=badge_color, outline="")
+        self.canvas.create_text(q3_cx - 80, (badge_y1 + badge_y2) // 2, text=shot_rank, fill="#101114", font=("Helvetica", 11, "bold"))
+        self.canvas.create_text(q3_cx - 50, (badge_y1 + badge_y2) // 2, text=shot_name.upper(), fill=badge_color, font=("Helvetica", 13, "bold"), anchor="w")
 
-        ball_r = 24
-        self.canvas.create_oval(q3_cx - ball_r, q3_cy - ball_r + 5, q3_cx + ball_r, q3_cy + ball_r + 5, fill="#FFFFFF", outline="#D0D5DD", width=2)
+        ball_r = 22
+        self.canvas.create_oval(q3_cx - ball_r, q3_cy - ball_r, q3_cx + ball_r, q3_cy + ball_r, fill="#FFFFFF", outline="#D0D5DD", width=2)
         
         axis_rad = math.radians(spin_axis)
-        ax1, ay1 = self.rotate_point(q3_cx, q3_cy + 5 + 38, q3_cx, q3_cy + 5, axis_rad)
-        ax2, ay2 = self.rotate_point(q3_cx, q3_cy + 5 - 38, q3_cx, q3_cy + 5, axis_rad)
-        self.canvas.create_line(ax1, ay1, ax2, ay2, fill="#FF4081", width=4, arrow=tk.LAST, arrowshape=(14, 18, 6))
+        ax1, ay1 = self.rotate_point(q3_cx, q3_cy + 32, q3_cx, q3_cy, axis_rad)
+        ax2, ay2 = self.rotate_point(q3_cx, q3_cy - 32, q3_cx, q3_cy, axis_rad)
+        self.canvas.create_line(ax1, ay1, ax2, ay2, fill="#FF4081", width=4, arrow=tk.LAST, arrowshape=(12, 16, 5))
 
         spin_line1 = f"Spin Axis: {abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}   |   Sidespin: {int(sidespin)} rpm"
         spin_line2 = f"Total Spin: {int(total_spin)} rpm   |   Opt. Potential: {opt_max:.1f} YDS"
 
-        self.canvas.create_text(q3_cx, q3_cy + 58, text=spin_line1, fill="#00E5FF", font=("Consolas", 11, "bold"))
-        self.canvas.create_text(q3_cx, q3_cy + 78, text=spin_line2, fill="#8E94A5", font=("Consolas", 10))
+        self.canvas.create_text(q3_cx, q3_bot - 34, text=spin_line1, fill="#00E5FF", font=("Consolas", 10, "bold"))
+        self.canvas.create_text(q3_cx, q3_bot - 16, text=spin_line2, fill="#8E94A5", font=("Consolas", 9))
 
-        # Quadrant 4 (Bottom-Right): Face Impact Location
-        q4_cx, q4_cy = mid_x + (mid_x // 2), mid_y + (avail_h // 4)
-        
+        # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
+        q4_cx, q4_cy = offset_x + (3 * avail_w // 4), mid_y + (avail_h // 4)
+        q4_top = mid_y
+        q4_bot = h - 10
+
+        # Direct telemetry extraction or physics gear-effect computation
+        shot_obj = self.current_shot or {}
+        ogc = shot_obj.get("open_golf_coach", {}) if isinstance(shot_obj, dict) else {}
+        impact_data = (
+            shot_obj.get("face_impact") or
+            shot_obj.get("impact_location") or
+            ogc.get("face_impact") or
+            ogc.get("impact_location") or
+            ogc.get("face_contact") or {}
+        )
+
+        if "lateral_offset_mm" in impact_data:
+            h_impact_mm = float(impact_data["lateral_offset_mm"])
+        elif "heel_toe_mm" in impact_data:
+            h_impact_mm = float(impact_data["heel_toe_mm"])
+        elif "horizontal_offset_mm" in impact_data:
+            h_impact_mm = float(impact_data["horizontal_offset_mm"])
+        elif "x_mm" in impact_data:
+            h_impact_mm = float(impact_data["x_mm"])
+        else:
+            # Positive = Heel strike, Negative = Toe strike
+            h_impact_mm = (face_to_path * 0.75) + (sidespin / 400.0)
+
+        if "vertical_offset_mm" in impact_data:
+            v_impact_mm = float(impact_data["vertical_offset_mm"])
+        elif "high_low_mm" in impact_data:
+            v_impact_mm = float(impact_data["high_low_mm"])
+        elif "y_mm" in impact_data:
+            v_impact_mm = float(impact_data["y_mm"])
+        else:
+            club_baselines = {
+                "Driver": 11.5, "3 Wood": 13.0, "5 Wood": 14.5, "3 Hybrid": 16.0,
+                "4 Iron": 16.5, "5 Iron": 17.5, "6 Iron": 19.0, "7 Iron": 21.0,
+                "8 Iron": 23.5, "9 Iron": 26.5, "PW": 29.0, "GW": 32.0,
+                "SW": 35.0, "LW": 38.0
+            }
+            base_launch = club_baselines.get(self.current_club, 21.0)
+            v_impact_mm = (vert_launch - base_launch) * 0.85
+
+        # Clamp offsets to physical face dimensions
+        h_impact_mm = max(-24.0, min(24.0, h_impact_mm))
+        v_impact_mm = max(-16.0, min(16.0, v_impact_mm))
+        total_offset_mm = math.sqrt(h_impact_mm**2 + v_impact_mm**2)
+
+        # Coordinate Tags & Strike Tier Styling
+        if abs(h_impact_mm) < 1.0:
+            h_text = "↔ 0.0 mm CENTER"
+            h_badge_col = "#00FF66"
+        elif h_impact_mm > 0:
+            h_text = f"↔ {abs(h_impact_mm):.1f} mm HEEL"
+            h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
+        else:
+            h_text = f"↔ {abs(h_impact_mm):.1f} mm TOE"
+            h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
+
+        if abs(v_impact_mm) < 1.0:
+            v_text = "↕ 0.0 mm FLUSH"
+            v_badge_col = "#00FF66"
+        elif v_impact_mm > 0:
+            v_text = f"↕ {abs(v_impact_mm):.1f} mm HIGH"
+            v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
+        else:
+            v_text = f"↕ {abs(v_impact_mm):.1f} mm LOW (THIN)"
+            v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
+
+        if total_offset_mm < 3.0:
+            strike_rank = "CENTER FLUSH"
+            strike_color = "#00FF66"
+        elif total_offset_mm < 8.0:
+            h_part = "HEEL" if h_impact_mm > 1.5 else ("TOE" if h_impact_mm < -1.5 else "")
+            v_part = "HIGH" if v_impact_mm > 1.5 else ("THIN" if v_impact_mm < -1.5 else "")
+            strike_rank = f"{h_part} {v_part}".strip() or "OFF-CENTER"
+            strike_color = "#FFEA00"
+        else:
+            h_part = "EXTREME HEEL" if h_impact_mm > 0 else "EXTREME TOE"
+            v_part = "HIGH" if v_impact_mm > 2.5 else ("THIN" if v_impact_mm < -2.5 else "")
+            strike_rank = f"{h_part} {v_part}".strip()
+            strike_color = "#FF1744"
+
+        # Top Pill Badges (Exact Strike Coordinates)
+        badge_y = q4_top + 20
+        badge_w = 125
+        # Lateral Pill
+        self.canvas.create_rectangle(q4_cx - badge_w - 6, badge_y - 11, q4_cx - 6, badge_y + 11, fill="#121622", outline=h_badge_col, width=1)
+        self.canvas.create_text(q4_cx - (badge_w // 2) - 6, badge_y, text=h_text, fill=h_badge_col, font=("Consolas", 8, "bold"))
+        # Vertical Pill
+        self.canvas.create_rectangle(q4_cx + 6, badge_y - 11, q4_cx + badge_w + 6, badge_y + 11, fill="#121622", outline=v_badge_col, width=1)
+        self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", 8, "bold"))
+
+        # Clubface Graphic
         if self.face_img:
             self.img_cache["q4_face"] = ImageTk.PhotoImage(self.face_img)
             self.canvas.create_image(q4_cx, q4_cy, image=self.img_cache["q4_face"], anchor="c")
 
-        h_impact_mm = int(face_to_path * 0.75)
-        v_impact_mm = int((vert_launch - 22.0) * 0.85)
+        # Sweet Spot Origin (0,0) on Scorelines
+        center_x = q4_cx - 20
+        center_y = q4_cy - 5
+        self.canvas.create_line(center_x - 14, center_y, center_x + 14, center_y, fill="#3A445C", width=1, dash=(2, 2))
+        self.canvas.create_line(center_x, center_y - 14, center_x, center_y + 14, fill="#3A445C", width=1, dash=(2, 2))
+        self.canvas.create_oval(center_x - 2, center_y - 2, center_x + 2, center_y + 2, fill="#00E5FF", outline="")
 
-        px_shift_h = max(-40, min(35, int(h_impact_mm * 1.8)))
-        px_shift_v = max(-22, min(22, int(v_impact_mm * 1.8)))
+        # Impact Contact Location
+        scale_px = 1.75
+        impact_x = center_x + int(h_impact_mm * scale_px)
+        impact_y = center_y - int(v_impact_mm * scale_px)
 
-        impact_x = q4_cx - 25 + px_shift_h
-        impact_y = q4_cy - 5 - px_shift_v
+        # Vector Line from Sweet Spot to Impact
+        if total_offset_mm >= 2.0:
+            self.canvas.create_line(center_x, center_y, impact_x, impact_y, fill=strike_color, width=1, dash=(3, 2))
 
-        self.canvas.create_oval(impact_x - 11, impact_y - 11, impact_x + 11, impact_y + 11, fill="", outline="#FF1744", width=3)
-        self.canvas.create_oval(impact_x - 5, impact_y - 5, impact_x + 5, impact_y + 5, fill="#FF1744", outline="")
+        # Precision Strike Reticle
+        self.canvas.create_oval(impact_x - 12, impact_y - 12, impact_x + 12, impact_y + 12, fill="", outline=strike_color, width=2)
+        self.canvas.create_oval(impact_x - 6, impact_y - 6, impact_x + 6, impact_y + 6, fill="", outline=strike_color, width=1)
+        self.canvas.create_oval(impact_x - 3, impact_y - 3, impact_x + 3, impact_y + 3, fill=strike_color, outline="")
 
-        h_dir = "Heel" if h_impact_mm > 0 else "Toe"
-        v_dir = "High" if v_impact_mm > 0 else "Low (Thin/Topped)"
-        
-        impact_header = f"H Impact: {abs(h_impact_mm)}mm {h_dir}   |   V Impact: {abs(v_impact_mm)}mm {v_dir}"
-
-        self.canvas.create_text(q4_cx, q4_cy - 75, text=impact_header, fill="#FF1744", font=("Consolas", 11, "bold"))
-        self.canvas.create_text(q4_cx, q4_cy + 75, text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", 11, "bold"))
+        # Footer Metrics
+        self.canvas.create_text(q4_cx, q4_bot - 24, text=f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)", fill=strike_color, font=("Helvetica", 9, "bold"))
+        self.canvas.create_text(q4_cx, q4_bot - 8, text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", 8, "bold"))
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
-        # Load calibration offsets
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
         cal_x = calib.get("offset_x", 0)
         cal_y = calib.get("offset_y", 0)
 
         cx = offset_x + (pane_w // 2) + cal_x
-        cy = (h // 2) - 20 + cal_y
+        cy = (h // 2) + 10 + cal_y
 
         self.canvas.create_line(cx - 130, cy, cx + 130, cy, fill="#22252E", width=2, dash=(4, 4))
         self.canvas.create_line(cx, cy - 130, cx, cy + 130, fill="#22252E", width=2, dash=(4, 4))
@@ -888,12 +3186,239 @@ class ShanktuaryApp:
         px2, py2 = self.rotate_point(cx, cy - path_len // 2, cx, cy, angle_rad)
         self.canvas.create_line(px1, py1, px2, py2, fill="#00E5FF", width=3, arrow=tk.LAST, arrowshape=(12, 15, 5))
 
-        # Luminous Red Physical Ball Origin Anchor Crosshair
         self.canvas.create_oval(cx - 10, cy - 10, cx + 10, cy + 10, outline="#FF1744", width=2)
         self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="#FF1744", outline="")
         self.canvas.create_text(cx, cy + 22, text="🎯 PHYSICAL BALL ORIGIN", fill="#FF1744", font=("Helvetica", 8, "bold"))
-
         self.canvas.create_text(cx, 55, text=f"DIVOT PROJECTOR  •  {shot_name.upper()}", fill="#00FF66", font=("Helvetica", 14, "bold"))
+
+    def draw_my_bag_viewport(self, avail_w, h, offset_x=0):
+        # 1. Background
+        self.canvas.create_rectangle(offset_x, 52, offset_x + avail_w, h, fill="#0E1017", outline="")
+
+        self.bag_club_card_rects.clear()
+        self.bag_edit_btn_rects.clear()
+        self.bag_move_up_rects.clear()
+        self.bag_move_down_rects.clear()
+
+        # 2. Top Toolbar (y: 52 to 98)
+        bar_y1, bar_y2 = 52, 98
+        self.canvas.create_rectangle(offset_x, bar_y1, offset_x + avail_w, bar_y2, fill="#131622", outline="#212636")
+
+        total_shots = sum(len(s.get("shots", [])) for s in self.sessions)
+        sess_shots = len(self.session_shots)
+        display_shots = sess_shots if self.bag_scope == "session" else total_shots
+        scope_str = "Current Session" if self.bag_scope == "session" else "All-Time History"
+
+        self.canvas.create_text(offset_x + 18, 66, text="MY BAG MAPPING & GAPPING MATRIX", fill="#00E5FF", font=("Helvetica", 11, "bold"), anchor="w")
+        self.canvas.create_text(offset_x + 18, 84, text=f"{len(self.bag)} Clubs in Bag  •  {display_shots} Shots ({scope_str})", fill="#8E94A5", font=("Helvetica", 8), anchor="w")
+
+        # Scope Selector Pills (Center-Right)
+        pill_w = 120
+        p1_x1 = offset_x + avail_w - 410
+        p1_x2 = p1_x1 + pill_w
+        p2_x1 = p1_x2 + 8
+        p2_x2 = p2_x1 + pill_w
+        py1, py2 = 62, 88
+
+        self.bag_scope_session_rect = (p1_x1, py1, p1_x2, py2)
+        self.bag_scope_all_rect = (p2_x1, py1, p2_x2, py2)
+
+        is_sess = (self.bag_scope == "session")
+        self.canvas.create_rectangle(p1_x1, py1, p1_x2, py2, fill="#0D2A1C" if is_sess else "#1A1E2B", outline="#00FF66" if is_sess else "#2D3446")
+        self.canvas.create_text((p1_x1 + p1_x2) // 2, (py1 + py2) // 2, text="Current Session", fill="#00FF66" if is_sess else "#8E94A5", font=("Helvetica", 8, "bold" if is_sess else "normal"), anchor="center")
+
+        is_all = (self.bag_scope == "all_time")
+        self.canvas.create_rectangle(p2_x1, py1, p2_x2, py2, fill="#0D2A1C" if is_all else "#1A1E2B", outline="#00FF66" if is_all else "#2D3446")
+        self.canvas.create_text((p2_x1 + p2_x2) // 2, (py1 + py2) // 2, text="All-Time History", fill="#00FF66" if is_all else "#8E94A5", font=("Helvetica", 8, "bold" if is_all else "normal"), anchor="center")
+
+        # Add Club to Bag Button (Far Right)
+        add_x1 = offset_x + avail_w - 146
+        add_x2 = offset_x + avail_w - 16
+        self.bag_add_club_btn_rect = (add_x1, py1, add_x2, py2)
+        self.canvas.create_rectangle(add_x1, py1, add_x2, py2, fill="#00FF66", outline="")
+        self.canvas.create_text((add_x1 + add_x2) // 2, (py1 + py2) // 2, text="+ Add Club to Bag", fill="#08090C", font=("Helvetica", 8, "bold"), anchor="center")
+
+        # 3. Dual-Pane Dimensions
+        content_y = 104
+        content_h = h - content_y - 12
+        left_w = int(avail_w * 0.54)
+        right_w = avail_w - left_w - 18
+        right_x = offset_x + left_w + 12
+
+        self._draw_bag_rack_pane(offset_x + 6, content_y, left_w, content_h)
+        self._draw_bag_gapping_ladder_pane(right_x, content_y, right_w, content_h)
+
+    def _draw_bag_rack_pane(self, x1, y1, w, h):
+        self.canvas.create_rectangle(x1, y1, x1 + w, y1 + h, fill="#12141D", outline="#212636")
+        self.canvas.create_text(x1 + 16, y1 + 16, text="BAG EQUIPMENT & SHOT AVERAGES", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(x1 + w - 16, y1 + 16, text="Click card to Select  •  Edit Specs for Details", fill="#6A7285", font=("Helvetica", 8), anchor="e")
+
+        card_area_y1 = y1 + 30
+        curr_y = card_area_y1 - self.bag_scroll_offset
+
+        for cat in BAG_CATEGORIES:
+            cat_clubs = [c for c in self.bag if c.get("category") == cat]
+            if not cat_clubs:
+                continue
+
+            # Category Header Bar
+            if y1 + 24 <= curr_y <= y1 + h - 10:
+                self.canvas.create_rectangle(x1 + 8, curr_y, x1 + w - 8, curr_y + 18, fill="#171A24", outline="#222736")
+                self.canvas.create_text(x1 + 16, curr_y + 9, text=f"{cat} ({len(cat_clubs)})", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+            curr_y += 22
+
+            for c in cat_clubs:
+                c_name = c.get("name", "")
+                card_h = 62
+                cy1 = curr_y
+                cy2 = cy1 + card_h
+
+                if y1 + 20 <= cy1 <= y1 + h or y1 + 20 <= cy2 <= y1 + h:
+                    cx1 = x1 + 8
+                    cx2 = x1 + w - 8
+                    self.bag_club_card_rects.append((cx1, cy1, cx2, cy2, c_name))
+
+                    is_active = (self.current_club == c_name)
+                    bg_col = "#1E2419" if is_active else "#151822"
+                    border_col = "#FFEA00" if is_active else "#262C3C"
+                    c_color = self.get_club_color(c_name)
+
+                    self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=bg_col, outline=border_col, width=1.5 if is_active else 1)
+                    self.canvas.create_rectangle(cx1, cy1, cx1 + 4, cy2, fill=c_color, outline="")
+
+                    # Line 1: Name, Loft, Active badge, Specs
+                    name_x = cx1 + 12
+                    self.canvas.create_text(name_x, cy1 + 12, text=c_name, fill="#FFFFFF", font=("Helvetica", 10, "bold"), anchor="w")
+                    
+                    loft = c.get("loft_deg", 0.0)
+                    loft_str = f"{loft:.1f}°" if loft else ""
+                    if loft_str:
+                        self.canvas.create_text(name_x + 95, cy1 + 12, text=loft_str, fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+                    specs_parts = [p for p in [c.get("brand", ""), c.get("model", ""), c.get("shaft", "")] if p]
+                    specs_str = " • ".join(specs_parts)
+                    if len(specs_str) > 26:
+                        specs_str = specs_str[:24] + "..."
+                    self.canvas.create_text(name_x + 135, cy1 + 12, text=specs_str, fill="#8E94A5", font=("Helvetica", 8), anchor="w")
+
+                    if is_active:
+                        badge_x2 = cx2 - 130
+                        badge_x1 = badge_x2 - 54
+                        self.canvas.create_rectangle(badge_x1, cy1 + 4, badge_x2, cy1 + 19, fill="#2E3310", outline="#FFEA00")
+                        self.canvas.create_text((badge_x1 + badge_x2) // 2, cy1 + 11, text="ACTIVE", fill="#FFEA00", font=("Helvetica", 7, "bold"))
+
+                    # Action buttons: Edit Specs, Move Up, Move Down
+                    btn_ey1 = cy1 + 6
+                    btn_ey2 = btn_ey1 + 20
+                    edit_x1 = cx2 - 120
+                    edit_x2 = cx2 - 54
+                    self.bag_edit_btn_rects.append((edit_x1, btn_ey1, edit_x2, btn_ey2, c_name))
+                    self.canvas.create_rectangle(edit_x1, btn_ey1, edit_x2, btn_ey2, fill="#1C2130", outline="#2E374D")
+                    self.canvas.create_text((edit_x1 + edit_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="Edit Specs", fill="#00E5FF", font=("Helvetica", 7, "bold"))
+
+                    up_x1 = cx2 - 48
+                    up_x2 = cx2 - 28
+                    self.bag_move_up_rects.append((up_x1, btn_ey1, up_x2, btn_ey2, c_name))
+                    self.canvas.create_rectangle(up_x1, btn_ey1, up_x2, btn_ey2, fill="#181B26", outline="#2E374D")
+                    self.canvas.create_text((up_x1 + up_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▲", fill="#8E94A5", font=("Helvetica", 8))
+
+                    dn_x1 = cx2 - 24
+                    dn_x2 = cx2 - 4
+                    self.bag_move_down_rects.append((dn_x1, btn_ey1, dn_x2, btn_ey2, c_name))
+                    self.canvas.create_rectangle(dn_x1, btn_ey1, dn_x2, btn_ey2, fill="#181B26", outline="#2E374D")
+                    self.canvas.create_text((dn_x1 + dn_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▼", fill="#8E94A5", font=("Helvetica", 8))
+
+                    # Line 2 & 3: Performance stats
+                    stats = self.get_bag_club_stats(c_name, scope=self.bag_scope)
+                    if stats["shot_count"] > 0:
+                        carry_str = f"Carry: {stats['avg_carry']:.1f}y (±{stats['std_carry']:.1f}y)"
+                        tot_str = f"Total: {stats['avg_total']:.1f}y"
+                        cnt_str = f"{stats['shot_count']} shots"
+                        self.canvas.create_text(name_x, cy1 + 31, text=f"{carry_str}   |   {tot_str}   |   {cnt_str}", fill="#00FF66", font=("Consolas", 8, "bold"), anchor="w")
+
+                        sub_stats = f"Ball: {stats['avg_ball_speed']:.1f}mph  •  Smash: {stats['avg_smash']:.2f}  •  Launch: {stats['avg_launch']:.1f}°  •  Spin: {stats['avg_spin']:.0f}rpm"
+                        self.canvas.create_text(name_x, cy1 + 48, text=sub_stats, fill="#8E94A5", font=("Consolas", 8), anchor="w")
+                    else:
+                        self.canvas.create_text(name_x, cy1 + 38, text="No shots recorded for this club in selected scope", fill="#464E62", font=("Helvetica", 8, "italic"), anchor="w")
+
+                curr_y += card_h + 5
+
+    def _draw_bag_gapping_ladder_pane(self, x1, y1, w, h):
+        self.canvas.create_rectangle(x1, y1, x1 + w, y1 + h, fill="#12141D", outline="#212636")
+        self.canvas.create_text(x1 + 16, y1 + 16, text="DISTANCE GAPPING LADDER", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+
+        gapping = self.calculate_bag_gapping(scope=self.bag_scope)
+        grade_text = f"Consistency: {gapping['consistency_grade']}  •  Mean Gap: {gapping['mean_gap']:.1f} yds"
+        self.canvas.create_text(x1 + w - 16, y1 + 16, text=grade_text, fill=gapping['consistency_color'], font=("Helvetica", 8, "bold"), anchor="e")
+
+        ladder_top = y1 + 44
+        ladder_bot = y1 + h - 26
+        ladder_h = ladder_bot - ladder_top
+        min_yds = 50.0
+        max_yds = 320.0
+
+        grid_steps = [50, 100, 150, 200, 250, 300]
+        for yds in grid_steps:
+            gy = ladder_bot - int(((yds - min_yds) / (max_yds - min_yds)) * ladder_h)
+            self.canvas.create_line(x1 + 65, gy, x1 + w - 20, gy, fill="#1C2130", dash=(2, 4))
+            self.canvas.create_text(x1 + 45, gy, text=f"{yds}y", fill="#5A6275", font=("Consolas", 8), anchor="e")
+
+        clubs_with_shots = gapping["clubs"]
+        if not clubs_with_shots:
+            self.canvas.create_text(x1 + w // 2, y1 + h // 2, text="No shot data recorded for current scope.\nHit shots or switch to All-Time History to view your visual gapping ladder.", fill="#464E62", font=("Helvetica", 10), justify="center")
+            return
+
+        bar_x1 = x1 + 105
+        bar_x2 = x1 + w - 145
+        bar_avail_w = bar_x2 - bar_x1
+
+        club_y_coords = {}
+        for c in clubs_with_shots:
+            carry = c["avg_carry"]
+            cy = ladder_bot - int(((carry - min_yds) / (max_yds - min_yds)) * ladder_h)
+            cy = max(ladder_top + 10, min(ladder_bot - 10, cy))
+            club_y_coords[c["name"]] = cy
+
+            # Club Label on left
+            self.canvas.create_text(x1 + 95, cy, text=c["name"], fill=c["color"], font=("Helvetica", 8, "bold"), anchor="e")
+
+            # Min-Max Whisker
+            min_c = c.get("min_carry", carry)
+            max_c = c.get("max_carry", carry)
+            wx1 = bar_x1 + int((min_c / max_yds) * bar_avail_w)
+            wx2 = bar_x1 + int((max_c / max_yds) * bar_avail_w)
+            wx1 = max(bar_x1, min(bar_x2, wx1))
+            wx2 = max(bar_x1, min(bar_x2, wx2))
+            self.canvas.create_line(wx1, cy, wx2, cy, fill="#3A4358", width=3)
+            self.canvas.create_line(wx1, cy - 4, wx1, cy + 4, fill="#3A4358", width=1.5)
+            self.canvas.create_line(wx2, cy - 4, wx2, cy + 4, fill="#3A4358", width=1.5)
+
+            # Center Dot / Mean marker
+            cx_pos = bar_x1 + int((carry / max_yds) * bar_avail_w)
+            cx_pos = max(bar_x1, min(bar_x2, cx_pos))
+            self.canvas.create_oval(cx_pos - 4, cy - 4, cx_pos + 4, cy + 4, fill=c["color"], outline="#FFFFFF", width=1)
+
+            # Yardage readout on right
+            self.canvas.create_text(bar_x2 + 10, cy, text=f"{carry:.1f} yds", fill="#FFFFFF", font=("Consolas", 8, "bold"), anchor="w")
+
+        # Plot Step Callout Indicators
+        for step in gapping["steps"]:
+            c_top = step["from_club"]
+            c_bot = step["to_club"]
+            if c_top in club_y_coords and c_bot in club_y_coords:
+                yt = club_y_coords[c_top]
+                yb = club_y_coords[c_bot]
+                mid_y = (yt + yb) // 2
+
+                bx = bar_x2 + 75
+                self.canvas.create_line(bx - 4, yt, bx, yt, fill=step["color"], width=1)
+                self.canvas.create_line(bx, yt, bx, yb, fill=step["color"], width=1)
+                self.canvas.create_line(bx - 4, yb, bx, yb, fill=step["color"], width=1)
+
+                badge_w = 68
+                badge_h = 16
+                self.canvas.create_rectangle(bx + 4, mid_y - badge_h // 2, bx + 4 + badge_w, mid_y + badge_h // 2, fill="#0F141F", outline=step["color"])
+                self.canvas.create_text(bx + 4 + badge_w // 2, mid_y, text=step["status_text"], fill=step["color"], font=("Consolas", 7, "bold"), anchor="center")
 
 def main():
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
@@ -909,3 +3434,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
