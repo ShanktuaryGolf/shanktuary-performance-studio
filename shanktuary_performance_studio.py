@@ -683,13 +683,17 @@ class ShanktuaryApp:
             self.draw_screen()
 
     def get_bag_club_stats(self, club_name, scope="session"):
+        target_clean = str(club_name).strip().lower()
         if scope == "session":
-            shots = [s for s in self.session_shots if s.get("club") == club_name and not s.get("excluded", False)]
+            shots = [
+                s for s in self.session_shots 
+                if str(s.get("club", "")).strip().lower() == target_clean and not s.get("excluded", False)
+            ]
         else:
             shots = []
             for sess in self.sessions:
                 for s in sess.get("shots", []):
-                    if s.get("club") == club_name and not s.get("excluded", False):
+                    if str(s.get("club", "")).strip().lower() == target_clean and not s.get("excluded", False):
                         shots.append(s)
         
         count = len(shots)
@@ -705,14 +709,15 @@ class ShanktuaryApp:
                 "avg_offline": 0.0
             }
         
-        carries = [float(s.get("carry", 0.0)) for s in shots]
-        totals = [float(s.get("total", 0.0)) for s in shots]
-        bspeeds = [float(s.get("ball_speed", 0.0)) for s in shots]
-        cspeeds = [float(s.get("club_speed", 0.0)) for s in shots]
-        smashes = [float(s.get("smash", 0.0)) for s in shots]
-        launches = [float(s.get("launch_angle", 0.0)) for s in shots]
-        spins = [float(s.get("total_spin", 0.0)) for s in shots]
-        offlines = [float(s.get("offline", 0.0)) for s in shots]
+        metrics = [self.extract_shot_metrics(s) for s in shots]
+        carries = [m["carry"] for m in metrics]
+        totals = [m["total"] for m in metrics]
+        bspeeds = [m["ball_speed"] for m in metrics]
+        cspeeds = [m["club_speed"] for m in metrics]
+        smashes = [m["smash"] for m in metrics]
+        launches = [m["launch_angle"] for m in metrics]
+        spins = [m["total_spin"] for m in metrics]
+        offlines = [m["offline"] for m in metrics]
 
         avg_c = sum(carries) / count
         min_c = min(carries)
@@ -732,6 +737,89 @@ class ShanktuaryApp:
             "avg_launch": sum(launches) / count,
             "avg_spin": sum(spins) / count,
             "avg_offline": sum(offlines) / count
+        }
+
+    def extract_shot_metrics(self, s):
+        if not isinstance(s, dict):
+            return {
+                "carry": 0.0, "total": 0.0, "ball_speed": 0.0, "club_speed": 0.0,
+                "smash": 0.0, "launch_angle": 0.0, "total_spin": 0.0, "offline": 0.0
+            }
+        
+        ogc = s.get("open_golf_coach", {})
+        us = ogc.get("us_customary_units", {})
+        
+        # 1. Carry distance in yards
+        carry = us.get("carry_distance_yards")
+        if carry is None:
+            carry = s.get("carry") or s.get("carry_distance_yards") or s.get("carry_distance")
+        if carry is None and ogc.get("carry_distance_meters"):
+            carry = float(ogc.get("carry_distance_meters")) * 1.09361
+        carry = float(carry or 0.0)
+
+        # 2. Total distance in yards
+        total = us.get("total_distance_yards")
+        if total is None:
+            total = s.get("total") or s.get("total_distance_yards") or s.get("total_distance")
+        if total is None and ogc.get("total_distance_meters"):
+            total = float(ogc.get("total_distance_meters")) * 1.09361
+        if total is None or total <= 0.0:
+            total = carry * 1.05
+        total = float(total or 0.0)
+
+        # 3. Ball speed in mph
+        ball_speed = us.get("ball_speed_mph")
+        if ball_speed is None:
+            ball_speed = s.get("ball_speed") or s.get("ball_speed_mph")
+        if ball_speed is None and s.get("ball_speed_meters_per_second"):
+            ball_speed = float(s.get("ball_speed_meters_per_second")) * 2.236936
+        ball_speed = float(ball_speed or 0.0)
+
+        # 4. Club speed in mph
+        club_speed = us.get("club_speed_mph")
+        if club_speed is None:
+            club_speed = s.get("club_speed") or s.get("club_speed_mph")
+        if club_speed is None and ogc.get("club_speed_meters_per_second"):
+            club_speed = float(ogc.get("club_speed_meters_per_second")) * 2.236936
+        club_speed = float(club_speed or 0.0)
+
+        # 5. Smash factor
+        smash = ogc.get("smash_factor")
+        if smash is None:
+            smash = s.get("smash") or s.get("smash_factor")
+        if (smash is None or smash == 0.0) and club_speed > 0.0:
+            smash = ball_speed / club_speed
+        smash = float(smash or 0.0)
+
+        # 6. Launch angle in degrees
+        launch = s.get("vertical_launch_angle_degrees")
+        if launch is None:
+            launch = s.get("launch_angle") or s.get("launch_angle_degrees") or ogc.get("vertical_launch_angle_degrees")
+        launch = float(launch or 0.0)
+
+        # 7. Total spin in rpm
+        spin = ogc.get("total_spin_rpm")
+        if spin is None:
+            spin = s.get("total_spin_rpm") or s.get("total_spin") or s.get("spin_rate_rpm")
+        spin = float(spin or 0.0)
+
+        # 8. Offline distance in yards
+        offline = us.get("offline_distance_yards")
+        if offline is None:
+            offline = s.get("offline") or s.get("offline_distance_yards") or s.get("offline_yards")
+        if offline is None and ogc.get("offline_distance_meters"):
+            offline = float(ogc.get("offline_distance_meters")) * 1.09361
+        offline = float(offline or 0.0)
+
+        return {
+            "carry": carry,
+            "total": total,
+            "ball_speed": ball_speed,
+            "club_speed": club_speed,
+            "smash": smash,
+            "launch_angle": launch,
+            "total_spin": spin,
+            "offline": offline
         }
 
     def calculate_bag_gapping(self, scope="session"):
@@ -3355,7 +3443,7 @@ class ShanktuaryApp:
         ladder_top = y1 + 44
         ladder_bot = y1 + h - 26
         ladder_h = ladder_bot - ladder_top
-        min_yds = 50.0
+        min_yds = 0.0
         max_yds = 320.0
 
         grid_steps = [50, 100, 150, 200, 250, 300]
