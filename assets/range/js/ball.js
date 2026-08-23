@@ -348,7 +348,9 @@ export class GolfBall {
       this.restTimer += deltaTime;
       if (this.restTimer >= 3.0) {
         this.isAtRest = false;
-        this.reset();
+        // Return ball to Tee Box ready for next swing, but keep tracer & landing marker visible
+        this.mesh.position.set(0, this.visualRadius + 0.02, 0);
+        this.elapsedTime = 0;
         if (typeof this.onResetCallback === 'function') {
           this.onResetCallback();
         }
