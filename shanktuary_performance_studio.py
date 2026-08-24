@@ -4888,7 +4888,13 @@ def main():
     root = tk.Tk()
     root.geometry("1150x780")
     app = ShanktuaryApp(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()
