@@ -2369,9 +2369,9 @@ class ShanktuaryApp:
 
         # 2. Right Utility Pills
         fs_w = 28
-        tools_w = 64
-        dex_w = 58
-        club_w = 90
+        tools_w = 70
+        dex_w = 64
+        club_w = 94
         gap = 6
 
         fs_x2 = w - 10
