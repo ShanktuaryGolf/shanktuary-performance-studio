@@ -3756,23 +3756,27 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(q4_cx + 6, badge_y - badge_h // 2, q4_cx + badge_w + 6, badge_y + badge_h // 2, fill="#121622", outline=v_badge_col, width=1)
         self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
 
-        # Clubface Graphic
+        # Clubface Graphic (Raw iron_face.png is LH; for RH mirror=True, for LH mirror=False)
         face_h = int(130 * scale)
         face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=not self.is_left_handed)
         if face_img:
             self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
 
-        # Sweet Spot Origin (0,0) on Scorelines
-        center_offset_x = int(22 * scale) if self.is_left_handed else int(-22 * scale)
+        # Sweet Spot Origin (0,0) exactly on the center of the scoreline grooves
+        # Base image dimensions 290x220: scoreline groove center is dX=+45px (LH) / -45px (RH), dY=-25px
+        dx_ratio = 45.0 / 220.0
+        dy_ratio = -25.0 / 220.0
+        center_offset_x = int(dx_ratio * face_h) if self.is_left_handed else -int(dx_ratio * face_h)
+        center_offset_y = int(dy_ratio * face_h)
         center_x = q4_cx + center_offset_x
-        center_y = q4_cy - int(6 * scale)
+        center_y = q4_cy + center_offset_y
         cross_len = int(18 * scale)
         self.canvas.create_line(center_x - cross_len, center_y, center_x + cross_len, center_y, fill="#3A445C", width=1, dash=(2, 2))
         self.canvas.create_line(center_x, center_y - cross_len, center_x, center_y + cross_len, fill="#3A445C", width=1, dash=(2, 2))
         self.canvas.create_oval(center_x - int(3 * scale), center_y - int(3 * scale), center_x + int(3 * scale), center_y + int(3 * scale), fill="#00E5FF", outline="")
 
-        # Impact Contact Location
-        scale_px = 2.1 * scale
+        # Impact Contact Location (~1.45 px/mm proportional to groove width)
+        scale_px = 1.45 * scale
         dx_px = -int(h_impact_mm * scale_px) if self.is_left_handed else int(h_impact_mm * scale_px)
         impact_x = center_x + dx_px
         impact_y = center_y - int(v_impact_mm * scale_px)
