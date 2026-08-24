@@ -11,9 +11,10 @@ This replicates the approach used by WiimoteLib / WiiBalanceWalker.
 
 import struct
 import time
-from dataclasses import dataclass
-
-import hid
+try:
+    import hid
+except ImportError:
+    hid = None
 
 from .base import BoardBackend, SensorReading
 

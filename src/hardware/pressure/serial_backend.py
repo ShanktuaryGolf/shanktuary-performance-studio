@@ -5,8 +5,11 @@ import time
 import threading
 from dataclasses import dataclass
 
-import serial
-import serial.tools.list_ports
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError:
+    serial = None
 
 from .base import BoardBackend, BoardOrientation, SensorReading, remap_for_orientation
 
