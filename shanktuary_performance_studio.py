@@ -2505,276 +2505,270 @@ class ShanktuaryApp:
             if i < len(metrics) - 1:
                 self.canvas.create_line(int(offset_x + (i + 1) * col_w), top_y + 10, int(offset_x + (i + 1) * col_w), bot_y - 10, fill="#232632")
 
-    def draw_shot_table_viewport(self, avail_w, h, offset_x=0):
-        self.table_row_rects.clear()
-        self.table_header_rects.clear()
-        self.table_checkbox_rects.clear()
+    def draw_club_dropdown(self, w, h):
+        box_w = 180
+        x1 = w - 245
+        x2 = x1 + box_w
+        y1 = 48
+        item_h = 24
+        custom_btn_h = 28
+        total_items = len(self.clubs)
+        box_h = total_items * item_h + custom_btn_h + 16
+        y2 = y1 + box_h
 
-        ui_scale = max(0.9, min(2.4, min(avail_w / 1100.0, h / 720.0)))
-        font_scale = max(0.9, min(1.8, ui_scale))
+        self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
+        self.canvas.create_text(x1 + 14, y1 + 12, text="SELECT ACTIVE CLUB", fill="#7E8496", font=("Helvetica", 8, "bold"), anchor="w")
 
-        top_y = 58
-        table_x1 = offset_x + 10
-        table_x2 = offset_x + avail_w - 10
-        table_avail_w = table_x2 - table_x1
+        self.club_menu_items.clear()
+        for idx, club_name in enumerate(self.clubs):
+            iy1 = y1 + 22 + (idx * item_h)
+            iy2 = iy1 + item_h - 2
+            self.club_menu_items.append((x1 + 6, iy1, x2 - 6, iy2, club_name))
 
-        # 1. Pinned Summary Averages Banner (Dynamically scaled height & font)
-        avg_h = int(42 * ui_scale)
-        avg_y1 = top_y
-        avg_y2 = avg_y1 + avg_h
-        self.canvas.create_rectangle(table_x1, avg_y1, table_x2, avg_y2, fill="#0C2534", outline="#00E5FF", width=2)
-        
-        avgs = self.calculate_session_averages()
-        active_count = avgs.get("count", 0)
-        
-        # Left Tag Badge (Clean, contained, zero overlap)
-        badge_w = int(210 * font_scale)
-        badge_x1 = table_x1 + 10
-        badge_x2 = badge_x1 + badge_w
-        self.canvas.create_rectangle(badge_x1, avg_y1 + 6, badge_x2, avg_y2 - 6, fill="#0E384D", outline="#00E5FF", width=1)
-        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill="#00E5FF", font=("Helvetica", max(8, int(10 * font_scale)), "bold"))
-        
-        if avgs:
-            metrics_x = badge_x2 + 16
-            avg_metrics = (
-                f"Carry: {avgs.get('carry', 0.0):.1f}y  |  "
-                f"Ball Spd: {avgs.get('ball_speed', 0.0):.1f}mph  |  "
-                f"Club Spd: {avgs.get('club_speed', 0.0):.1f}mph  |  "
-                f"Smash: {avgs.get('smash', 1.0):.2f}  |  "
-                f"Launch: {avgs.get('launch_angle', 0.0):.1f}°  |  "
-                f"Spin: {int(avgs.get('total_spin', 0.0))}rpm  |  "
-                f"Apex: {avgs.get('apex', 0.0):.1f}y  |  "
-                f"Offline: {avgs.get('offline', 0.0):+.1f}y"
-            )
-            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", max(9, int(12 * font_scale)), "bold"), anchor="w")
-
-        # 2. Interactive Column Headers (Proportionally distributed across 100% width)
-        head_h = int(32 * ui_scale)
-        head_y1 = avg_y2 + 6
-        head_y2 = head_y1 + head_h
-        self.canvas.create_rectangle(table_x1, head_y1, table_x2, head_y2, fill="#161822", outline="#262A3B")
-
-        cols_base = [
-            ("index", "#", 40, "c"),
-            ("excluded", "Excl", 44, "c"),
-            ("club", "Club", 70, "w"),
-            ("carry", "Carry", 68, "e"),
-            ("total", "Total", 68, "e"),
-            ("ball_speed", "Ball Spd", 74, "e"),
-            ("club_speed", "Club Spd", 74, "e"),
-            ("smash", "Smash", 60, "e"),
-            ("launch", "Launch", 64, "e"),
-            ("push_pull", "Push/Pull", 72, "e"),
-            ("spin", "Spin", 68, "e"),
-            ("sidespin", "Sidespin", 72, "e"),
-            ("axis", "Axis", 64, "e"),
-            ("path", "Path", 64, "e"),
-            ("face", "Face", 64, "e"),
-            ("apex", "Apex", 62, "e"),
-            ("descent", "Descent", 64, "e"),
-            ("offline", "Offline", 72, "e")
-        ]
-
-        base_tot_w = sum(c[2] for c in cols_base)
-        w_factor = max(1.0, table_avail_w / float(base_tot_w))
-        cols = [(c[0], c[1], int(c[2] * w_factor), c[3]) for c in cols_base]
-
-        curr_x = table_x1
-        for col_key, col_title, col_w, align in cols:
-            cx2 = min(table_x2, curr_x + col_w)
-            self.table_header_rects.append((curr_x, head_y1, cx2, head_y2, col_key))
+            is_sel = (club_name == self.current_club)
+            bg = "#0E2A38" if is_sel else ("#1D202B" if idx % 2 == 0 else "#161822")
+            txt_col = "#00E5FF" if is_sel else "#D0D5DD"
             
-            is_sorted = (self.table_sort_col == col_key)
-            sort_arrow = (" ▲" if self.table_sort_asc else " ▼") if is_sorted else ""
-            txt_col = "#00E5FF" if is_sorted else "#8E94A5"
-            
-            if align == "c":
-                tx = (curr_x + cx2) // 2
-            elif align == "e":
-                tx = cx2 - 8
+            self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
+            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=f"🏌️  {club_name}", fill=txt_col, font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+
+        # Divider & Add Custom Club Action
+        div_y = y1 + 22 + (total_items * item_h) + 2
+        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill="#282E40", width=1)
+
+        btn_y1 = div_y + 4
+        btn_y2 = btn_y1 + 22
+        self.club_menu_items.append((x1 + 6, btn_y1, x2 - 6, btn_y2, "__add_custom__"))
+        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill="#142C24", outline="#00FF66", width=1)
+        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋ Add Custom Club...", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+
+    def draw_tools_flyout_menu(self, w, h):
+        box_w = 320
+        x2 = w - 16
+        x1 = x2 - box_w
+        y1 = 48
+        y2 = y1 + 395
+
+        self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161922", outline="#00E5FF", width=2)
+
+        self.tools_menu_items.clear()
+        curr_y = y1 + 14
+
+        self.canvas.create_text(x1 + 14, curr_y, text="⚙️ STUDIO TOOLS & STREAMING", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+        curr_y += 24
+
+        # Section 1: Broadcast & Overlays
+        self.canvas.create_text(x1 + 14, curr_y, text="🎥 BROADCAST & OVERLAYS", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 14
+
+        btn1_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], "open_config"))
+        self.canvas.create_rectangle(btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn1_rect[1] + btn1_rect[3]) // 2, text="🎛️ OBS Overlay Config (/config)", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 32
+
+        btn2_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], "copy_obs_url"))
+        self.canvas.create_rectangle(btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn2_rect[1] + btn2_rect[3]) // 2, text="📋 Copy Full Overlay URL (OBS)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 32
+
+        btn3_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], "open_range"))
+        self.canvas.create_rectangle(btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn3_rect[1] + btn3_rect[3]) // 2, text="⛳ Open 3D Range Source (/range)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 36
+
+        # Section 2: Floor Projection & Virtual Divot
+        self.canvas.create_text(x1 + 14, curr_y, text="🎯 FLOOR PROJECTION & VIRTUAL DIVOT", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 14
+
+        btn4_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], "copy_divot_url"))
+        self.canvas.create_rectangle(btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn4_rect[1] + btn4_rect[3]) // 2, text="📋 Copy Virtual Divot URL (/divot)", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 32
+
+        btn5_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], "open_divot"))
+        self.canvas.create_rectangle(btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn5_rect[1] + btn5_rect[3]) // 2, text="🎯 Open Virtual Divot (/divot)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 32
+
+        btn6_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
+        self.tools_menu_items.append((btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], "set_mode_2"))
+        self.canvas.create_rectangle(btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], fill="#1F2432", outline="#2E374D")
+        self.canvas.create_text(x1 + 18, (btn6_rect[1] + btn6_rect[3]) // 2, text="🎚️ Switch App to Divot Mode (2)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
+        curr_y += 36
+
+        # Section 3: Hardware
+        self.canvas.create_text(x1 + 14, curr_y, text="📡 NOVA & HARDWARE", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        curr_y += 16
+        self.canvas.create_text(x1 + 18, curr_y, text="Host: 192.168.40.249:2920 (mDNS Ready)", fill="#8E94A5", font=("Consolas", 8), anchor="w")
+
+    def draw_screen(self):
+        self.canvas.delete("all")
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w <= 10 or h <= 10:
+            w, h = 1150, 780
+
+        self.land_dot_coords.clear()
+        self.mode_pill_rects.clear()
+
+        # Extract Current Shot Metrics
+        if self.current_shot:
+            ogc = self.current_shot.get("open_golf_coach", {})
+            us_units = ogc.get("us_customary_units", {})
+
+            hand_key = "left_handed" if self.is_left_handed else "right_handed"
+            path_data = ogc.get("club_path_degrees", {})
+            if isinstance(path_data, dict):
+                club_path = path_data.get(hand_key, path_data.get("right_handed", 0.0))
             else:
-                tx = curr_x + 8
+                club_path = float(path_data or 0.0)
+                if self.is_left_handed: club_path = -club_path
 
-            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=("Helvetica", max(8, int(10 * font_scale)), "bold"), anchor=align)
-            curr_x = cx2
+            f2p_data = ogc.get("club_face_to_path_degrees", {})
+            if isinstance(f2p_data, dict):
+                face_to_path = f2p_data.get(hand_key, f2p_data.get("right_handed", 0.0))
+            else:
+                face_to_path = float(f2p_data or 0.0)
+                if self.is_left_handed: face_to_path = -face_to_path
 
-        # 3. Sortable Data Rows
-        data_y1 = head_y2 + 4
-        row_h = int(32 * ui_scale)
-        avail_rows = max(1, (h - data_y1 - 15) // row_h)
-        
-        raw_items = list(enumerate(self.session_shots))
+            f2t_data = ogc.get("club_face_to_target_degrees", {})
+            if isinstance(f2t_data, dict):
+                face_to_target = f2t_data.get(hand_key, f2t_data.get("right_handed", 0.0))
+            else:
+                face_to_target = float(f2t_data or 0.0)
+                if self.is_left_handed: face_to_target = -face_to_target
+            vert_launch = self.current_shot.get("vertical_launch_angle_degrees", 0.0)
+            horiz_launch = self.current_shot.get("horizontal_launch_angle_degrees", 0.0)
+            sidespin = ogc.get("sidespin_rpm", 0.0)
+            backspin = ogc.get("backspin_rpm", 0.0)
+            spin_axis = ogc.get("spin_axis_degrees", 0.0)
+            total_spin = ogc.get("total_spin_rpm", 0.0)
+            smash = ogc.get("smash_factor", 1.23)
+            hang_time = ogc.get("hang_time_seconds", 0.0)
+            descent_angle = ogc.get("descent_angle_degrees", 0.0)
+            eff_pct = ogc.get("distance_efficiency_percent", 0.0)
 
-        def get_sort_val(item):
-            idx, s = item
-            ogc = s.get("open_golf_coach", {})
-            us = ogc.get("us_customary_units", {})
-            if self.table_sort_col == "index": return idx
-            elif self.table_sort_col == "excluded": return 1 if s.get("excluded", False) else 0
-            elif self.table_sort_col == "club": return s.get("club", "")
-            elif self.table_sort_col == "carry": return us.get("carry_distance_yards", 0.0)
-            elif self.table_sort_col == "total": return us.get("total_distance_yards", 0.0)
-            elif self.table_sort_col == "ball_speed": return us.get("ball_speed_mph", 0.0)
-            elif self.table_sort_col == "club_speed": return us.get("club_speed_mph", 0.0)
-            elif self.table_sort_col == "smash": return ogc.get("smash_factor", 1.0)
-            elif self.table_sort_col == "launch": return s.get("vertical_launch_angle_degrees", 0.0)
-            elif self.table_sort_col == "push_pull": return s.get("horizontal_launch_angle_degrees", 0.0)
-            elif self.table_sort_col == "spin": return ogc.get("total_spin_rpm", 0.0)
-            elif self.table_sort_col == "sidespin": return ogc.get("sidespin_rpm", 0.0)
-            elif self.table_sort_col == "axis": return ogc.get("spin_axis_degrees", 0.0)
-            elif self.table_sort_col == "path": return ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            elif self.table_sort_col == "face": return ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
-            elif self.table_sort_col == "apex": return us.get("peak_height_yards", 0.0)
-            elif self.table_sort_col == "descent": return ogc.get("descent_angle_degrees", 0.0)
-            elif self.table_sort_col == "offline": return us.get("offline_distance_yards", 0.0)
-            return idx
+            ball_speed_mph = us_units.get("ball_speed_mph", 0.0)
+            club_speed_mph = us_units.get("club_speed_mph", 0.0)
+            carry_yds = us_units.get("carry_distance_yards", 0.0)
+            total_yds = us_units.get("total_distance_yards", 0.0)
+            offline_yds = us_units.get("offline_distance_yards", 0.0)
+            peak_height_yds = us_units.get("peak_height_yards", 0.0)
 
-        sorted_items = sorted(raw_items, key=get_sort_val, reverse=not self.table_sort_asc)
-        visible_items = sorted_items[self.table_scroll_offset : self.table_scroll_offset + avail_rows]
+            shot_name = ogc.get("shot_name", "Straight")
+            shot_rank = ogc.get("shot_rank", "A")
+            optimal_max_yds = ogc.get("distance_potential_yards", 0.0)
+            closure_rate = ogc.get("closure_rate_dps", 0.0)
+            attack_angle = ogc.get("attack_angle_degrees", 0.0)
+            dynamic_loft = ogc.get("dynamic_loft_degrees", 0.0)
+        else:
+            club_path = 0.0
+            face_to_path = 0.0
+            face_to_target = 0.0
+            vert_launch = 0.0
+            horiz_launch = 0.0
+            sidespin = 0.0
+            backspin = 0.0
+            spin_axis = 0.0
+            total_spin = 0.0
+            smash = 0.0
+            hang_time = 0.0
+            descent_angle = 0.0
+            eff_pct = 0.0
+            ball_speed_mph = 0.0
+            club_speed_mph = 0.0
+            carry_yds = 0.0
+            total_yds = 0.0
+            offline_yds = 0.0
+            peak_height_yds = 0.0
+            shot_name = "Ready"
+            shot_rank = "A"
+            optimal_max_yds = 0.0
+            closure_rate = 0.0
+            attack_angle = 0.0
+            dynamic_loft = 0.0
 
-        for r_i, (real_idx, shot) in enumerate(visible_items):
-            ry1 = data_y1 + r_i * row_h
-            ry2 = ry1 + row_h - 2
-            
-            is_sel = (real_idx == self.selected_shot_index)
-            is_ex = shot.get("excluded", False)
-            bg = "#2B280A" if is_sel else ("#191C28" if r_i % 2 == 0 else "#141620")
-            border = "#FFEA00" if is_sel else "#242838"
-            txt_color = "#5A6175" if is_ex else ("#FFFFFF" if not is_sel else "#FFEA00")
+        offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+        avail_w = w - offset_x
 
-            self.canvas.create_rectangle(table_x1, ry1, table_x2, ry2, fill=bg, outline=border, width=2 if is_sel else 1)
-            self.table_row_rects.append((table_x1, ry1, table_x2, ry2, real_idx))
+        # 1. Left Shot Library Sidebar
+        self.draw_left_sidebar(w, h)
 
-            ogc = shot.get("open_golf_coach", {})
-            us = ogc.get("us_customary_units", {})
-            
-            c_val = us.get("carry_distance_yards", 0.0)
-            tot_val = us.get("total_distance_yards", 0.0)
-            bs_val = us.get("ball_speed_mph", 0.0)
-            cs_val = us.get("club_speed_mph", 0.0)
-            sm_val = ogc.get("smash_factor", 1.0)
-            la_val = shot.get("vertical_launch_angle_degrees", 0.0)
-            hl_val = shot.get("horizontal_launch_angle_degrees", 0.0)
-            sp_val = ogc.get("total_spin_rpm", 0.0)
-            ss_val = ogc.get("sidespin_rpm", 0.0)
-            sa_val = ogc.get("spin_axis_degrees", 0.0)
-            cp_val = ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            fp_val = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
-            ap_val = us.get("peak_height_yards", 0.0)
-            da_val = ogc.get("descent_angle_degrees", 0.0)
-            off_val = us.get("offline_distance_yards", 0.0)
+        # 2. Top Navigation Bar
+        self.draw_top_header(w, h, offset_x=offset_x)
 
-            row_data = {
-                "index": f"#{real_idx + 1}",
-                "excluded": "[X]" if is_ex else "[✓]",
-                "club": shot.get("club", "Club"),
-                "carry": f"{c_val:.1f}",
-                "total": f"{tot_val:.1f}",
-                "ball_speed": f"{bs_val:.1f}",
-                "club_speed": f"{cs_val:.1f}",
-                "smash": f"{sm_val:.2f}",
-                "launch": f"{la_val:.1f}°",
-                "push_pull": f"{hl_val:+.1f}°",
-                "spin": f"{int(sp_val)}",
-                "sidespin": f"{int(ss_val):+d}",
-                "axis": f"{sa_val:+.1f}°",
-                "path": f"{cp_val:+.1f}°",
-                "face": f"{fp_val:+.1f}°",
-                "apex": f"{ap_val:.1f}y",
-                "descent": f"{da_val:.1f}°",
-                "offline": f"{off_val:+.1f}y"
-            }
+        # 3. Workspace View Routing
+        if self.view_mode == 1:
+            # Mode 1: Delivery (4-Quadrant Studio)
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            if self.current_shot:
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
+            else:
+                self.canvas.create_text(offset_x + avail_w // 2, (h + 108) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
+        elif self.view_mode == 2:
+            # Mode 2: 3D Range Viewport
+            self.draw_3d_range_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, peak_height_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=offset_x)
+        elif self.view_mode == 3:
+            # Mode 3: Dispersion & Club Gapping Viewport
+            self.draw_dispersion_and_gapping(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 4:
+            # Mode 4: Sortable Shot Table Matrix
+            self.draw_shot_table_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 5:
+            # Mode 5: High-Contrast Big Numbers Sim Grid
+            self.draw_big_numbers_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, smash, vert_launch, total_spin, spin_axis, club_path, face_to_path, peak_height_yds, offline_yds, closure_rate, attack_angle, dynamic_loft, hang_time, offset_x=offset_x)
+        elif self.view_mode == 6:
+            # Mode 6: My Bag Mapping & Gapping Matrix
+            self.draw_my_bag_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 8:
+            # Mode 8: Swing Lab Biomechanics Suite
+            self.draw_swing_lab_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 7:
+            # Mode 7: Club Fitting & Head-to-Head Comparison
+            self.draw_fitting_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 0:
+            # Mode 0: Floor Divot Focus Projector
+            self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
+        else:
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            if self.current_shot:
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
 
-            curr_x = table_x1
-            for col_key, col_title, col_w, align in cols:
-                cx2 = min(table_x2, curr_x + col_w)
-                val_text = row_data.get(col_key, "-")
+        # 4. Floating Overlay Menus (Top Layer)
+        if self.show_session_dropdown:
+            self.draw_session_dropdown(w, h)
+        elif self.show_filter_dropdown:
+            self.draw_filter_dropdown(w, h)
+        elif self.show_club_menu:
+            self.draw_club_dropdown(w, h)
+        elif self.show_tools_menu:
+            self.draw_tools_flyout_menu(w, h)
 
-                if col_key == "excluded":
-                    self.table_checkbox_rects.append((curr_x, ry1, cx2, ry2, real_idx))
-                    chk_color = "#FF4081" if is_ex else "#00FF66"
-                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=("Consolas", max(9, int(11 * font_scale)), "bold"))
-                else:
-                    if align == "c":
-                        tx = (curr_x + cx2) // 2
-                    elif align == "e":
-                        tx = cx2 - 8
-                    else:
-                        tx = curr_x + 8
-                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=("Consolas", max(8, int(11 * font_scale)), "bold" if is_sel else "normal"), anchor=align)
+        # 5. In-Canvas Modal Dialog (Top-most Modal Layer)
+        if self.show_balance_hardware_modal:
+            self.draw_balance_hardware_modal(w, h)
+        if self.show_spec_editor_modal:
+            self.draw_club_spec_editor_modal(w, h)
+        elif self.show_custom_club_modal:
+            self.draw_custom_club_modal(w, h)
 
-                curr_x = cx2
-
-    def draw_big_numbers_viewport(self, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin, spin_axis, club_path, face_to_path, apex, offline, closure_rate=0.0, attack_angle=0.0, dynamic_loft=0.0, hang_time=0.0, offset_x=0):
-        ui_scale = max(0.9, min(2.5, min(avail_w / 1100.0, h / 720.0)))
-        top_y = 60
-        bot_y = h - 15
-        grid_w = avail_w - 30
-        grid_h = bot_y - top_y
-
-        off_dir = "L" if offline < 0 else "R"
-        path_dir = "In-Out" if club_path > 0 else "Out-In"
-        face_dir = "Open" if face_to_path > 0 else "Closed"
-        axis_dir = "R" if spin_axis > 0 else "L"
-        apex_ft = apex * 3.0
-
-        cards = [
-            ("CARRY DISTANCE", f"{carry:.1f}", "YARDS", "#00FF66", "OPTIMAL" if carry > 150 else ""),
-            ("TOTAL DISTANCE", f"{total:.1f}", "YARDS", "#FFFFFF", ""),
-            ("BALL SPEED", f"{ball_speed:.1f}", "MPH", "#FFFFFF", "TOUR AVG" if ball_speed > 115 else ""),
-            ("CLUB SPEED", f"{club_speed:.1f}", "MPH", "#FFFFFF", ""),
-            ("SMASH FACTOR", f"{smash:.2f}", "RATIO", "#00E5FF", "HIGH" if smash >= 1.35 else ""),
-            ("LAUNCH ANGLE", f"{launch:.1f}°", "DEGREES", "#00E5FF", "OPTIMAL" if 14 <= launch <= 20 else ""),
-            ("TOTAL SPIN", f"{int(spin)}", "RPM", "#FFEA00", "MID SPIN"),
-            ("SPIN AXIS", f"{abs(spin_axis):.1f}° {axis_dir}", "DEGREES", "#FF4081", "DRAW" if spin_axis < 0 else "FADE"),
-            ("CLOSURE RATE", f"{int(closure_rate)}", "DEG / SEC", "#00FF66", "RELEASE" if closure_rate > 1500 else ""),
-            ("APEX HEIGHT", f"{apex_ft:.1f}", "FEET", "#40C4FF", "APEX"),
-            ("CLUB PATH", f"{abs(club_path):.1f}° {path_dir}", "DEGREES", "#00E5FF", ""),
-            ("FACE TO PATH", f"{abs(face_to_path):.1f}° {face_dir}", "DEGREES", "#FFEA00", "SQUARE" if abs(face_to_path) < 1.5 else ""),
-            ("ATTACK ANGLE", f"{attack_angle:+.1f}°", "DEGREES", "#00E5FF", ""),
-            ("DYNAMIC LOFT", f"{dynamic_loft:.1f}°", "DEGREES", "#FFEA00", ""),
-            ("HANG TIME", f"{hang_time:.1f}s", "SECONDS", "#A0A5B5", ""),
-            ("OFFLINE", f"{abs(offline):.1f} {off_dir}", "YARDS", "#00FF66" if abs(offline) <= 4.0 else "#FF4081", "ON TARGET" if abs(offline) <= 4.0 else "OFFLINE")
-        ]
-
-        rows = 4
-        cols = 4
-        col_gap = int(10 * ui_scale)
-        row_gap = int(10 * ui_scale)
-        card_w = (grid_w - (cols - 1) * col_gap) // cols
-        card_h = (grid_h - (rows - 1) * row_gap) // rows
-
-        lbl_font = ("Helvetica", max(8, int(10 * ui_scale)), "bold")
-        val_font = ("Consolas", max(20, int(28 * ui_scale)), "bold")
-        unit_font = ("Helvetica", max(7, int(9 * ui_scale)), "bold")
-        tag_font = ("Helvetica", max(7, int(8 * ui_scale)), "bold")
-
-        for idx, (c_label, c_val, c_unit, c_color, c_tag) in enumerate(cards):
-            r = idx // cols
-            c = idx % cols
-            
-            x1 = offset_x + 15 + c * (card_w + col_gap)
-            y1 = top_y + r * (card_h + row_gap)
-            x2 = x1 + card_w
-            y2 = y1 + card_h
-
-            # Card Container
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill="#151722", outline="#262C3D", width=2)
-            
-            # Header Label
-            self.canvas.create_text(x1 + int(14 * ui_scale), y1 + int(16 * ui_scale), text=c_label, fill="#7E8799", font=lbl_font, anchor="w")
-
-            # Status pill in top right of card
-            if c_tag:
-                tag_w = int(len(c_tag) * 6 * ui_scale + 12 * ui_scale)
-                self.canvas.create_rectangle(x2 - tag_w - 10, y1 + int(8 * ui_scale), x2 - 10, y1 + int(24 * ui_scale), fill="#0D261A" if ("OPTIMAL" in c_tag or "TOUR" in c_tag or "TARGET" in c_tag or "HIGH" in c_tag or "SQUARE" in c_tag) else "#26151A", outline=c_color)
-                self.canvas.create_text(x2 - 10 - tag_w // 2, y1 + int(16 * ui_scale), text=c_tag, fill=c_color, font=tag_font, anchor="center")
-
-            # Giant Primary Value (Centered in card)
-            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=val_font, anchor="center")
-
-            # Bottom Unit Tag
-            self.canvas.create_text((x1 + x2) // 2, y2 - int(12 * ui_scale), text=c_unit, fill="#50566A", font=unit_font, anchor="center")
+        # 6. Toast Notification (Always on Top)
+        if self.copy_feedback:
+            msg = self.copy_feedback if self.copy_feedback.startswith("✓") or self.copy_feedback.startswith("🦶") else f"✓ {self.copy_feedback}"
+            toast_w = max(260, len(msg) * 8 + 36)
+            tx1 = (w - toast_w) // 2
+            tx2 = tx1 + toast_w
+            ty1 = h - 60
+            ty2 = ty1 + 38
+            self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill="#0F2B1D", outline="#00FF66", width=2)
+            self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill="#00FF66", font=("Helvetica", 9, "bold"), anchor="center")
 
     def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
         self.range_launch_web_rect = None
@@ -3257,23 +3251,29 @@ class ShanktuaryApp:
         self.table_header_rects.clear()
         self.table_checkbox_rects.clear()
 
+        ui_scale = max(0.9, min(2.4, min(avail_w / 1100.0, h / 720.0)))
+        font_scale = max(0.9, min(1.8, ui_scale))
+
         top_y = 58
         table_x1 = offset_x + 10
         table_x2 = offset_x + avail_w - 10
+        table_avail_w = table_x2 - table_x1
 
-        # 1. Pinned Summary Averages Banner (y: 58 to 98)
+        # 1. Pinned Summary Averages Banner (Dynamically scaled height & font)
+        avg_h = int(42 * ui_scale)
         avg_y1 = top_y
-        avg_y2 = avg_y1 + 40
+        avg_y2 = avg_y1 + avg_h
         self.canvas.create_rectangle(table_x1, avg_y1, table_x2, avg_y2, fill="#0C2534", outline="#00E5FF", width=2)
         
         avgs = self.calculate_session_averages()
         active_count = avgs.get("count", 0)
         
         # Left Tag Badge (Clean, contained, zero overlap)
+        badge_w = int(210 * font_scale)
         badge_x1 = table_x1 + 10
-        badge_x2 = badge_x1 + 190
-        self.canvas.create_rectangle(badge_x1, avg_y1 + 7, badge_x2, avg_y2 - 7, fill="#0E384D", outline="#00E5FF", width=1)
-        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill="#00E5FF", font=("Helvetica", 8, "bold"))
+        badge_x2 = badge_x1 + badge_w
+        self.canvas.create_rectangle(badge_x1, avg_y1 + 6, badge_x2, avg_y2 - 6, fill="#0E384D", outline="#00E5FF", width=1)
+        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill="#00E5FF", font=("Helvetica", max(8, int(10 * font_scale)), "bold"))
         
         if avgs:
             metrics_x = badge_x2 + 16
@@ -3287,17 +3287,18 @@ class ShanktuaryApp:
                 f"Apex: {avgs.get('apex', 0.0):.1f}y  |  "
                 f"Offline: {avgs.get('offline', 0.0):+.1f}y"
             )
-            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", 9, "bold"), anchor="w")
+            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill="#00FF66", font=("Consolas", max(9, int(12 * font_scale)), "bold"), anchor="w")
 
-        # 2. Interactive Column Headers (y: 104 to 132)
-        head_y1 = 104
-        head_y2 = 132
+        # 2. Interactive Column Headers (Proportionally distributed across 100% width)
+        head_h = int(32 * ui_scale)
+        head_y1 = avg_y2 + 6
+        head_y2 = head_y1 + head_h
         self.canvas.create_rectangle(table_x1, head_y1, table_x2, head_y2, fill="#161822", outline="#262A3B")
 
-        cols = [
+        cols_base = [
             ("index", "#", 40, "c"),
             ("excluded", "Excl", 44, "c"),
-            ("club", "Club", 68, "w"),
+            ("club", "Club", 70, "w"),
             ("carry", "Carry", 68, "e"),
             ("total", "Total", 68, "e"),
             ("ball_speed", "Ball Spd", 74, "e"),
@@ -3315,6 +3316,10 @@ class ShanktuaryApp:
             ("offline", "Offline", 72, "e")
         ]
 
+        base_tot_w = sum(c[2] for c in cols_base)
+        w_factor = max(1.0, table_avail_w / float(base_tot_w))
+        cols = [(c[0], c[1], int(c[2] * w_factor), c[3]) for c in cols_base]
+
         curr_x = table_x1
         for col_key, col_title, col_w, align in cols:
             cx2 = min(table_x2, curr_x + col_w)
@@ -3331,12 +3336,12 @@ class ShanktuaryApp:
             else:
                 tx = curr_x + 8
 
-            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=("Helvetica", 8, "bold"), anchor=align)
+            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=("Helvetica", max(8, int(10 * font_scale)), "bold"), anchor=align)
             curr_x = cx2
 
         # 3. Sortable Data Rows
-        data_y1 = 134
-        row_h = 28
+        data_y1 = head_y2 + 4
+        row_h = int(32 * ui_scale)
         avail_rows = max(1, (h - data_y1 - 15) // row_h)
         
         raw_items = list(enumerate(self.session_shots))
@@ -3429,7 +3434,7 @@ class ShanktuaryApp:
                 if col_key == "excluded":
                     self.table_checkbox_rects.append((curr_x, ry1, cx2, ry2, real_idx))
                     chk_color = "#FF4081" if is_ex else "#00FF66"
-                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=("Consolas", 8, "bold"))
+                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=("Consolas", max(9, int(11 * font_scale)), "bold"))
                 else:
                     if align == "c":
                         tx = (curr_x + cx2) // 2
@@ -3437,11 +3442,12 @@ class ShanktuaryApp:
                         tx = cx2 - 8
                     else:
                         tx = curr_x + 8
-                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=("Consolas", 8, "bold" if is_sel else "normal"), anchor=align)
+                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=("Consolas", max(8, int(11 * font_scale)), "bold" if is_sel else "normal"), anchor=align)
 
                 curr_x = cx2
 
     def draw_big_numbers_viewport(self, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin, spin_axis, club_path, face_to_path, apex, offline, closure_rate=0.0, attack_angle=0.0, dynamic_loft=0.0, hang_time=0.0, offset_x=0):
+        ui_scale = max(0.9, min(2.5, min(avail_w / 1100.0, h / 720.0)))
         top_y = 60
         bot_y = h - 15
         grid_w = avail_w - 30
@@ -3474,10 +3480,15 @@ class ShanktuaryApp:
 
         rows = 4
         cols = 4
-        col_gap = 10
-        row_gap = 10
+        col_gap = int(10 * ui_scale)
+        row_gap = int(10 * ui_scale)
         card_w = (grid_w - (cols - 1) * col_gap) // cols
         card_h = (grid_h - (rows - 1) * row_gap) // rows
+
+        lbl_font = ("Helvetica", max(8, int(10 * ui_scale)), "bold")
+        val_font = ("Consolas", max(20, int(28 * ui_scale)), "bold")
+        unit_font = ("Helvetica", max(7, int(9 * ui_scale)), "bold")
+        tag_font = ("Helvetica", max(7, int(8 * ui_scale)), "bold")
 
         for idx, (c_label, c_val, c_unit, c_color, c_tag) in enumerate(cards):
             r = idx // cols
@@ -3492,19 +3503,19 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(x1, y1, x2, y2, fill="#151722", outline="#262C3D", width=2)
             
             # Header Label
-            self.canvas.create_text(x1 + 14, y1 + 16, text=c_label, fill="#7E8799", font=("Helvetica", 8, "bold"), anchor="w")
+            self.canvas.create_text(x1 + int(14 * ui_scale), y1 + int(16 * ui_scale), text=c_label, fill="#7E8799", font=lbl_font, anchor="w")
 
             # Status pill in top right of card
             if c_tag:
-                tag_w = len(c_tag) * 6 + 10
-                self.canvas.create_rectangle(x2 - tag_w - 10, y1 + 8, x2 - 10, y1 + 24, fill="#0D261A" if ("OPTIMAL" in c_tag or "TOUR" in c_tag or "TARGET" in c_tag or "HIGH" in c_tag or "SQUARE" in c_tag) else "#26151A", outline=c_color)
-                self.canvas.create_text(x2 - 10 - tag_w // 2, y1 + 16, text=c_tag, fill=c_color, font=("Helvetica", 7, "bold"), anchor="center")
+                tag_w = int(len(c_tag) * 6 * ui_scale + 12 * ui_scale)
+                self.canvas.create_rectangle(x2 - tag_w - 10, y1 + int(8 * ui_scale), x2 - 10, y1 + int(24 * ui_scale), fill="#0D261A" if ("OPTIMAL" in c_tag or "TOUR" in c_tag or "TARGET" in c_tag or "HIGH" in c_tag or "SQUARE" in c_tag) else "#26151A", outline=c_color)
+                self.canvas.create_text(x2 - 10 - tag_w // 2, y1 + int(16 * ui_scale), text=c_tag, fill=c_color, font=tag_font, anchor="center")
 
             # Giant Primary Value (Centered in card)
-            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=("Consolas", 26, "bold"), anchor="center")
+            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=val_font, anchor="center")
 
             # Bottom Unit Tag
-            self.canvas.create_text((x1 + x2) // 2, y2 - 12, text=c_unit, fill="#50566A", font=("Helvetica", 7, "bold"), anchor="center")
+            self.canvas.create_text((x1 + x2) // 2, y2 - int(12 * ui_scale), text=c_unit, fill="#50566A", font=unit_font, anchor="center")
 
     def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0):
         top_bar_h = 108
