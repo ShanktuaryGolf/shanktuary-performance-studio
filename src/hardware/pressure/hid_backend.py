@@ -167,23 +167,26 @@ class HidBackend(BoardBackend):
         time.sleep(0.05)
 
         # 2. Read factory calibration data from 0xA40024 (24 bytes)
+        cal_bytes = bytearray()
         try:
             self._device.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
             time.sleep(0.05)
-            cal_bytes = bytearray()
-            for _ in range(5):
-                d = self._device.read(64, 250)
+            for _ in range(12):
+                d = self._device.read(64, 100)
                 if d and d[0] == 0x21 and len(d) >= 22:
                     sz = ((d[3] >> 4) & 0x0F) + 1
                     cal_bytes.extend(d[6:6+sz])
                     if len(cal_bytes) >= 24:
                         break
-            if len(cal_bytes) >= 24:
-                self._calibration = self._parse_calibration(bytes(cal_bytes[:24]))
-            else:
-                self._calibration = None
         except Exception:
+            pass
+
+        if len(cal_bytes) >= 24:
+            self._calibration = self._parse_calibration(bytes(cal_bytes[:24]))
+            print(f"[+] Loaded factory calibration: 0kg={self._calibration.top_left.kg0}, 17kg={self._calibration.top_left.kg17}, 34kg={self._calibration.top_left.kg34}")
+        else:
             self._calibration = None
+            print("[!] Using adaptive calibration baseline (100 counts/kg)")
 
         # 3. Turn on LED 1 (solid blue)
         self._device.write(bytes([0x11, 0x10]))
@@ -260,11 +263,11 @@ class HidBackend(BoardBackend):
             kg_bl = _interpolate_kg(bl, self._calibration.bottom_left)
             kg_br = _interpolate_kg(br, self._calibration.bottom_right)
         else:
-            # Adaptive baseline delta if factory EEPROM was not readable
-            kg_tr = max(0.0, (tr - self._baseline_raw[0]) / 25.0)
-            kg_br = max(0.0, (br - self._baseline_raw[1]) / 25.0)
-            kg_tl = max(0.0, (tl - self._baseline_raw[2]) / 25.0)
-            kg_bl = max(0.0, (bl - self._baseline_raw[3]) / 25.0)
+            # Adaptive baseline delta if factory EEPROM was not readable (~100 counts per kg)
+            kg_tr = max(0.0, (tr - self._baseline_raw[0]) / 100.0)
+            kg_br = max(0.0, (br - self._baseline_raw[1]) / 100.0)
+            kg_tl = max(0.0, (tl - self._baseline_raw[2]) / 100.0)
+            kg_bl = max(0.0, (bl - self._baseline_raw[3]) / 100.0)
 
         return SensorReading(
             top_left=kg_tl,

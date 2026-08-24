@@ -90,11 +90,11 @@ for idx, cand in enumerate(wbb_candidates):
         # Read calibration from 0xA40024 (24 bytes)
         print("Reading factory calibration data...")
         dev.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
-        time.sleep(0.1)
+        time.sleep(0.05)
 
         cal_bytes = bytearray()
-        for _ in range(5):
-            d = dev.read(64, timeout_ms=300)
+        for _ in range(12):
+            d = dev.read(64, 100)
             if d and d[0] == 0x21 and len(d) >= 22:
                 # 0x21 report: byte 3 is (size-1)<<4 | err
                 sz = ((d[3] >> 4) & 0x0F) + 1
@@ -110,7 +110,7 @@ for idx, cand in enumerate(wbb_candidates):
             print(f"    17kg ref (TR,BR,TL,BL): {cals[4]}, {cals[5]}, {cals[6]}, {cals[7]}")
             print(f"    34kg ref (TR,BR,TL,BL): {cals[8]}, {cals[9]}, {cals[10]}, {cals[11]}")
         else:
-            print("[!] Factory calibration read skipped (will use adaptive baseline).")
+            print("[!] Factory calibration read skipped (will use adaptive baseline ~100 counts/kg).")
 
         # Turn LED ON: 0x11, 0x10
         dev.write(bytes([0x11, 0x10]))
@@ -146,10 +146,10 @@ for idx, cand in enumerate(wbb_candidates):
                     kg_tl = interp(tl, cals[2], cals[6], cals[10])
                     kg_bl = interp(bl, cals[3], cals[7], cals[11])
                 else:
-                    kg_tr = max(0.0, (tr - baseline[0]) / 25.0)
-                    kg_br = max(0.0, (br - baseline[1]) / 25.0)
-                    kg_tl = max(0.0, (tl - baseline[2]) / 25.0)
-                    kg_bl = max(0.0, (bl - baseline[3]) / 25.0)
+                    kg_tr = max(0.0, (tr - baseline[0]) / 100.0)
+                    kg_br = max(0.0, (br - baseline[1]) / 100.0)
+                    kg_tl = max(0.0, (tl - baseline[2]) / 100.0)
+                    kg_bl = max(0.0, (bl - baseline[3]) / 100.0)
 
                 total_kg = kg_tr + kg_br + kg_tl + kg_bl
                 if packet_count % 15 == 0:
