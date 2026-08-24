@@ -91,8 +91,21 @@ def enumerate_boards() -> list[dict]:
     if hid is None:
         return []
     try:
-        return hid.enumerate(WBB_VID, WBB_PID)
-    except Exception:
+        boards = hid.enumerate(WBB_VID, WBB_PID)
+        if boards:
+            return boards
+        all_devs = hid.enumerate()
+        matched = []
+        for d in all_devs:
+            vid = d.get("vendor_id", 0)
+            pid = d.get("product_id", 0)
+            prod = str(d.get("product_string", "")).lower()
+            path = str(d.get("path", "")).lower()
+            if vid == WBB_VID or "rvl-wbc" in prod or "balance" in prod or "rvl-wbc" in path:
+                matched.append(d)
+        return matched
+    except Exception as e:
+        print(f"[!] Error enumerating HID boards: {e}")
         return []
 
 
@@ -109,27 +122,48 @@ class HidBackend(BoardBackend):
         if hid is None:
             raise RuntimeError("hidapi is not installed. Run: pip install hidapi")
         self._device = hid.device()
-        try:
-            if self._device_path:
-                self._device.open_path(self._device_path)
-            else:
-                self._device.open(WBB_VID, WBB_PID)
-        except IOError as e:
-            self._device = None
-            raise RuntimeError(
-                "Wii Balance Board not found via HID. "
-                "Make sure it is paired and connected via Bluetooth. "
-                f"({e})"
-            ) from e
+        opened = False
 
-        # Use non-blocking / short-timeout mode
+        # 1. Try specified path if valid (not placeholder)
+        if self._device_path and self._device_path not in (b"Board A", b"Board B", "Board A", "Board B"):
+            try:
+                p = self._device_path.encode("utf-8") if isinstance(self._device_path, str) else self._device_path
+                self._device.open_path(p)
+                opened = True
+            except Exception:
+                opened = False
+
+        # 2. Try default VID/PID
+        if not opened:
+            try:
+                self._device.open(WBB_VID, WBB_PID)
+                opened = True
+            except Exception:
+                opened = False
+
+        # 3. Try enumerating matched devices
+        if not opened:
+            devs = enumerate_boards()
+            if devs and "path" in devs[0]:
+                try:
+                    self._device.open_path(devs[0]["path"])
+                    opened = True
+                except Exception:
+                    opened = False
+
+        if not opened:
+            self._device = None
+            raise RuntimeError("Wii Balance Board not found via HID. Please verify Bluetooth connection.")
+
+        # Use non-blocking mode
         self._device.set_nonblocking(1)
 
         # 1. Wake extension controller
         self._write_register(EXT_INIT_ADDR1, b"\x55")
         self._write_register(EXT_INIT_ADDR2, b"\x00")
 
-        # 2. Try reading factory calibration (non-blocking, fallback to default)
+        # 2. Default calibration fallback
+        self._calibration = DEFAULT_CALIBRATION
         try:
             cal_data = self._read_register(EXT_CALIB_ADDR, 24)
             if cal_data and len(cal_data) >= 24:
@@ -137,14 +171,12 @@ class HidBackend(BoardBackend):
         except Exception:
             pass
 
-        if not self._calibration:
-            self._calibration = DEFAULT_CALIBRATION
-
         # 3. Turn on LED 1 as visual feedback
         self._send_report(bytes([RPT_LED, 0x10]))
 
         # 4. Set reporting mode: continuous, buttons + extension
         self._send_report(bytes([RPT_DATA_REPORTING, 0x04, RPT_IN_BTN_EXT8]))
+        print("[+] Wii Balance Board connected and streaming via HID!")
 
     def _send_report(self, data: bytes) -> None:
         """Send an output report to the Wiimote."""
