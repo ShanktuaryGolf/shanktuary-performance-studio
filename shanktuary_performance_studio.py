@@ -425,6 +425,7 @@ class ShanktuaryApp:
         self.balance_modal_box_rect = None
         self.balance_modal_close_rect = None
         self.balance_modal_tare_rect = None
+        self.balance_modal_align_rect = None
         self.balance_modal_sim_rect = None
         self.balance_modal_pair_rect = None
         self.balance_modal_copy_pin_rect = None
@@ -1632,6 +1633,13 @@ class ShanktuaryApp:
                     obs_server.pressure_manager.tare()
                     self.swing_lab_history.clear()
                     self.copy_feedback = "✓ Baseline Zeroed (Tared)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_align_rect and self.balance_modal_align_rect[0] <= event.x <= self.balance_modal_align_rect[2] and self.balance_modal_align_rect[1] <= event.y <= self.balance_modal_align_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.start_stance_alignment(duration_sec=4.0)
+                    self.copy_feedback = "⏳ Stand still in address posture (4s)..."
                     self.root.after(2000, self.clear_copy_feedback)
                     self.draw_screen()
                 return
@@ -4852,18 +4860,38 @@ class ShanktuaryApp:
         self.canvas.create_text((btn_open_x1 + btn_open_x2) // 2, (act_y1 + act_y2) // 2, text="🌐 Open Bluetooth Settings", fill="#38BDF8", font=("Helvetica", 8, "bold"))
 
         # --- SECTION 2: HARDWARE CONTROLS ---
-        hw_y1 = pin_card_y2 + 10
-        hw_y2 = hw_y1 + 40
+        hw_y1 = pin_card_y2 + 8
+        hw_y2 = hw_y1 + 38
         is_sim = pm.is_simulator if pm else False
 
-        self.balance_modal_tare_rect = (mx1 + 20, hw_y1, mx1 + 265, hw_y2)
-        self.canvas.create_rectangle(mx1 + 20, hw_y1, mx1 + 265, hw_y2, fill="#1A2234", outline="#00FF66")
-        self.canvas.create_text((mx1 + 20 + mx1 + 265) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare / Zero Baseline", fill="#00FF66", font=("Helvetica", 8, "bold"))
+        tot_hw_w = mx2 - mx1 - 40
+        btn_w3 = (tot_hw_w - 20) // 3
+        b1_x1, b1_x2 = mx1 + 20, mx1 + 20 + btn_w3
+        b2_x1, b2_x2 = b1_x2 + 10, b1_x2 + 10 + btn_w3
+        b3_x1, b3_x2 = b2_x2 + 10, mx2 - 20
 
-        self.balance_modal_sim_rect = (mx1 + 280, hw_y1, mx2 - 20, hw_y2)
+        # Button 1: Tare Zero
+        self.balance_modal_tare_rect = (b1_x1, hw_y1, b1_x2, hw_y2)
+        self.canvas.create_rectangle(b1_x1, hw_y1, b1_x2, hw_y2, fill="#1A2234", outline="#00FF66")
+        self.canvas.create_text((b1_x1 + b1_x2) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare Resting Zero", fill="#00FF66", font=("Helvetica", 8, "bold"))
+
+        # Button 2: 50/50 Stance Calibration (4s)
+        align_st = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {"active": False, "remaining_sec": 0.0, "message": "Idle"}
+        is_aligning = align_st.get("active", False)
+        rem_sec = align_st.get("remaining_sec", 0.0)
+
+        self.balance_modal_align_rect = (b2_x1, hw_y1, b2_x2, hw_y2)
+        align_bg = "#0369A1" if is_aligning else "#1E293B"
+        align_bd = "#38BDF8" if is_aligning else "#00E5FF"
+        align_txt = f"⏳ Stand Still... {rem_sec:.1f}s" if is_aligning else "🎯 50/50 Stance (4s)"
+        self.canvas.create_rectangle(b2_x1, hw_y1, b2_x2, hw_y2, fill=align_bg, outline=align_bd, width=2 if is_aligning else 1)
+        self.canvas.create_text((b2_x1 + b2_x2) // 2, (hw_y1 + hw_y2) // 2, text=align_txt, fill="#FFFFFF", font=("Helvetica", 8, "bold"))
+
+        # Button 3: Simulator Toggle
+        self.balance_modal_sim_rect = (b3_x1, hw_y1, b3_x2, hw_y2)
         sim_col = "#00E5FF" if is_sim else "#475569"
-        self.canvas.create_rectangle(mx1 + 280, hw_y1, mx2 - 20, hw_y2, fill="#151926", outline=sim_col)
-        self.canvas.create_text((mx1 + 280 + mx2 - 20) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator Mode: {'[ON]' if is_sim else '[OFF]'}", fill="#FFFFFF", font=("Helvetica", 8, "bold"))
+        self.canvas.create_rectangle(b3_x1, hw_y1, b3_x2, hw_y2, fill="#151926", outline=sim_col)
+        self.canvas.create_text((b3_x1 + b3_x2) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator: {'[ON]' if is_sim else '[OFF]'}", fill="#FFFFFF", font=("Helvetica", 8, "bold"))
 
         # --- SECTION 3: STEP-BY-STEP PAIRING INSTRUCTIONS ---
         guide_y1 = hw_y2 + 8
@@ -4871,11 +4899,17 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(mx1 + 20, guide_y1, mx2 - 20, guide_y2, fill="#141824", outline="#1F2536")
         self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill="#64748B", font=("Helvetica", 7, "bold"), anchor="w")
 
+        # Alignment feedback banner if present
+        msg = align_st.get("message", "")
+        if msg and msg != "Idle":
+            msg_col = "#00FF66" if msg.startswith("✓") else ("#FFB800" if "Sampling" in msg or "Stand" in msg else "#FF3366")
+            self.canvas.create_text(mx2 - 32, guide_y1 + 12, text=msg, fill=msg_col, font=("Helvetica", 7, "bold"), anchor="e")
+
         steps = [
             "1. Press red SYNC button on board(s) (4 LEDs blink) → Open BT Settings → Paste PIN.",
             "2. For 2-Board setups: Select '2 Boards' above and click 'Start Wizard' to identify feet.",
             "3. Step on Left board first, then Right board when prompted.",
-            "4. Stand evenly on board(s) and click 'Tare Zero' to calibrate baseline."
+            "4. Step off and click 'Tare Resting Zero' → Stand at address and click '50/50 Stance (4s)'."
         ]
         for idx, s in enumerate(steps):
             self.canvas.create_text(mx1 + 32, guide_y1 + 26 + (idx * 14), text=s, fill="#CBD5E1", font=("Helvetica", 7), anchor="w")
