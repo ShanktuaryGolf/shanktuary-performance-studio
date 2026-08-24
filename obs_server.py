@@ -323,7 +323,8 @@ class PressureManager:
                 b = HidBackend(device_path=path)
                 b.open()
                 return b
-            except Exception:
+            except Exception as e:
+                print(f"[!] Error creating Windows HID backend for path={device_path}: {e}")
                 return None
         else:
             try:
