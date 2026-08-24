@@ -2531,7 +2531,7 @@ class ShanktuaryApp:
             txt_col = "#00E5FF" if is_sel else "#D0D5DD"
             
             self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
-            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=f"🏌️  {club_name}", fill=txt_col, font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=f"•  {club_name}", fill=txt_col, font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
 
         # Divider & Add Custom Club Action
         div_y = y1 + 22 + (total_items * item_h) + 2
@@ -3611,7 +3611,7 @@ class ShanktuaryApp:
         
         side_h = int(115 * scale)
         side_offset_x = int(95 * scale)
-        side_img = self.get_scaled_club_asset(SIDE_PATH, side_h, mirror=self.is_left_handed)
+        side_img = self.get_scaled_club_asset(SIDE_PATH, side_h, mirror=False)
         if side_img:
             self.canvas.create_image(q2_cx - side_offset_x, ground_y - int(24 * scale), image=side_img, anchor="c")
 
@@ -3758,7 +3758,7 @@ class ShanktuaryApp:
 
         # Clubface Graphic
         face_h = int(130 * scale)
-        face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=self.is_left_handed)
+        face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=not self.is_left_handed)
         if face_img:
             self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
 
