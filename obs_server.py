@@ -298,11 +298,13 @@ class PressureManager:
 
                         # Sampling for 4-second stance alignment
                         if self._alignment_active:
-                            if tared.total >= 10.0:
-                                left_w = tared.top_left + tared.bottom_left
-                                right_w = tared.top_right + tared.bottom_right
-                                self._alignment_samples.append((left_w, right_w))
-                            if time.time() >= self._alignment_end_time:
+                            now_t = time.time()
+                            if now_t >= self._alignment_sample_start:
+                                if tared.total >= 10.0:
+                                    left_w = tared.top_left + tared.bottom_left
+                                    right_w = tared.top_right + tared.bottom_right
+                                    self._alignment_samples.append((left_w, right_w))
+                            if now_t >= self._alignment_end_time:
                                 self._finish_stance_alignment()
 
                         # Apply 50/50 stance balance calibration multipliers
@@ -384,26 +386,40 @@ class PressureManager:
         except Exception as e:
             print(f"[!] Could not load calibration: {e}")
 
-    def start_stance_alignment(self, duration_sec=4.0):
+    def start_stance_alignment(self, delay_sec=5.0, duration_sec=4.0):
         with self.lock:
             self._alignment_samples = []
             self._alignment_start_time = time.time()
-            self._alignment_end_time = time.time() + duration_sec
+            self._alignment_sample_start = self._alignment_start_time + delay_sec
+            self._alignment_end_time = self._alignment_sample_start + duration_sec
             self._alignment_active = True
-            self._alignment_status_msg = f"Sampling stance balance ({duration_sec:.0f}s)..."
-            return {"status": "started", "duration_sec": duration_sec}
+            self._alignment_status_msg = f"⏳ Step onto boards & take stance in {delay_sec:.0f}s..."
+            return {"status": "started", "delay_sec": delay_sec, "duration_sec": duration_sec}
 
     def get_alignment_status(self):
         with self.lock:
             now = time.time()
             rem = max(0.0, self._alignment_end_time - now) if self._alignment_active else 0.0
-            tot_dur = max(0.01, self._alignment_end_time - self._alignment_start_time) if self._alignment_start_time > 0 else 4.0
+            tot_dur = max(0.01, self._alignment_end_time - self._alignment_start_time) if self._alignment_start_time > 0 else 9.0
             prog = min(1.0, max(0.0, (tot_dur - rem) / tot_dur)) if self._alignment_active else (1.0 if self._alignment_status_msg.startswith("✓") else 0.0)
+            
+            # Dynamic message update based on phase
+            if self._alignment_active:
+                if now < self._alignment_sample_start:
+                    rem_lead = max(0.1, self._alignment_sample_start - now)
+                    msg = f"⏳ Step onto boards & take stance ({rem_lead:.1f}s)..."
+                else:
+                    rem_samp = max(0.1, self._alignment_end_time - now)
+                    msg = f"🎯 Hold stance still... ({rem_samp:.1f}s)"
+            else:
+                msg = self._alignment_status_msg
+
             return {
                 "active": self._alignment_active,
+                "in_lead_in": bool(self._alignment_active and now < self._alignment_sample_start),
                 "remaining_sec": round(rem, 1),
                 "progress": round(prog, 2),
-                "message": self._alignment_status_msg,
+                "message": msg,
                 "multipliers": self.balance_multiplier,
             }
 
