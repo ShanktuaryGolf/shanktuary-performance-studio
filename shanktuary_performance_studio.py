@@ -1334,14 +1334,6 @@ class ShanktuaryApp:
                     if len(self.swing_lab_history) > 200:
                         self.swing_lab_history.pop(0)
 
-                # If wizard is active during hardware modal, update with live readings
-                if self.show_balance_hardware_modal and pm.assignment_wizard and pm.assignment_wizard.phase in ("waiting_left", "waiting_right"):
-                    if latest and "raw_cells" in latest:
-                        rc = latest["raw_cells"]
-                        w_a = (rc[0] + rc[2]) * 0.5
-                        w_b = (rc[1] + rc[3]) * 0.5
-                        pm.update_assignment_wizard(w_a, w_b)
-
                 if self.view_mode == 8 or self.show_balance_hardware_modal:
                     self.draw_screen()
         except Exception:

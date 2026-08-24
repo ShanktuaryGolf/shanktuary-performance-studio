@@ -18,6 +18,10 @@ import sys
 import os
 
 
+import functools
+
+
+@functools.lru_cache(maxsize=1)
 def get_host_bluetooth_mac() -> str | None:
     """Return the local Bluetooth adapter MAC address as 12-char uppercase hex 'AABBCCDDEEFF'.
 
