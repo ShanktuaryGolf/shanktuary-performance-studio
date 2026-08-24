@@ -40,6 +40,18 @@ import obs_server
 FALLBACK_NOVA_HOST = "192.168.40.249"
 FALLBACK_NOVA_PORT = 2920
 
+# Windows High-DPI Scaling Precision Fix
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 if getattr(sys, "frozen", False):
     BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     DATA_DIR = os.path.dirname(sys.executable)
@@ -420,6 +432,8 @@ class ShanktuaryApp:
         self.balance_modal_mode_1_rect = None
         self.balance_modal_mode_2_rect = None
         self.balance_modal_assign_btn_rect = None
+        self.balance_modal_step_a_rect = None
+        self.balance_modal_step_b_rect = None
         self.balance_modal_pin_text = ""
         self.root.after(33, self.poll_pressure_stream)
 
@@ -1370,7 +1384,14 @@ class ShanktuaryApp:
     def handle_mouse_hover(self, event):
         # 0. In-Canvas Balance Hardware Modal Hover
         if self.show_balance_hardware_modal:
-            for r in (self.balance_modal_close_rect, self.balance_modal_pair_rect, self.balance_modal_tare_rect, self.balance_modal_sim_rect, self.balance_modal_copy_pin_rect, self.balance_modal_bt_settings_rect):
+            for r in (
+                self.balance_modal_close_rect, self.balance_modal_pair_rect,
+                self.balance_modal_tare_rect, self.balance_modal_sim_rect,
+                self.balance_modal_copy_pin_rect, self.balance_modal_bt_settings_rect,
+                self.balance_modal_mode_1_rect, self.balance_modal_mode_2_rect,
+                self.balance_modal_assign_btn_rect,
+                self.balance_modal_step_a_rect, self.balance_modal_step_b_rect
+            ):
                 if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
                     self.canvas.config(cursor="hand2")
                     return
@@ -1648,6 +1669,20 @@ class ShanktuaryApp:
                     obs_server.pressure_manager.start_assignment_wizard()
                     self.copy_feedback = "🦶 Wizard Started: Step on LEFT Board"
                     self.root.after(3000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_step_a_rect and self.balance_modal_step_a_rect[0] <= event.x <= self.balance_modal_step_a_rect[2] and self.balance_modal_step_a_rect[1] <= event.y <= self.balance_modal_step_a_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.update_assignment_wizard(35.0, 0.0)
+                    self.copy_feedback = "🦶 Stepped on Board A (35 kg)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_step_b_rect and self.balance_modal_step_b_rect[0] <= event.x <= self.balance_modal_step_b_rect[2] and self.balance_modal_step_b_rect[1] <= event.y <= self.balance_modal_step_b_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.update_assignment_wizard(0.0, 35.0)
+                    self.copy_feedback = "🦶 Stepped on Board B (35 kg)"
+                    self.root.after(2000, self.clear_copy_feedback)
                     self.draw_screen()
                 return
             if self.balance_modal_box_rect:
@@ -2614,11 +2649,12 @@ class ShanktuaryApp:
         elif self.show_custom_club_modal:
             self.draw_custom_club_modal(w, h)
 
-        # 6. Toast Notification
+        # 6. Toast Notification (Always on Top)
         if self.copy_feedback:
-            toast_w = 220
-            self.canvas.create_rectangle((w - toast_w) // 2, h - 50, (w + toast_w) // 2, h - 18, fill="#0E2A1B", outline="#00FF66", width=2)
-            self.canvas.create_text(w // 2, h - 34, text=f"✓ {self.copy_feedback}", fill="#00FF66", font=("Helvetica", 9, "bold"))
+            msg = self.copy_feedback if self.copy_feedback.startswith("✓") or self.copy_feedback.startswith("🦶") else f"✓ {self.copy_feedback}"
+            toast_w = max(260, len(msg) * 8 + 36)
+            self.canvas.create_rectangle((w - toast_w) // 2, h - 52, (w + toast_w) // 2, h - 18, fill="#0E2A1B", outline="#00FF66", width=2)
+            self.canvas.create_text(w // 2, h - 35, text=msg, fill="#00FF66", font=("Helvetica", 9, "bold"))
 
     def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
         self.range_launch_web_rect = None
@@ -4713,7 +4749,7 @@ class ShanktuaryApp:
             w_a = wiz_status.get("board_a_weight", 0.0)
             w_b = wiz_status.get("board_b_weight", 0.0)
 
-            card_h = 56
+            card_h = 68 if wiz_phase in ("waiting_left", "waiting_right") else 56
             card_y1 = next_y
             card_y2 = card_y1 + card_h
             self.canvas.create_rectangle(mx1 + 20, card_y1, mx2 - 20, card_y2, fill="#0F172A", outline="#38BDF8" if wiz_phase != "idle" else "#1E293B")
@@ -4732,23 +4768,46 @@ class ShanktuaryApp:
                 p_text = "Step on boards to assign Left & Right feet:"
                 p_col = "#CBD5E1"
 
-            self.canvas.create_text(mx1 + 32, card_y1 + 16, text=p_text, fill=p_col, font=("Helvetica", 8, "bold"), anchor="w")
-            self.canvas.create_text(mx1 + 32, card_y1 + 38, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill="#94A3B8", font=("Consolas", 8), anchor="w")
+            self.canvas.create_text(mx1 + 32, card_y1 + 14, text=p_text, fill=p_col, font=("Helvetica", 8, "bold"), anchor="w")
+            self.canvas.create_text(mx1 + 32, card_y1 + 32, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill="#94A3B8", font=("Consolas", 8), anchor="w")
+
+            # Step simulation chips during wizard
+            if wiz_phase in ("waiting_left", "waiting_right"):
+                sa_x1 = mx1 + 32
+                sa_x2 = sa_x1 + 105
+                sb_x1 = sa_x2 + 8
+                sb_x2 = sb_x1 + 105
+                s_y1 = card_y1 + 44
+                s_y2 = s_y1 + 18
+
+                self.balance_modal_step_a_rect = (sa_x1, s_y1, sa_x2, s_y2)
+                self.canvas.create_rectangle(sa_x1, s_y1, sa_x2, s_y2, fill="#1E293B", outline="#00E5FF")
+                self.canvas.create_text((sa_x1 + sa_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board A", fill="#00E5FF", font=("Helvetica", 7, "bold"))
+
+                self.balance_modal_step_b_rect = (sb_x1, s_y1, sb_x2, s_y2)
+                self.canvas.create_rectangle(sb_x1, s_y1, sb_x2, s_y2, fill="#1E293B", outline="#FF4081")
+                self.canvas.create_text((sb_x1 + sb_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board B", fill="#FF4081", font=("Helvetica", 7, "bold"))
+            else:
+                self.balance_modal_step_a_rect = None
+                self.balance_modal_step_b_rect = None
 
             # Calibrate / Start Button
-            btn_w = 140
+            btn_w = 135
             b_x2 = mx2 - 32
             b_x1 = b_x2 - btn_w
             b_y1 = card_y1 + 12
             b_y2 = card_y2 - 12
             self.balance_modal_assign_btn_rect = (b_x1, b_y1, b_x2, b_y2)
             btn_lbl = "🎯 Re-Assign" if wiz_phase == "complete" else ("⏳ Detecting..." if wiz_phase in ("waiting_left", "waiting_right") else "🎯 Start Wizard")
-            self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill="#0284C7" if wiz_phase != "idle" else "#1E293B", outline="#38BDF8")
+            btn_bg = "#0284C7" if wiz_phase != "idle" else "#1E293B"
+            self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill=btn_bg, outline="#38BDF8")
             self.canvas.create_text((b_x1 + b_x2) // 2, (b_y1 + b_y2) // 2, text=btn_lbl, fill="#FFFFFF", font=("Helvetica", 8, "bold"))
 
             next_y = card_y2 + 8
         else:
             self.balance_modal_assign_btn_rect = None
+            self.balance_modal_step_a_rect = None
+            self.balance_modal_step_b_rect = None
 
         # --- SECTION 1: BLUETOOTH PAIRING PIN CARD ---
         from src.hardware.pressure.bluetooth_windows import (
