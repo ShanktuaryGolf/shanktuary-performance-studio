@@ -241,8 +241,9 @@ class PressureManager:
         last_broadcast = 0.0
         while self.running:
             try:
-                # 0. Hardware auto-reconnect if not in simulator mode and no backend open
-                if not self.is_simulator and (not self.backend or not self.backend.is_open):
+                # 0. Hardware auto-reconnect if not in simulator mode, no backend open, and wizard not active
+                is_wiz_active = bool(self.assignment_wizard and self.assignment_wizard.phase in ("waiting_left", "waiting_right"))
+                if not self.is_simulator and not is_wiz_active and (not self.backend or not self.backend.is_open):
                     now = time.time()
                     if now - self._last_reconnect_attempt >= 2.0:
                         self._last_reconnect_attempt = now
@@ -383,6 +384,22 @@ class PressureManager:
     def start_assignment_wizard(self):
         with self.lock:
             from src.hardware.pressure.connection import BoardAssignmentWizard
+            
+            # Close existing backend so we don't hold exclusive handle on Board 1
+            if self.backend:
+                try: self.backend.close()
+                except Exception: pass
+                self.backend = None
+
+            if self._wiz_backend_a:
+                try: self._wiz_backend_a.close()
+                except Exception: pass
+                self._wiz_backend_a = None
+            if self._wiz_backend_b:
+                try: self._wiz_backend_b.close()
+                except Exception: pass
+                self._wiz_backend_b = None
+
             dev_paths = []
             if sys.platform == "win32":
                 try:
@@ -397,13 +414,6 @@ class PressureManager:
                     dev_paths = enumerate_board_devices()
                 except Exception:
                     pass
-
-            if self._wiz_backend_a:
-                try: self._wiz_backend_a.close()
-                except Exception: pass
-            if self._wiz_backend_b:
-                try: self._wiz_backend_b.close()
-                except Exception: pass
 
             if len(dev_paths) >= 2:
                 b_a_id = dev_paths[0]
@@ -437,15 +447,28 @@ class PressureManager:
             if phase == "complete" or getattr(phase, "value", phase) == "complete":
                 self.assigned_left = self.assignment_wizard.left_board
                 self.assigned_right = self.assignment_wizard.right_board
-                if self._wiz_backend_a:
-                    try: self._wiz_backend_a.close()
-                    except Exception: pass
+
+                # Seamlessly transition wizard backends directly into DualWbbBackend
+                if self.board_mode == "dual" and self._wiz_backend_a and self._wiz_backend_b:
+                    from src.hardware.pressure.dual_wbb_backend import DualWbbBackend
+                    if self.assigned_left == self.assignment_wizard.board_a:
+                        b_left = self._wiz_backend_a
+                        b_right = self._wiz_backend_b
+                    else:
+                        b_left = self._wiz_backend_b
+                        b_right = self._wiz_backend_a
+                    self.backend = DualWbbBackend(b_left, b_right)
                     self._wiz_backend_a = None
-                if self._wiz_backend_b:
-                    try: self._wiz_backend_b.close()
-                    except Exception: pass
                     self._wiz_backend_b = None
-                if self.board_mode == "dual":
+                else:
+                    if self._wiz_backend_a:
+                        try: self._wiz_backend_a.close()
+                        except Exception: pass
+                        self._wiz_backend_a = None
+                    if self._wiz_backend_b:
+                        try: self._wiz_backend_b.close()
+                        except Exception: pass
+                        self._wiz_backend_b = None
                     self._set_simulator_unlocked(self.is_simulator)
             return self.assignment_wizard.get_status()
 
