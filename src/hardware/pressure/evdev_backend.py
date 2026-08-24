@@ -1,19 +1,19 @@
 """Real Wii Balance Board backend using evdev."""
 
-import time
-import evdev
-from evdev import ecodes
-
-from .base import BoardBackend, SensorReading
-
-
-# evdev ABS codes from hid-wiimote kernel driver
-SENSOR_MAP = {
-    ecodes.ABS_HAT1X: "top_left",      # code 18
-    ecodes.ABS_HAT0X: "top_right",     # code 16
-    ecodes.ABS_HAT1Y: "bottom_left",   # code 19
-    ecodes.ABS_HAT0Y: "bottom_right",  # code 17
-}
+try:
+    import evdev
+    from evdev import ecodes
+    # evdev ABS codes from hid-wiimote kernel driver
+    SENSOR_MAP = {
+        ecodes.ABS_HAT1X: "top_left",      # code 18
+        ecodes.ABS_HAT0X: "top_right",     # code 16
+        ecodes.ABS_HAT1Y: "bottom_left",   # code 19
+        ecodes.ABS_HAT0Y: "bottom_right",  # code 17
+    }
+except ImportError:
+    evdev = None
+    ecodes = None
+    SENSOR_MAP = {}
 
 DEVICE_NAME = "Nintendo Wii Remote Balance Board"
 
