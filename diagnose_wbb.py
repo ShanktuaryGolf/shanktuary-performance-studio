@@ -162,6 +162,73 @@ for idx, cand in enumerate(wbb_candidates):
     finally:
         dev.close()
 
+# 4. Simultaneous Dual-Board Balance Test (if 2+ boards found)
+if len(wbb_candidates) >= 2:
+    print("\n" + "=" * 60)
+    print("  SIMULTANEOUS DUAL-BOARD BALANCE TEST")
+    print("=" * 60)
+    print("Opening both boards together...")
+
+    dev1 = hid.device()
+    dev2 = hid.device()
+    try:
+        dev1.open_path(wbb_candidates[0]["path"])
+        dev2.open_path(wbb_candidates[1]["path"])
+        print("[✓] Opened both board handles!")
+
+        for dev, name in [(dev1, "Board 1"), (dev2, "Board 2")]:
+            dev.set_nonblocking(0)
+            dev.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xF0, 0x01, 0x55] + [0x00] * 15))
+            time.sleep(0.05)
+            dev.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xFB, 0x01, 0x00] + [0x00] * 15))
+            time.sleep(0.05)
+            dev.write(bytes([0x11, 0x10]))
+            time.sleep(0.05)
+            dev.write(bytes([0x12, 0x04, 0x32]))
+            time.sleep(0.05)
+            dev.set_nonblocking(1)
+
+        print("\n>>> Stand naturally with ONE foot on Board 1 and ONE foot on Board 2 <<<")
+        print("Streaming live balance for 10 seconds (Ctrl+C to stop)...\n")
+
+        start_t = time.time()
+        base1 = None
+        base2 = None
+
+        while time.time() - start_t < 10.0:
+            d1 = dev1.read(64)
+            d2 = dev2.read(64)
+
+            w1, w2 = 0.0, 0.0
+
+            if d1 and d1[0] == 0x32 and len(d1) >= 11:
+                import struct
+                tr, br, tl, bl = struct.unpack(">HHHH", bytes(d1[3:11]))
+                if base1 is None:
+                    base1 = (tr, br, tl, bl)
+                w1 = max(0.0, (tr - base1[0] + br - base1[1] + tl - base1[2] + bl - base1[3]) / 25.0)
+
+            if d2 and d2[0] == 0x32 and len(d2) >= 11:
+                import struct
+                tr, br, tl, bl = struct.unpack(">HHHH", bytes(d2[3:11]))
+                if base2 is None:
+                    base2 = (tr, br, tl, bl)
+                w2 = max(0.0, (tr - base2[0] + br - base2[1] + tl - base2[2] + bl - base2[3]) / 25.0)
+
+            tot = w1 + w2
+            pct1 = (100.0 * w1 / tot) if tot > 0 else 50.0
+            pct2 = (100.0 * w2 / tot) if tot > 0 else 50.0
+            cop_x_mm = (w2 - w1) / tot * 200.0 if tot > 0 else 0.0
+
+            print(f"\r  Board 1 (L): {w1:5.1f} kg ({pct1:4.1f}%) | Board 2 (R): {w2:5.1f} kg ({pct2:4.1f}%) | Total: {tot:5.1f} kg | CoP X: {cop_x_mm:+6.1f} mm", end="", flush=True)
+            time.sleep(0.05)
+        print()
+    except Exception as e:
+        print(f"\n[!] Dual test error: {e}")
+    finally:
+        dev1.close()
+        dev2.close()
+
 print("\n" + "=" * 60)
 print("Diagnostic Complete.")
 print("=" * 60)
