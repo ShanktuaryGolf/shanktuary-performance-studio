@@ -268,10 +268,13 @@ def load_image_asset(path, target_h=210, mirror=False):
             print(f"[!] Error loading {path}: {e}")
     return None
 
+APP_VERSION = "v1.2.0"
+BUILD_NUMBER = "2026.08.24.1"
+
 class ShanktuaryApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Shanktuary Performance Studio - Launch Monitor Suite")
+        self.root.title(f"Shanktuary Performance Studio {APP_VERSION} - Launch Monitor Suite")
         self.root.configure(bg="#101114")
         self.fullscreen = False
         self.view_mode = 1  # 1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite

@@ -25,6 +25,8 @@ import struct
 import sys
 from pathlib import Path
 
+APP_VERSION = "v1.2.0"
+BUILD_NUMBER = "2026.08.24.1"
 OBS_PORT = 9321
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
