@@ -225,6 +225,7 @@ class PressureManager:
             self.backend = None
             self._wiz_backend_a = None
             self._wiz_backend_b = None
+            self._last_reconnect_attempt = 0.0
             try:
                 self.backend = self._create_hardware_backend()
             except Exception:
@@ -240,6 +241,17 @@ class PressureManager:
         last_broadcast = 0.0
         while self.running:
             try:
+                # 0. Hardware auto-reconnect if not in simulator mode and no backend open
+                if not self.is_simulator and (not self.backend or not self.backend.is_open):
+                    now = time.time()
+                    if now - self._last_reconnect_attempt >= 2.0:
+                        self._last_reconnect_attempt = now
+                        with self.lock:
+                            try:
+                                self.backend = self._create_hardware_backend()
+                            except Exception:
+                                pass
+
                 # 1. Wizard multi-board polling
                 wiz = self.assignment_wizard
                 if wiz and wiz.phase in ("waiting_left", "waiting_right"):
