@@ -2,8 +2,7 @@
 
 import time
 
-from .base import BoardBackend, BoardOrientation, SensorReading, remap_for_orientation
-from .serial_backend import DualPlateReading
+from .base import BoardBackend, BoardOrientation, SensorReading, DualPlateReading, remap_for_orientation
 
 
 class DualWbbBackend(BoardBackend):

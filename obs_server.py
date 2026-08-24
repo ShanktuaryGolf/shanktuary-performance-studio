@@ -223,10 +223,10 @@ class PressureManager:
             self.buffer = ShotSynchronizedPressureBuffer(capacity=600)
             self.tare_offsets = TareOffsets()
             self.backend = None
+            self._wiz_backend_a = None
+            self._wiz_backend_b = None
             try:
-                from src.hardware.pressure.evdev_backend import EvdevBackend
-                self.backend = EvdevBackend()
-                self.backend.open()
+                self.backend = self._create_hardware_backend()
             except Exception:
                 self.backend = None
             self.running = True
@@ -240,6 +240,33 @@ class PressureManager:
         last_broadcast = 0.0
         while self.running:
             try:
+                # 1. Wizard multi-board polling
+                wiz = self.assignment_wizard
+                if wiz and wiz.phase in ("waiting_left", "waiting_right"):
+                    w_a = wiz.board_a_weight
+                    w_b = wiz.board_b_weight
+                    if self._wiz_backend_a and self._wiz_backend_b:
+                        rd_a = self._wiz_backend_a.read()
+                        rd_b = self._wiz_backend_b.read()
+                        if rd_a:
+                            w_a = rd_a.total_weight
+                        if rd_b:
+                            w_b = rd_b.total_weight
+                    elif self._wiz_backend_a and not self._wiz_backend_b:
+                        rd_a = self._wiz_backend_a.read()
+                        if rd_a:
+                            w_a = rd_a.top_left + rd_a.bottom_left
+                            w_b = rd_a.top_right + rd_a.bottom_right
+                    elif self.backend and self.backend.is_open:
+                        rd = self.backend.read()
+                        if rd:
+                            w_a = rd.top_left + rd.bottom_left
+                            w_b = rd.top_right + rd.bottom_right
+
+                    if w_a > 0.0 or w_b > 0.0:
+                        self.update_assignment_wizard(w_a, w_b)
+
+                # 2. Standard stream loop
                 if self.backend and self.backend.is_open:
                     reading = self.backend.read()
                     if reading:
@@ -344,9 +371,47 @@ class PressureManager:
     def start_assignment_wizard(self):
         with self.lock:
             from src.hardware.pressure.connection import BoardAssignmentWizard
+            dev_paths = []
+            if sys.platform == "win32":
+                try:
+                    from src.hardware.pressure.hid_backend import enumerate_boards
+                    devs = enumerate_boards()
+                    dev_paths = [d["path"] for d in devs]
+                except Exception:
+                    pass
+            else:
+                try:
+                    from src.hardware.pressure.evdev_backend import enumerate_board_devices
+                    dev_paths = enumerate_board_devices()
+                except Exception:
+                    pass
+
+            if self._wiz_backend_a:
+                try: self._wiz_backend_a.close()
+                except Exception: pass
+            if self._wiz_backend_b:
+                try: self._wiz_backend_b.close()
+                except Exception: pass
+
+            if len(dev_paths) >= 2:
+                b_a_id = dev_paths[0]
+                b_b_id = dev_paths[1]
+                self._wiz_backend_a = self._create_hardware_backend(b_a_id)
+                self._wiz_backend_b = self._create_hardware_backend(b_b_id)
+            elif len(dev_paths) == 1:
+                b_a_id = dev_paths[0]
+                b_b_id = "Board B"
+                self._wiz_backend_a = self._create_hardware_backend(b_a_id)
+                self._wiz_backend_b = None
+            else:
+                b_a_id = "Board A"
+                b_b_id = "Board B"
+                self._wiz_backend_a = None
+                self._wiz_backend_b = None
+
             self.assignment_wizard = BoardAssignmentWizard(
-                board_a="Board A",
-                board_b="Board B",
+                board_a=b_a_id,
+                board_b=b_b_id,
                 threshold=5.0
             )
             self.assignment_wizard.start()
@@ -360,6 +425,14 @@ class PressureManager:
             if phase == "complete" or getattr(phase, "value", phase) == "complete":
                 self.assigned_left = self.assignment_wizard.left_board
                 self.assigned_right = self.assignment_wizard.right_board
+                if self._wiz_backend_a:
+                    try: self._wiz_backend_a.close()
+                    except Exception: pass
+                    self._wiz_backend_a = None
+                if self._wiz_backend_b:
+                    try: self._wiz_backend_b.close()
+                    except Exception: pass
+                    self._wiz_backend_b = None
                 if self.board_mode == "dual":
                     self._set_simulator_unlocked(self.is_simulator)
             return self.assignment_wizard.get_status()
