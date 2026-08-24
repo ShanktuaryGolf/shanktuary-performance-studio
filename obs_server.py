@@ -225,6 +225,7 @@ class PressureManager:
             self.backend = None
             self._wiz_backend_a = None
             self._wiz_backend_b = None
+            self._latest_raw_reading = None
             self._last_reconnect_attempt = 0.0
             try:
                 self.backend = self._create_hardware_backend()
@@ -283,35 +284,83 @@ class PressureManager:
                 if self.backend and self.backend.is_open:
                     reading = self.backend.read()
                     if reading:
+                        self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
-                        cop = self.cop_calc.compute(tared) if self.cop_calc else None
-                        if cop:
-                            torque = self.torque_calc.update(cop) if self.torque_calc else None
-                            phase = self.swing_det.update(cop).value if self.swing_det else "Address"
-                            frame = self.buffer.push(cop, torque=torque, phase=phase)
+                        
+                        # When load is under threshold (< 1.0 kg), emit zero resting frame at center (0,0)
+                        if tared.total < 1.0:
+                            from src.processing.pressure.cop import CoPSample
+                            zero_cop = CoPSample(
+                                cop_x=0.0,
+                                cop_y=0.0,
+                                total_kg=0.0,
+                                pct_left=50.0,
+                                pct_right=50.0,
+                                pct_front=50.0,
+                                pct_back=50.0,
+                                timestamp=time.time(),
+                                raw=tared,
+                                left_kg=0.0,
+                                right_kg=0.0,
+                            )
+                            frame = self.buffer.push(zero_cop, torque=0.0, phase="Address")
                             with self.lock:
                                 self.latest_frame = frame
+                        else:
+                            cop = self.cop_calc.compute(tared) if self.cop_calc else None
+                            if cop:
+                                torque = self.torque_calc.update(cop) if self.torque_calc else 0.0
+                                phase = self.swing_det.update(cop).value if self.swing_det else "Address"
+                                frame = self.buffer.push(cop, torque=torque, phase=phase)
+                                with self.lock:
+                                    self.latest_frame = frame
 
-                            now = time.time()
-                            if now - last_broadcast >= 0.033:  # ~30Hz broadcast rate for smooth UI rendering
-                                obs_state.broadcast({"type": "pressure", "data": frame})
-                                last_broadcast = now
+                        now = time.time()
+                        if now - last_broadcast >= 0.033:  # ~30Hz broadcast rate for smooth UI rendering
+                            if self.latest_frame:
+                                obs_state.broadcast({"type": "pressure", "data": self.latest_frame})
+                            last_broadcast = now
             except Exception:
                 pass
             time.sleep(0.012)
 
     def tare(self):
         with self.lock:
-            from src.hardware.pressure import TareOffsets
-            if self.latest_frame and "raw_cells" in self.latest_frame:
+            from src.hardware.pressure import TareOffsets, SensorReading
+            from src.processing.pressure.cop import CoPSample
+            if self._latest_raw_reading:
+                self.tare_offsets = TareOffsets(
+                    top_left=self._latest_raw_reading.top_left,
+                    top_right=self._latest_raw_reading.top_right,
+                    bottom_left=self._latest_raw_reading.bottom_left,
+                    bottom_right=self._latest_raw_reading.bottom_right,
+                )
+            elif self.latest_frame and "raw_cells" in self.latest_frame:
                 rc = self.latest_frame["raw_cells"]
                 self.tare_offsets = TareOffsets(
                     top_left=rc[0], top_right=rc[1], bottom_left=rc[2], bottom_right=rc[3]
                 )
             else:
-                self.tare_offsets = TareOffsets(
-                    top_left=0.0, top_right=0.0, bottom_left=0.0, bottom_right=0.0
-                )
+                self.tare_offsets = TareOffsets(0.0, 0.0, 0.0, 0.0)
+
+            # Immediately produce and broadcast zeroed resting frame at (0,0)
+            zero_reading = SensorReading(0.0, 0.0, 0.0, 0.0, timestamp=time.time())
+            zero_cop = CoPSample(
+                cop_x=0.0,
+                cop_y=0.0,
+                total_kg=0.0,
+                pct_left=50.0,
+                pct_right=50.0,
+                pct_front=50.0,
+                pct_back=50.0,
+                timestamp=time.time(),
+                raw=zero_reading,
+                left_kg=0.0,
+                right_kg=0.0,
+            )
+            frame = self.buffer.push(zero_cop, torque=0.0, phase="Address")
+            self.latest_frame = frame
+            obs_state.broadcast({"type": "pressure", "data": frame})
             return True
 
     def _create_hardware_backend(self, device_path=None):
