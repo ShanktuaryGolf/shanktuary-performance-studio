@@ -70,6 +70,10 @@ DEFAULT_LAYOUT = {
         "overhead_path": {"x": 550, "y": 30, "w": 250, "h": 200, "visible": True},
         "side_launch": {"x": 810, "y": 30, "w": 250, "h": 180, "visible": True},
         "spin_axis_3d": {"x": 1070, "y": 30, "w": 250, "h": 180, "visible": True},
+        "wbb_heatmap": {"x": 30, "y": 680, "w": 260, "h": 260, "visible": True},
+        "wbb_cop_dot": {"x": 300, "y": 680, "w": 180, "h": 180, "visible": True},
+        "wbb_balance_bar": {"x": 490, "y": 680, "w": 240, "h": 80, "visible": True},
+        "wbb_force_curve": {"x": 740, "y": 680, "w": 240, "h": 120, "visible": False},
         "ball_speed": {"x": 30, "y": 970, "w": 140, "h": 70, "visible": True},
         "club_speed": {"x": 180, "y": 970, "w": 140, "h": 70, "visible": True},
         "carry": {"x": 330, "y": 970, "w": 140, "h": 70, "visible": True},
@@ -82,7 +86,14 @@ DEFAULT_LAYOUT = {
         "spin_axis": {"x": 1380, "y": 970, "w": 140, "h": 70, "visible": True},
         "club_path": {"x": 1530, "y": 970, "w": 140, "h": 70, "visible": True},
         "face_angle": {"x": 1680, "y": 970, "w": 140, "h": 70, "visible": True},
-        "offline": {"x": 1780, "y": 970, "w": 140, "h": 70, "visible": False}
+        "offline": {"x": 1780, "y": 970, "w": 140, "h": 70, "visible": False},
+        "closure_rate": {"x": 1680, "y": 890, "w": 140, "h": 70, "visible": True},
+        "apex": {"x": 1530, "y": 890, "w": 140, "h": 70, "visible": True},
+        "face_to_path": {"x": 1380, "y": 890, "w": 140, "h": 70, "visible": False},
+        "attack_angle": {"x": 1230, "y": 890, "w": 140, "h": 70, "visible": False},
+        "dynamic_loft": {"x": 1080, "y": 890, "w": 140, "h": 70, "visible": False},
+        "hang_time": {"x": 930, "y": 890, "w": 140, "h": 70, "visible": False},
+        "descent_angle": {"x": 780, "y": 890, "w": 140, "h": 70, "visible": False}
     },
     "divot_calibration": {
         "offset_x": 0,
@@ -133,6 +144,16 @@ class OBSState:
     def push_shot(self, shot_data):
         with self.lock:
             self.latest_shot = shot_data
+        
+        # Trigger shot impact capture in pressure buffer
+        if 'pressure_manager' in globals():
+            def on_pressure_captured(trace_frames):
+                shot_data["pressure_trace"] = trace_frames
+                pressure_manager.last_shot_trace = trace_frames
+                self.broadcast({"type": "shot_pressure", "shot_id": shot_data.get("shotId"), "trace": trace_frames})
+
+            pressure_manager.buffer.trigger_shot_impact(callback=on_pressure_captured)
+
         self.broadcast({"type": "shot", "data": shot_data})
 
     def broadcast(self, message):
@@ -164,6 +185,229 @@ class OBSState:
 
 obs_state = OBSState()
 
+# --- Biomechanical Pressure Subsystem Manager ---
+class PressureManager:
+    """Manages Wii Balance Board hardware, simulator, and 60Hz telemetry broadcasting."""
+
+    def __init__(self):
+        self.backend = None
+        self.cop_calc = None
+        self.torque_calc = None
+        self.swing_det = None
+        self.buffer = None
+        self.tare_offsets = None
+        self.is_simulator = False
+        self.board_mode = "single"  # "single" or "dual"
+        self.assigned_left = None
+        self.assigned_right = None
+        self.assignment_wizard = None
+        self.running = False
+        self.thread = None
+        self.latest_frame = None
+        self.last_shot_trace = None
+        self.lock = threading.Lock()
+        self._init_subsystem()
+
+    def _init_subsystem(self):
+        try:
+            from src.hardware.pressure import TareOffsets
+            from src.processing.pressure import (
+                CoPCalculator,
+                TorqueCalculator,
+                SwingDetector,
+                ShotSynchronizedPressureBuffer,
+            )
+            self.cop_calc = CoPCalculator()
+            self.torque_calc = TorqueCalculator()
+            self.swing_det = SwingDetector()
+            self.buffer = ShotSynchronizedPressureBuffer(capacity=600)
+            self.tare_offsets = TareOffsets()
+            self.backend = None
+            try:
+                from src.hardware.pressure.evdev_backend import EvdevBackend
+                self.backend = EvdevBackend()
+                self.backend.open()
+            except Exception:
+                self.backend = None
+            self.running = True
+            self.thread = threading.Thread(target=self._loop, daemon=True, name="pressure-worker")
+            self.thread.start()
+            print("[+] Swing Lab Pressure Subsystem initialized (Hardware Mode / Demo OFF)")
+        except Exception as e:
+            print(f"[!] Warning: Could not initialize Pressure subsystem: {e}")
+
+    def _loop(self):
+        last_broadcast = 0.0
+        while self.running:
+            try:
+                if self.backend and self.backend.is_open:
+                    reading = self.backend.read()
+                    if reading:
+                        tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
+                        cop = self.cop_calc.compute(tared) if self.cop_calc else None
+                        if cop:
+                            torque = self.torque_calc.update(cop) if self.torque_calc else None
+                            phase = self.swing_det.update(cop).value if self.swing_det else "Address"
+                            frame = self.buffer.push(cop, torque=torque, phase=phase)
+                            with self.lock:
+                                self.latest_frame = frame
+
+                            now = time.time()
+                            if now - last_broadcast >= 0.033:  # ~30Hz broadcast rate for smooth UI rendering
+                                obs_state.broadcast({"type": "pressure", "data": frame})
+                                last_broadcast = now
+            except Exception:
+                pass
+            time.sleep(0.012)
+
+    def tare(self):
+        with self.lock:
+            from src.hardware.pressure import TareOffsets
+            if self.latest_frame and "raw_cells" in self.latest_frame:
+                rc = self.latest_frame["raw_cells"]
+                self.tare_offsets = TareOffsets(
+                    top_left=rc[0], top_right=rc[1], bottom_left=rc[2], bottom_right=rc[3]
+                )
+            else:
+                self.tare_offsets = TareOffsets(
+                    top_left=0.0, top_right=0.0, bottom_left=0.0, bottom_right=0.0
+                )
+            return True
+
+    def _create_hardware_backend(self, device_path=None):
+        """Create hardware backend appropriate for host OS (Evdev on Linux, Hid on Windows/macOS)."""
+        if sys.platform == "win32":
+            try:
+                from src.hardware.pressure.hid_backend import HidBackend
+                path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
+                b = HidBackend(device_path=path)
+                b.open()
+                return b
+            except Exception:
+                return None
+        else:
+            try:
+                from src.hardware.pressure.evdev_backend import EvdevBackend
+                b = EvdevBackend(device_path=device_path)
+                b.open()
+                return b
+            except Exception:
+                try:
+                    from src.hardware.pressure.hid_backend import HidBackend
+                    path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
+                    b = HidBackend(device_path=path)
+                    b.open()
+                    return b
+                except Exception:
+                    return None
+
+    def _set_simulator_unlocked(self, enabled: bool):
+        """Inner logic — caller MUST already hold self.lock."""
+        self.is_simulator = enabled
+        if self.backend:
+            try: self.backend.close()
+            except Exception: pass
+        if self.is_simulator:
+            from src.hardware.pressure import SimulatorBackend
+            self.backend = SimulatorBackend()
+            try: self.backend.open()
+            except Exception: pass
+        else:
+            try:
+                if self.board_mode == "dual" and self.assigned_left and self.assigned_right:
+                    from src.hardware.pressure.dual_wbb_backend import DualWbbBackend
+                    b_left = self._create_hardware_backend(self.assigned_left)
+                    b_right = self._create_hardware_backend(self.assigned_right)
+                    if b_left and b_right:
+                        self.backend = DualWbbBackend(b_left, b_right)
+                    else:
+                        self.backend = b_left or b_right
+                else:
+                    self.backend = self._create_hardware_backend()
+            except Exception:
+                self.backend = None
+        return self.is_simulator
+
+    def set_simulator(self, enabled: bool):
+        with self.lock:
+            return self._set_simulator_unlocked(enabled)
+
+    def set_board_mode(self, mode: str):
+        """Toggle between 'single' and 'dual' board modes."""
+        with self.lock:
+            if mode not in ("single", "dual"):
+                mode = "single"
+            self.board_mode = mode
+            self._set_simulator_unlocked(self.is_simulator)
+            return self.board_mode
+
+    def start_assignment_wizard(self):
+        with self.lock:
+            from src.hardware.pressure.connection import BoardAssignmentWizard
+            self.assignment_wizard = BoardAssignmentWizard(
+                board_a="Board A",
+                board_b="Board B",
+                threshold=5.0
+            )
+            self.assignment_wizard.start()
+            return self.assignment_wizard.get_status()
+
+    def update_assignment_wizard(self, weight_a: float, weight_b: float):
+        with self.lock:
+            if not self.assignment_wizard:
+                self.start_assignment_wizard()
+            phase, msg = self.assignment_wizard.update(weight_a, weight_b)
+            if phase == "complete" or getattr(phase, "value", phase) == "complete":
+                self.assigned_left = self.assignment_wizard.left_board
+                self.assigned_right = self.assignment_wizard.right_board
+                if self.board_mode == "dual":
+                    self._set_simulator_unlocked(self.is_simulator)
+            return self.assignment_wizard.get_status()
+
+    def reset_assignment_wizard(self):
+        with self.lock:
+            if self.assignment_wizard:
+                self.assignment_wizard.reset()
+            return {"phase": "idle", "message": ""}
+
+    def toggle_demo_swing(self) -> bool:
+        with self.lock:
+            new_state = not self.is_simulator
+            self._set_simulator_unlocked(new_state)
+            return new_state
+
+    def trigger_demo_swing(self):
+        with self.lock:
+            if not self.is_simulator or not self.backend:
+                self._set_simulator_unlocked(True)
+            elif hasattr(self.backend, "open"):
+                self.backend.open()
+            return True
+
+    def get_status(self):
+        with self.lock:
+            wizard_status = self.assignment_wizard.get_status() if self.assignment_wizard else {
+                "phase": "idle", "message": "", "is_complete": False
+            }
+            return {
+                "connected": self.backend.is_open if self.backend else False,
+                "mode": "simulator" if self.is_simulator else "hardware",
+                "board_mode": self.board_mode,
+                "is_dual": self.board_mode == "dual",
+                "assigned_left": self.assigned_left,
+                "assigned_right": self.assigned_right,
+                "assignment_wizard": wizard_status,
+                "latest": self.latest_frame,
+                "tare": {
+                    "top_left": self.tare_offsets.top_left if self.tare_offsets else 0.0,
+                    "top_right": self.tare_offsets.top_right if self.tare_offsets else 0.0,
+                    "bottom_left": self.tare_offsets.bottom_left if self.tare_offsets else 0.0,
+                    "bottom_right": self.tare_offsets.bottom_right if self.tare_offsets else 0.0,
+                }
+            }
+
+pressure_manager = PressureManager()
+
 class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
@@ -191,6 +435,36 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             with obs_state.lock:
                 shot = obs_state.latest_shot or {}
             self.send_json(shot)
+        elif parsed_path == "/api/pressure/status":
+            self.send_json(pressure_manager.get_status())
+        elif parsed_path == "/api/pressure/shot":
+            self.send_json({"trace": pressure_manager.last_shot_trace or []})
+        elif parsed_path == "/api/pressure/pin":
+            try:
+                from src.hardware.pressure.bluetooth_windows import (
+                    get_host_bluetooth_mac,
+                    mac_to_wii_pin,
+                    mac_to_wii_pin_display,
+                    mac_has_zero_byte,
+                    format_mac_display,
+                )
+                mac = get_host_bluetooth_mac() or ""
+                self.send_json({
+                    "status": "ok",
+                    "host_mac": mac,
+                    "host_mac_formatted": format_mac_display(mac) if mac else "",
+                    "pin_raw": mac_to_wii_pin(mac) if mac else "",
+                    "pin_display": mac_to_wii_pin_display(mac) if mac else "",
+                    "has_zero_byte": mac_has_zero_byte(mac) if mac else False,
+                    "platform": sys.platform,
+                })
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=500)
+        elif parsed_path == "/api/pressure/mode":
+            self.send_json({"board_mode": pressure_manager.board_mode, "is_dual": pressure_manager.board_mode == "dual"})
+        elif parsed_path == "/api/pressure/assign":
+            wizard_status = pressure_manager.assignment_wizard.get_status() if pressure_manager.assignment_wizard else {"phase": "idle", "message": ""}
+            self.send_json(wizard_status)
         elif parsed_path.startswith("/assets/"):
             asset_filename = parsed_path.replace("/assets/", "")
             file_path = assets_dir / asset_filename
@@ -205,6 +479,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             mime, _ = mimetypes.guess_type(file_path)
             if not mime: mime = "application/octet-stream"
             self.serve_file(file_path, mime)
+        elif parsed_path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
         else:
             self.send_error(404, f"File Not Found: {parsed_path}")
 
@@ -217,6 +494,55 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 layout_data = json.loads(body)
                 success = obs_state.save_layout(layout_data)
                 self.send_json({"status": "ok" if success else "error"})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=400)
+        elif parsed_path == "/api/pressure/tare":
+            ok = pressure_manager.tare()
+            self.send_json({"status": "ok" if ok else "error"})
+        elif parsed_path == "/api/pressure/simulator":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                data = json.loads(body)
+                enabled = data.get("enabled", True)
+                pressure_manager.set_simulator(enabled)
+                self.send_json({"status": "ok", "mode": "simulator" if enabled else "hardware"})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=400)
+        elif parsed_path == "/api/pressure/open_bt_settings":
+            try:
+                from src.hardware.pressure.bluetooth_windows import open_windows_bluetooth_settings
+                ok = open_windows_bluetooth_settings()
+                self.send_json({"status": "ok" if ok else "error"})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=500)
+        elif parsed_path == "/api/pressure/mode":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                data = json.loads(body)
+                mode = data.get("mode", "single")
+                new_mode = pressure_manager.set_board_mode(mode)
+                self.send_json({"status": "ok", "board_mode": new_mode})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=400)
+        elif parsed_path == "/api/pressure/assign":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                data = json.loads(body)
+                action = data.get("action", "start")
+                if action == "start":
+                    status = pressure_manager.start_assignment_wizard()
+                elif action == "reset":
+                    status = pressure_manager.reset_assignment_wizard()
+                elif action == "update":
+                    w_a = float(data.get("weight_a", 0.0))
+                    w_b = float(data.get("weight_b", 0.0))
+                    status = pressure_manager.update_assignment_wizard(w_a, w_b)
+                else:
+                    status = {"status": "error", "message": f"Unknown action {action}"}
+                self.send_json(status)
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         else:
@@ -297,17 +623,18 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-def start_obs_server():
+def start_obs_server(port=None):
+    use_port = port or OBS_PORT
     try:
-        server = ThreadedHTTPServer(("0.0.0.0", OBS_PORT), OBSHTTPRequestHandler)
-        print(f"[+] Started OBS Overlay Server on http://localhost:{OBS_PORT}")
-        print(f"[+] OBS Web Configurator available at http://localhost:{OBS_PORT}/config")
+        server = ThreadedHTTPServer(("0.0.0.0", use_port), OBSHTTPRequestHandler)
+        print(f"[+] Started OBS Overlay Server on http://localhost:{use_port}")
+        print(f"[+] OBS Web Configurator available at http://localhost:{use_port}/config")
         server.serve_forever()
     except Exception as e:
         print(f"[!] Error starting OBS Overlay Server: {e}")
 
-def launch_obs_server_thread():
-    t = threading.Thread(target=start_obs_server, daemon=True)
+def launch_obs_server_thread(port=None):
+    t = threading.Thread(target=start_obs_server, args=(port,), daemon=True)
     t.start()
     return t
 

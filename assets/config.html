@@ -174,6 +174,27 @@
       </label>
     </div>
 
+    <!-- Swing Lab Biomechanics & Pressure Section -->
+    <div class="section-title">⚖️ Swing Lab Biomechanics & Pressure</div>
+    <div class="grid">
+      <label class="toggle-card">
+        <span class="toggle-label">Dual-Foot Pressure Heatmap</span>
+        <span class="switch"><input type="checkbox" id="v_wbb_heatmap"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Center of Pressure (COP) Dot</span>
+        <span class="switch"><input type="checkbox" id="v_wbb_cop_dot"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">L/R Balance Bar & Phase</span>
+        <span class="switch"><input type="checkbox" id="m_wbb_balance_bar"><span class="slider"></span></span>
+      </label>
+      <label class="toggle-card">
+        <span class="toggle-label">Vertical Force Curve</span>
+        <span class="switch"><input type="checkbox" id="v_wbb_force_curve"><span class="slider"></span></span>
+      </label>
+    </div>
+
     <!-- Ball Telemetry Metrics Section -->
     <div class="section-title">🏎️ Ball Telemetry Metrics</div>
     <div class="grid">
@@ -186,6 +207,9 @@
       <label class="toggle-card"><span class="toggle-label">Sidespin</span><span class="switch"><input type="checkbox" id="m_sidespin"><span class="slider"></span></span></label>
       <label class="toggle-card"><span class="toggle-label">Spin Axis</span><span class="switch"><input type="checkbox" id="m_spin_axis"><span class="slider"></span></span></label>
       <label class="toggle-card"><span class="toggle-label">Offline Distance</span><span class="switch"><input type="checkbox" id="m_offline"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Apex Height (Peak)</span><span class="switch"><input type="checkbox" id="m_apex"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Hang Time</span><span class="switch"><input type="checkbox" id="m_hang_time"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Descent Angle</span><span class="switch"><input type="checkbox" id="m_descent_angle"><span class="slider"></span></span></label>
     </div>
 
     <!-- Club Telemetry Metrics Section -->
@@ -195,6 +219,10 @@
       <label class="toggle-card"><span class="toggle-label">Smash Factor</span><span class="switch"><input type="checkbox" id="m_smash"><span class="slider"></span></span></label>
       <label class="toggle-card"><span class="toggle-label">Club Path</span><span class="switch"><input type="checkbox" id="m_club_path"><span class="slider"></span></span></label>
       <label class="toggle-card"><span class="toggle-label">Face Angle</span><span class="switch"><input type="checkbox" id="m_face_angle"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Face Closure Rate</span><span class="switch"><input type="checkbox" id="m_closure_rate"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Face to Path</span><span class="switch"><input type="checkbox" id="m_face_to_path"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Angle of Attack</span><span class="switch"><input type="checkbox" id="m_attack_angle"><span class="slider"></span></span></label>
+      <label class="toggle-card"><span class="toggle-label">Dynamic Loft</span><span class="switch"><input type="checkbox" id="m_dynamic_loft"><span class="slider"></span></span></label>
     </div>
 
     <button class="btn-save" onclick="saveLayout()">💾 SAVE LAYOUT & UPDATE OBS LIVE</button>
@@ -202,8 +230,12 @@
   </div>
 
   <script>
-    const visualsList = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d'];
-    const metricsList = ['ball_speed', 'carry', 'total', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'offline', 'club_speed', 'smash', 'club_path', 'face_angle'];
+    const visualsList = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d', 'wbb_heatmap', 'wbb_cop_dot', 'wbb_force_curve'];
+    const metricsList = [
+      'wbb_balance_bar',
+      'ball_speed', 'carry', 'total', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'offline', 'apex', 'hang_time', 'descent_angle',
+      'club_speed', 'smash', 'club_path', 'face_angle', 'closure_rate', 'face_to_path', 'attack_angle', 'dynamic_loft'
+    ];
 
     let currentLayout = null;
 

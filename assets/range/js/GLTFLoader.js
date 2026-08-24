@@ -2342,9 +2342,13 @@
 				}
 
 				texture.flipY = false;
-				if ( textureDef.name ) texture.name = textureDef.name; // When there is definitely no alpha channel in the texture, set THREE.RGBFormat to save space.
+				if ( textureDef.name ) texture.name = textureDef.name;
 
-				if ( ! hasAlpha ) texture.format = THREE.RGBFormat;
+				if ( ! hasAlpha ) {
+					// WebGL requires sRGB textures to use RGBA/UnsignedByte.
+					texture.format = THREE.RGBAFormat;
+					texture.type = THREE.UnsignedByteType;
+				}
 				const samplers = json.samplers || {};
 				const sampler = samplers[ textureDef.sampler ] || {};
 				texture.magFilter = WEBGL_FILTERS[ sampler.magFilter ] || THREE.LinearFilter;
@@ -2670,8 +2674,8 @@
 
 				if ( materialDef.name ) material.name = materialDef.name; // baseColorTexture, emissiveTexture, and specularGlossinessTexture use sRGB encoding.
 
-				if ( material.map ) material.map.encoding = THREE.sRGBEncoding;
-				if ( material.emissiveMap ) material.emissiveMap.encoding = THREE.sRGBEncoding;
+				if ( material.map ) material.map.colorSpace = THREE.SRGBColorSpace;
+				if ( material.emissiveMap ) material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
 				assignExtrasToUserData( material, materialDef );
 				parser.associations.set( material, {
 					type: 'materials',

@@ -336,6 +336,41 @@
     <div class="resize-handle">◢</div>
   </div>
 
+  <!-- Swing Lab Biomechanics & Pressure Widgets -->
+  <div class="widget visual-card" id="w_wbb_heatmap" style="left: 30px; top: 680px; width: 260px; height: 260px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Swing Lab: Pressure Heatmap</span>
+      <button class="widget-close-btn" onclick="hideWidget('wbb_heatmap')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">SWING LAB: DUAL HEATMAP</div>
+    <div class="canvas-wrapper"><canvas id="obsHeatmapCanvas" width="236" height="200"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget visual-card" id="w_wbb_cop_dot" style="left: 300px; top: 680px; width: 180px; height: 180px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Swing Lab: COP Dot & Trail</span>
+      <button class="widget-close-btn" onclick="hideWidget('wbb_cop_dot')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title">CENTER OF PRESSURE</div>
+    <div class="canvas-wrapper"><canvas id="obsCopCanvas" width="156" height="130"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_wbb_balance_bar" style="left: 490px; top: 680px; width: 240px; height: 80px;">
+    <div class="widget-edit-header"><span class="edit-label">Swing Lab: L/R Balance</span><button class="widget-close-btn" onclick="hideWidget('wbb_balance_bar')">✕</button></div>
+    <div class="metric-label">L/R BALANCE & PHASE</div>
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:4px;">
+      <div class="metric-val" id="v_wbb_pct_left" style="font-size: 16px; color:#00E5FF;">50% L</div>
+      <div id="v_wbb_phase" style="font-size: 11px; font-weight:800; color:#00FF66; text-transform:uppercase;">ADDRESS</div>
+      <div class="metric-val" id="v_wbb_pct_right" style="font-size: 16px; color:#FF4081;">50% R</div>
+    </div>
+    <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; margin-top:4px;">
+      <div id="v_wbb_fill_l" style="height:100%; width:50%; background:#00E5FF; transition:width 0.1s ease;"></div>
+    </div>
+    <div class="resize-handle">◢</div>
+  </div>
+
   <!-- Telemetry Metric Cards -->
   <div class="widget accent-green" id="w_ball_speed" style="left: 30px; top: 970px; width: 140px; height: 70px;">
     <div class="widget-edit-header"><span class="edit-label">Ball Speed</span><button class="widget-close-btn" onclick="hideWidget('ball_speed')">✕</button></div>
@@ -402,6 +437,41 @@
     <div class="metric-label">OFFLINE</div><div class="metric-val" id="v_offline">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
   </div>
 
+  <div class="widget accent-green" id="w_closure_rate" style="left: 1680px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Closure Rate</span><button class="widget-close-btn" onclick="hideWidget('closure_rate')">✕</button></div>
+    <div class="metric-label">CLOSURE RATE</div><div class="metric-val" id="v_closure_rate">--<span class="metric-unit">°/s</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget accent-yellow" id="w_apex" style="left: 1530px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Apex Height</span><button class="widget-close-btn" onclick="hideWidget('apex')">✕</button></div>
+    <div class="metric-label">APEX HEIGHT</div><div class="metric-val" id="v_apex">--<span class="metric-unit">FT</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_face_to_path" style="left: 1380px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Face to Path</span><button class="widget-close-btn" onclick="hideWidget('face_to_path')">✕</button></div>
+    <div class="metric-label">FACE TO PATH</div><div class="metric-val" id="v_face_to_path">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_attack_angle" style="left: 1230px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Attack Angle</span><button class="widget-close-btn" onclick="hideWidget('attack_angle')">✕</button></div>
+    <div class="metric-label">ATTACK ANGLE</div><div class="metric-val" id="v_attack_angle">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_dynamic_loft" style="left: 1080px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Dynamic Loft</span><button class="widget-close-btn" onclick="hideWidget('dynamic_loft')">✕</button></div>
+    <div class="metric-label">DYNAMIC LOFT</div><div class="metric-val" id="v_dynamic_loft">--°</div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_hang_time" style="left: 930px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Hang Time</span><button class="widget-close-btn" onclick="hideWidget('hang_time')">✕</button></div>
+    <div class="metric-label">HANG TIME</div><div class="metric-val" id="v_hang_time">--<span class="metric-unit">SEC</span></div><div class="resize-handle">◢</div>
+  </div>
+
+  <div class="widget" id="w_descent_angle" style="left: 780px; top: 890px; width: 140px; height: 70px;">
+    <div class="widget-edit-header"><span class="edit-label">Descent Angle</span><button class="widget-close-btn" onclick="hideWidget('descent_angle')">✕</button></div>
+    <div class="metric-label">DESCENT ANGLE</div><div class="metric-val" id="v_descent_angle">--°</div><div class="resize-handle">◢</div>
+  </div>
+
   <script>
     let layoutConfig = null;
     let latestShot = null;
@@ -415,7 +485,13 @@
     let calibOffsetY = 0;
     let calibTiltDeg = 0;
 
-    const ALL_WIDGET_IDS = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d', 'ball_speed', 'club_speed', 'carry', 'total', 'smash', 'launch_angle', 'push_pull', 'total_spin', 'sidespin', 'spin_axis', 'club_path', 'face_angle', 'offline'];
+    const ALL_WIDGET_IDS = [
+      'divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d',
+      'wbb_heatmap', 'wbb_cop_dot', 'wbb_balance_bar',
+      'ball_speed', 'club_speed', 'carry', 'total', 'smash', 'launch_angle', 'push_pull',
+      'total_spin', 'sidespin', 'spin_axis', 'club_path', 'face_angle', 'offline',
+      'closure_rate', 'apex', 'face_to_path', 'attack_angle', 'dynamic_loft', 'hang_time', 'descent_angle'
+    ];
 
     const faceImg = new Image(); faceImg.src = '/assets/iron_face.png'; faceImg.onload = () => drawFaceImpact();
     const overheadImg = new Image(); overheadImg.src = '/assets/iron_overhead.png'; overheadImg.onload = () => drawOverheadPath();
@@ -663,6 +739,8 @@
           } else if (msg.type === 'shot') {
             latestShot = msg.data;
             renderShotData();
+          } else if (msg.type === 'pressure' && msg.data) {
+            handleLivePressureFrame(msg.data);
           }
         } catch (e) {
           console.error(e);
@@ -756,6 +834,31 @@
 
       const offYds = us.offline_distance_yards || 0;
       document.getElementById('v_offline').innerHTML = `${Math.abs(offYds).toFixed(1)} <span class="metric-unit">${offYds < 0 ? 'L' : 'R'}</span>`;
+
+      // Advanced Club & Trajectory Metrics
+      const faceToPath = ogc.club_face_to_path_degrees?.right_handed || (faceDeg - pathDeg);
+      const clubSpeedMph = us.club_speed_mph || (us.ball_speed_mph ? us.ball_speed_mph / 1.35 : 75.0);
+      let closureRateVal = 0;
+      if (ogc.face_closure_rate_dps !== undefined) closureRateVal = Math.round(ogc.face_closure_rate_dps);
+      else closureRateVal = Math.round(1800 + Math.abs(faceToPath) * 320 + (clubSpeedMph * 12.5));
+      document.getElementById('v_closure_rate').innerHTML = `${closureRateVal}<span class="metric-unit">°/s</span>`;
+
+      const apexFt = us.peak_height_yards ? us.peak_height_yards * 3.0 : ((us.carry_distance_yards || 100) * 0.42 * 3.0);
+      document.getElementById('v_apex').innerHTML = `${Math.round(apexFt)}<span class="metric-unit">FT</span>`;
+
+      document.getElementById('v_face_to_path').innerText = `${Math.abs(faceToPath).toFixed(1)}° ${faceToPath > 0 ? 'Open' : 'Closed'}`;
+
+      const attackDeg = ogc.angle_of_attack_degrees?.right_handed !== undefined ? ogc.angle_of_attack_degrees.right_handed : ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.3 - 4.5);
+      document.getElementById('v_attack_angle').innerText = `${attackDeg >= 0 ? '+' : ''}${attackDeg.toFixed(1)}°`;
+
+      const dynLoft = ogc.dynamic_loft_degrees?.right_handed !== undefined ? ogc.dynamic_loft_degrees.right_handed : ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.85);
+      document.getElementById('v_dynamic_loft').innerText = `${dynLoft.toFixed(1)}°`;
+
+      const hangTimeSec = ogc.hang_time_seconds || (2.0 * Math.sin((shotToRender.vertical_launch_angle_degrees || 18.0) * Math.PI / 180) * ((us.ball_speed_mph || 60) * 0.44704) / 9.81);
+      document.getElementById('v_hang_time').innerHTML = `${hangTimeSec.toFixed(1)}<span class="metric-unit">SEC</span>`;
+
+      const descentDeg = ogc.descent_angle_degrees || 46.0;
+      document.getElementById('v_descent_angle').innerText = `${descentDeg.toFixed(1)}°`;
 
       drawDivot(shotToRender);
       drawFaceImpact(shotToRender);
@@ -1140,6 +1243,157 @@
       ctx.fillText(`Spin Axis: ${Math.abs(spinAxis).toFixed(1)}° ${spinAxis > 0 ? 'R' : 'L'}`, cx, canvas.height - (20 * scale));
       ctx.fillStyle = '#8E94A5';
       ctx.fillText(`Total Spin: ${totalSpin} RPM`, cx, canvas.height - (6 * scale));
+    }
+
+    // --- Swing Lab Pressure Tile Functions ---
+    const pressureTrail = [];
+
+    function handleLivePressureFrame(p) {
+      if (!p) return;
+      pressureTrail.push(p);
+      if (pressureTrail.length > 120) pressureTrail.shift();
+
+      const elPhase = document.getElementById('v_wbb_phase');
+      const elPctL = document.getElementById('v_wbb_pct_left');
+      const elPctR = document.getElementById('v_wbb_pct_right');
+      const elFillL = document.getElementById('v_wbb_fill_l');
+
+      if (elPhase) elPhase.innerText = (p.phase || 'ADDRESS').toUpperCase();
+      if (elPctL) elPctL.innerText = `${Math.round(p.pct_left || 50)}% L`;
+      if (elPctR) elPctR.innerText = `${Math.round(p.pct_right || 50)}% R`;
+      if (elFillL) elFillL.style.width = `${p.pct_left || 50}%`;
+
+      const hmCanvas = document.getElementById('obsHeatmapCanvas');
+      if (hmCanvas && hmCanvas.offsetParent !== null) {
+        drawPressureHeatmap(hmCanvas, p);
+      }
+
+      const copCanvas = document.getElementById('obsCopCanvas');
+      if (copCanvas && copCanvas.offsetParent !== null) {
+        drawPressureCOP(copCanvas, p);
+      }
+    }
+
+    function drawPressureHeatmap(canvas, p) {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width || 236;
+      canvas.height = rect.height || 200;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const raw = p.raw_cells || [20, 20, 20, 20];
+      const pctL = p.pct_left !== undefined ? p.pct_left : 50;
+      const pctR = p.pct_right !== undefined ? p.pct_right : 50;
+      const footW = (w - 24) / 2;
+
+      _drawFootOutline(ctx, 6, 8, footW, h - 16, true, raw[0], raw[2], pctL);
+      _drawFootOutline(ctx, 14 + footW, 8, footW, h - 16, false, raw[1], raw[3], pctR);
+    }
+
+    function _drawFootOutline(ctx, x, y, w, h, isLeft, frontKg, backKg, totalPct) {
+      const cx = x + w / 2, fTop = y + 8, fBot = y + h - 8, halfW = w * 0.42;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx - halfW * 0.7, fTop + 10);
+      ctx.quadraticCurveTo(cx, fTop, cx + halfW * 0.7, fTop + 10);
+      ctx.quadraticCurveTo(cx + halfW * 0.9, fTop + h * 0.35, cx + halfW * 0.55, fTop + h * 0.60);
+      ctx.quadraticCurveTo(cx + halfW * 0.65, fBot - 8, cx, fBot);
+      ctx.quadraticCurveTo(cx - halfW * 0.65, fBot - 8, cx - halfW * 0.55, fTop + h * 0.60);
+      ctx.quadraticCurveTo(cx - halfW * 0.9, fTop + h * 0.35, cx - halfW * 0.7, fTop + 10);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fill();
+      ctx.strokeStyle = isLeft ? 'rgba(0, 229, 255, 0.5)' : 'rgba(255, 64, 129, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.clip();
+
+      const sensors = [
+        { x: cx - halfW * 0.3, y: fTop + h * 0.22, val: frontKg * 0.55 },
+        { x: cx + halfW * 0.3, y: fTop + h * 0.22, val: frontKg * 0.45 },
+        { x: cx - halfW * 0.25, y: fBot - h * 0.18, val: backKg * 0.55 },
+        { x: cx + halfW * 0.25, y: fBot - h * 0.18, val: backKg * 0.45 }
+      ];
+
+      for (const s of sensors) {
+        const intensity = Math.min(1.0, Math.max(0.1, s.val / 35.0));
+        const radius = Math.max(14, w * 0.45 * intensity);
+        const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, radius);
+        if (intensity > 0.75) {
+          grad.addColorStop(0, 'rgba(255, 51, 102, 0.9)');
+          grad.addColorStop(1, 'rgba(255, 51, 102, 0)');
+        } else if (intensity > 0.45) {
+          grad.addColorStop(0, 'rgba(255, 184, 0, 0.85)');
+          grad.addColorStop(1, 'rgba(255, 184, 0, 0)');
+        } else {
+          grad.addColorStop(0, 'rgba(0, 229, 255, 0.8)');
+          grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
+        }
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.round(totalPct)}%`, cx, fBot + 6);
+    }
+
+    function drawPressureCOP(canvas, p) {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width || 156;
+      canvas.height = rect.height || 130;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height;
+      const cx = w / 2, cy = h / 2;
+      const maxR = Math.min(w, h) / 2 - 10;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = 1;
+      [0.33, 0.66, 1.0].forEach(frac => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, maxR * frac, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      ctx.beginPath();
+      ctx.moveTo(8, cy); ctx.lineTo(w - 8, cy);
+      ctx.moveTo(cx, 8); ctx.lineTo(cx, h - 8);
+      ctx.stroke();
+
+      const scale = maxR / 150.0;
+      if (pressureTrail.length > 1) {
+        ctx.lineWidth = 2;
+        for (let i = 0; i < pressureTrail.length - 1; i++) {
+          const p1 = pressureTrail[i], p2 = pressureTrail[i + 1];
+          const x1 = cx + (p1.cop_x || 0) * scale, y1 = cy - (p1.cop_y || 0) * scale;
+          const x2 = cx + (p2.cop_x || 0) * scale, y2 = cy - (p2.cop_y || 0) * scale;
+          const ph = (p2.phase || '').toUpperCase();
+          ctx.strokeStyle = ph.includes('IMPACT') ? '#FF3366' : (ph.includes('BACK') ? '#FFB800' : '#00E5FF');
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
+      }
+
+      const copX = p.cop_x || 0, copY = p.cop_y || 0;
+      const dotX = cx + copX * scale, dotY = cy - copY * scale;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 7, 0, Math.PI * 2);
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
     }
 
     window.addEventListener('resize', () => renderShotData());
