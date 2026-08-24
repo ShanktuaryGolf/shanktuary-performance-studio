@@ -55,6 +55,17 @@ class TestStanceCalibration(unittest.TestCase):
         tared_right = 30.0 * mult_r
         self.assertAlmostEqual(tared_left, tared_right, places=2)
 
+    def test_lead_in_countdown_status(self):
+        pm = PressureManager()
+        res = pm.start_stance_alignment(delay_sec=5.0, duration_sec=4.0)
+        self.assertEqual(res["delay_sec"], 5.0)
+        self.assertEqual(res["duration_sec"], 4.0)
+
+        st = pm.get_alignment_status()
+        self.assertTrue(st["active"])
+        self.assertGreater(st["remaining_sec"], 4.0)
+        self.assertIn("Step onto boards", st["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

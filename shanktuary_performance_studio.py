@@ -4875,15 +4875,27 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(b1_x1, hw_y1, b1_x2, hw_y2, fill="#1A2234", outline="#00FF66")
         self.canvas.create_text((b1_x1 + b1_x2) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare Resting Zero", fill="#00FF66", font=("Helvetica", 8, "bold"))
 
-        # Button 2: 50/50 Stance Calibration (4s)
-        align_st = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {"active": False, "remaining_sec": 0.0, "message": "Idle"}
+        # Button 2: 50/50 Stance Calibration (5s Lead-in + 4s Sample)
+        align_st = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {"active": False, "remaining_sec": 0.0, "in_lead_in": False, "message": "Idle"}
         is_aligning = align_st.get("active", False)
+        in_lead = align_st.get("in_lead_in", False)
         rem_sec = align_st.get("remaining_sec", 0.0)
 
         self.balance_modal_align_rect = (b2_x1, hw_y1, b2_x2, hw_y2)
-        align_bg = "#0369A1" if is_aligning else "#1E293B"
-        align_bd = "#38BDF8" if is_aligning else "#00E5FF"
-        align_txt = f"⏳ Stand Still... {rem_sec:.1f}s" if is_aligning else "🎯 50/50 Stance (4s)"
+        if is_aligning:
+            if in_lead:
+                align_bg = "#9A3412"  # Warm amber/orange during lead-in
+                align_bd = "#FB923C"
+                align_txt = f"⏳ Step On & Settle... {rem_sec:.0f}s"
+            else:
+                align_bg = "#0369A1"  # Cyan/blue during hold
+                align_bd = "#38BDF8"
+                align_txt = f"🎯 Hold Stance... {rem_sec:.1f}s"
+        else:
+            align_bg = "#1E293B"
+            align_bd = "#00E5FF"
+            align_txt = "🎯 50/50 Stance Calibrate"
+
         self.canvas.create_rectangle(b2_x1, hw_y1, b2_x2, hw_y2, fill=align_bg, outline=align_bd, width=2 if is_aligning else 1)
         self.canvas.create_text((b2_x1 + b2_x2) // 2, (hw_y1 + hw_y2) // 2, text=align_txt, fill="#FFFFFF", font=("Helvetica", 8, "bold"))
 
