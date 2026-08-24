@@ -117,6 +117,7 @@ class HidBackend(BoardBackend):
         self._calibration: _BoardCalibration | None = None
         self._device_path = device_path
         self._temp_ref: float = 0.0
+        self._baseline_raw: tuple[int, int, int, int] | None = None
 
     def open(self) -> None:
         if hid is None:
@@ -155,28 +156,33 @@ class HidBackend(BoardBackend):
             self._device = None
             raise RuntimeError("Wii Balance Board not found via HID. Please verify Bluetooth connection.")
 
-        # Use non-blocking mode
-        self._device.set_nonblocking(1)
+        # Use blocking reads during extension initialization
+        self._device.set_nonblocking(0)
 
         # 1. Wake extension controller
         self._write_register(EXT_INIT_ADDR1, b"\x55")
+        time.sleep(0.05)
         self._write_register(EXT_INIT_ADDR2, b"\x00")
+        time.sleep(0.05)
 
-        # 2. Default calibration fallback
-        self._calibration = DEFAULT_CALIBRATION
-        try:
-            cal_data = self._read_register(EXT_CALIB_ADDR, 24)
-            if cal_data and len(cal_data) >= 24:
-                self._calibration = self._parse_calibration(cal_data)
-        except Exception:
-            pass
+        # 2. Read factory calibration data from 0xA40024 (24 bytes)
+        cal_data = self._read_register(EXT_CALIB_ADDR, 24)
+        if cal_data and len(cal_data) >= 24:
+            self._calibration = self._parse_calibration(cal_data)
+        else:
+            self._calibration = None
 
         # 3. Turn on LED 1 as visual feedback
         self._send_report(bytes([RPT_LED, 0x10]))
+        time.sleep(0.05)
 
         # 4. Set reporting mode: continuous, buttons + extension
         self._send_report(bytes([RPT_DATA_REPORTING, 0x04, RPT_IN_BTN_EXT8]))
-        print("[+] Wii Balance Board connected and streaming via HID!")
+        time.sleep(0.05)
+
+        # Switch to non-blocking for normal streaming operation
+        self._device.set_nonblocking(1)
+        print(f"[+] Wii Balance Board connected and streaming via HID (calibrated={'yes' if self._calibration else 'adaptive'})!")
 
     def _send_report(self, data: bytes) -> None:
         """Send an output report to the Wiimote."""
@@ -196,33 +202,30 @@ class HidBackend(BoardBackend):
         self._send_report(payload)
 
     def _read_register(self, address: int, size: int) -> bytes | None:
-        """Read data from a Wiimote register address with short timeout."""
+        """Read data from a Wiimote register address."""
         addr_bytes = address.to_bytes(3, "big")
         size_bytes = size.to_bytes(2, "big")
         payload = bytes([RPT_READ_REG, 0x04]) + addr_bytes + size_bytes
         self._send_report(payload)
+        time.sleep(0.05)
 
         result = bytearray()
-        remaining = size
-        deadline = time.monotonic() + 0.3
+        for _ in range(6):
+            report = self._wait_for_report(RPT_IN_READ_DATA, timeout=0.25)
+            if report and len(report) >= 22:
+                size_error = report[3]
+                chunk_size = ((size_error >> 4) & 0x0F) + 1
+                chunk = report[6:6 + chunk_size]
+                result.extend(chunk)
+                if len(result) >= size:
+                    break
+        return bytes(result[:size]) if len(result) >= size else None
 
-        while remaining > 0 and time.monotonic() < deadline:
-            report = self._wait_for_report(RPT_IN_READ_DATA, timeout=0.1)
-            if report is None or len(report) < 22:
-                break
-            size_error = report[3]
-            chunk_size = ((size_error >> 4) & 0x0F) + 1
-            chunk = report[6:6 + chunk_size]
-            result.extend(chunk)
-            remaining -= chunk_size
-
-        return bytes(result) if result else None
-
-    def _wait_for_report(self, report_id: int, timeout: float = 0.1) -> bytes | None:
+    def _wait_for_report(self, report_id: int, timeout: float = 0.25) -> bytes | None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                data = self._device.read(64)
+                data = self._device.read(64, timeout_ms=int(timeout * 1000))
             except Exception:
                 return None
             if not data:
@@ -293,11 +296,20 @@ class HidBackend(BoardBackend):
         ext = data[3:11]
         tr, br, tl, bl = struct.unpack(">HHHH", bytes(ext))
 
-        cal = self._calibration or DEFAULT_CALIBRATION
-        kg_tl = _interpolate_kg(tl, cal.top_left)
-        kg_tr = _interpolate_kg(tr, cal.top_right)
-        kg_bl = _interpolate_kg(bl, cal.bottom_left)
-        kg_br = _interpolate_kg(br, cal.bottom_right)
+        if self._baseline_raw is None:
+            self._baseline_raw = (tr, br, tl, bl)
+
+        if self._calibration:
+            kg_tl = _interpolate_kg(tl, self._calibration.top_left)
+            kg_tr = _interpolate_kg(tr, self._calibration.top_right)
+            kg_bl = _interpolate_kg(bl, self._calibration.bottom_left)
+            kg_br = _interpolate_kg(br, self._calibration.bottom_right)
+        else:
+            # Adaptive baseline delta if factory EEPROM was not readable
+            kg_tr = max(0.0, (tr - self._baseline_raw[0]) / 25.0)
+            kg_br = max(0.0, (br - self._baseline_raw[1]) / 25.0)
+            kg_tl = max(0.0, (tl - self._baseline_raw[2]) / 25.0)
+            kg_bl = max(0.0, (bl - self._baseline_raw[3]) / 25.0)
 
         return SensorReading(
             top_left=kg_tl,
