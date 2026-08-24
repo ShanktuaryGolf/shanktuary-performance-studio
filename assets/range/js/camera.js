@@ -13,9 +13,9 @@ export class CameraController {
         this.camera = camera;
         this.mode = CameraModes.GOLFER;
         
-        this.target = new THREE.Vector3(0, 0.25, -20);
-        this.currentPosition = new THREE.Vector3(0, 0.75, 2.0);
-        this.desiredPosition = new THREE.Vector3(0, 0.75, 2.0);
+        this.target = new THREE.Vector3(0, 1.10, -70);
+        this.currentPosition = new THREE.Vector3(0, 1.75, 4.6);
+        this.desiredPosition = new THREE.Vector3(0, 1.75, 4.6);
         
         this.ballPosition = new THREE.Vector3(0, 0.085, 0);
         this.landingPosition = new THREE.Vector3(0, 0.05, -150);
@@ -70,8 +70,8 @@ export class CameraController {
         
         switch (this.mode) {
             case CameraModes.GOLFER:
-                this.desiredPosition.set(0, 0.75, 2.0); // Close view behind the ball
-                this.target.set(0, 0.25, -20);
+                this.desiredPosition.set(0, 1.75, 4.6); // Elevated and pulled back for natural golfer perspective
+                this.target.set(0, 1.10, -70);
                 break;
                 
             case CameraModes.FOLLOW:

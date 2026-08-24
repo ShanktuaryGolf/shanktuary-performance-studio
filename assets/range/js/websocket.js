@@ -1,99 +1,377 @@
-// WebSocket Telemetry, Proximity & Live Nova / OpenGolfCoach Real Shot Handler
+// WebSocket Telemetry, Proximity, Real-time Fairway Width Slider & Minimap Radar
 
 import { setTargetDistance } from './environment.js';
+import { setFairwayWidth, getFairwayWidth } from './foliage.js';
+import { PressureTileRenderer } from './pressure_tiles.js';
 
 export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController) {
-    const telemetryDiv = document.getElementById('telemetry-data');
+    // 1. DOM Elements
+    const btnStudioMenu = document.getElementById('btn-studio-menu');
+    const btnSettingsToggle = document.getElementById('btn-settings-toggle');
+    const settingsDrawer = document.getElementById('settings-drawer');
+    const btnGameModes = document.getElementById('btn-game-modes');
+    const gameModesDrawer = document.getElementById('game-modes-drawer');
+    const btnCloseGameModes = document.getElementById('btn-close-game-modes');
+    const gameModeCards = document.querySelectorAll('.game-mode-card');
+
+    const rangeModeTitle = document.getElementById('range-mode-title');
+    const practiceCarryContainer = document.getElementById('practice-carry-container');
+    const practiceOfflineContainer = document.getElementById('practice-offline-container');
+    const practiceLastCarry = document.getElementById('practice-last-carry');
+    const practiceLastOffline = document.getElementById('practice-last-offline');
+    const challengePtsContainer = document.getElementById('challenge-pts-container');
+    const challengeProxContainer = document.getElementById('challenge-prox-container');
+    const targetScoringLegend = document.getElementById('target-scoring-legend');
+
+    const ladderBanner = document.getElementById('ladder-banner');
+    const ladderBannerTitle = document.getElementById('ladder-banner-title');
+    const ladderBannerSub = document.getElementById('ladder-banner-sub');
+    const ladderBannerIcon = document.getElementById('ladder-banner-icon');
+    let bannerTimer = null;
+
+    function showBanner(icon, title, sub, duration = 3500) {
+        if (!ladderBanner) return;
+        if (ladderBannerIcon) ladderBannerIcon.innerText = icon;
+        if (ladderBannerTitle) ladderBannerTitle.innerText = title;
+        if (ladderBannerSub) ladderBannerSub.innerText = sub;
+        ladderBanner.classList.add('show');
+        if (bannerTimer) clearTimeout(bannerTimer);
+        bannerTimer = setTimeout(() => {
+            ladderBanner.classList.remove('show');
+        }, duration);
+    }
+    
     const demoBtn = document.getElementById('btn-demo-shot');
     const replayBtn = document.getElementById('btn-replay-shot');
-    const statusBadge = document.getElementById('ws-status-badge');
-    const targetInput = document.getElementById('target-dist-input');
-    const presetBtns = document.querySelectorAll('.preset-btn');
-    
-    const btnMinus10 = document.getElementById('btn-step-minus-10');
-    const btnMinus5 = document.getElementById('btn-step-minus-5');
-    const btnPlus5 = document.getElementById('btn-step-plus-5');
-    const btnPlus10 = document.getElementById('btn-step-plus-10');
-    
+    const lmStatusText = document.getElementById('lm-status-text');
+    const hudClubName = document.getElementById('hud-club-name');
+
+    // Telemetry Left Stack
+    const elBallSpeed = document.getElementById('tele-ball-speed');
+    const elClubSpeed = document.getElementById('tele-club-speed');
+    const elSmash = document.getElementById('tele-smash');
+    const elCarry = document.getElementById('tele-carry');
+    const elTotal = document.getElementById('tele-total');
+    const elLaunch = document.getElementById('tele-launch');
+    const elHla = document.getElementById('tele-hla');
+    const elClosureRate = document.getElementById('tele-closure-rate');
+    const elClubPath = document.getElementById('tele-club-path');
+    const elFaceAngle = document.getElementById('tele-face-angle');
+    const elAttackAngle = document.getElementById('tele-attack-angle');
+    const elDynamicLoft = document.getElementById('tele-dynamic-loft');
+    const elBackspin = document.getElementById('tele-backspin');
+    const elSidespin = document.getElementById('tele-sidespin');
+    const elOffline = document.getElementById('tele-offline');
+    const elApex = document.getElementById('tele-apex');
+    const elDescent = document.getElementById('tele-descent');
+    const elHangTime = document.getElementById('tele-hang-time');
+
+    // Top Challenge & Practice Pill
+    const elTargetPts = document.getElementById('target-pts-val');
+    const elTargetDistBadge = document.getElementById('target-dist-badge');
+    const elPinProx = document.getElementById('pin-proximity-badge');
+
+    // Fairway Width Controls
+    const fwSlider = document.getElementById('fairway-width-slider');
+    const fwReadout = document.getElementById('fairway-width-readout');
+    const fwStepMinus10 = document.getElementById('fw-step-minus-10');
+    const fwStepMinus5 = document.getElementById('fw-step-minus-5');
+    const fwStepPlus5 = document.getElementById('fw-step-plus-5');
+    const fwStepPlus10 = document.getElementById('fw-step-plus-10');
+    const fwPresetChips = document.querySelectorAll('.preset-chip[data-fw]');
+
+    // Target Distance Controls
+    const tgtSlider = document.getElementById('target-dist-slider');
+    const tgtReadout = document.getElementById('target-dist-readout');
+    const tgtCustomInput = document.getElementById('target-custom-input');
+    const btnSetCustomTarget = document.getElementById('btn-set-custom-target');
+    const targetBadgeContainer = document.getElementById('target-dist-badge-container');
+    const tgtStepMinus10 = document.getElementById('tgt-step-minus-10');
+    const tgtStepMinus5 = document.getElementById('tgt-step-minus-5');
+    const tgtStepPlus5 = document.getElementById('tgt-step-plus-5');
+    const tgtStepPlus10 = document.getElementById('tgt-step-plus-10');
+    const tgtPresetChips = document.querySelectorAll('.preset-chip[data-tgt]');
+
+    // Swing Lab Pressure Tile Elements
+    const btnPressureToggle = document.getElementById('btn-pressure-toggle');
+    const rangePressureTile = document.getElementById('range-pressure-tile');
+    const btnClosePressureTile = document.getElementById('btn-close-pressure-tile');
+    const hudPressurePhase = document.getElementById('hud-pressure-phase');
+    const hudPctLeft = document.getElementById('hud-pct-left');
+    const hudPctRight = document.getElementById('hud-pct-right');
+    const hudBarFillLeft = document.getElementById('hud-bar-fill-left');
+    const rangeHeatmapCanvas = document.getElementById('range-heatmap-canvas');
+    const rangeCopCanvas = document.getElementById('range-cop-canvas');
+    const pressureRenderer = new PressureTileRenderer();
+
+    // Radar Minimap
+    const minimapCanvas = document.getElementById('minimap-canvas');
+    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+
+    function togglePressureTile() {
+        if (!rangePressureTile) return;
+        const isHidden = rangePressureTile.style.display === 'none' || !rangePressureTile.style.display;
+        rangePressureTile.style.display = isHidden ? 'flex' : 'none';
+        if (btnPressureToggle) {
+            btnPressureToggle.classList.toggle('active', isHidden);
+        }
+    }
+
+    if (btnPressureToggle) btnPressureToggle.addEventListener('click', togglePressureTile);
+    if (btnClosePressureTile) btnClosePressureTile.addEventListener('click', () => {
+        if (rangePressureTile) rangePressureTile.style.display = 'none';
+        if (btnPressureToggle) btnPressureToggle.classList.remove('active');
+    });
+
     let currentTargetYards = 150;
+    let currentRangeMode = localStorage.getItem('sps_range_game_mode') || 'practice';
+    let totalChallengeScore = 0;
+    let bestPinProx = 999.0;
+    let bestLongDrive = 0.0;
+    let ladderLevel = 1;
+    let ladderStreak = 0;
     let lastShotTelemetry = null;
     let lastShotId = null;
-    
+    let lastLandingPt = null;
+
+    // 2. Game Mode Selection Logic
+    function setGameMode(mode) {
+        currentRangeMode = mode;
+        localStorage.setItem('sps_range_game_mode', mode);
+
+        gameModeCards.forEach(card => {
+            const m = card.getAttribute('data-mode');
+            const isActive = (m === mode);
+            card.classList.toggle('active', isActive);
+            const tag = card.querySelector('.game-mode-tag');
+            if (tag) tag.style.display = isActive ? 'inline-block' : 'none';
+        });
+
+        // Reset stats for new game session
+        totalChallengeScore = 0;
+        bestPinProx = 999.0;
+        bestLongDrive = 0.0;
+        if (elTargetPts) elTargetPts.innerText = '0';
+        if (elPinProx) elPinProx.innerText = '--';
+
+        if (mode === 'practice') {
+            if (rangeModeTitle) rangeModeTitle.innerText = '⛳ DRIVING RANGE';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        } else if (mode === 'ladder') {
+            ladderLevel = 1;
+            ladderStreak = 0;
+            updateTarget(20);
+            if (rangeModeTitle) rangeModeTitle.innerText = '🪜 LADDER CHALLENGE';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (practiceLastCarry) practiceLastCarry.innerText = 'LEVEL 1';
+            if (practiceLastOffline) practiceLastOffline.innerText = '0 STREAK';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+            showBanner('🪜', 'DISTANCE LADDER CHALLENGE', 'Target starts at 20 yds. Hit the green to move back 10-20 yds!');
+        } else if (mode === 'challenge') {
+            if (rangeModeTitle) rangeModeTitle.innerText = '🎯 TARGET CHALLENGE';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'none';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'none';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'block';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'block';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'flex';
+        } else if (mode === 'closest-pin') {
+            if (rangeModeTitle) rangeModeTitle.innerText = '📍 CLOSEST TO PIN';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'none';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'none';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'block';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'block';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        } else if (mode === 'long-drive') {
+            if (rangeModeTitle) rangeModeTitle.innerText = '💥 LONG DRIVE';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        }
+    }
+
+    // Initialize Default Mode
+    setGameMode(currentRangeMode);
+
+    // 3. Initialize Fairway Width from Storage
+    let currentFairwayWidth = getFairwayWidth();
+    if (fwSlider) fwSlider.value = currentFairwayWidth;
+    if (fwReadout) fwReadout.innerText = `${currentFairwayWidth} yds`;
+
+    function updateFairwayWidth(yards) {
+        if (isNaN(yards)) return;
+        currentFairwayWidth = Math.max(30, Math.min(120, Math.round(yards)));
+        setFairwayWidth(currentFairwayWidth);
+        if (fwSlider) fwSlider.value = currentFairwayWidth;
+        if (fwReadout) fwReadout.innerText = `${currentFairwayWidth} yds`;
+        
+        fwPresetChips.forEach(chip => {
+            const val = parseInt(chip.getAttribute('data-fw'), 10);
+            chip.classList.toggle('active', val === currentFairwayWidth);
+        });
+
+        drawMinimap();
+    }
+
+    if (fwSlider) {
+        fwSlider.addEventListener('input', (e) => updateFairwayWidth(parseFloat(e.target.value)));
+    }
+    if (fwStepMinus10) fwStepMinus10.addEventListener('click', () => updateFairwayWidth(currentFairwayWidth - 10));
+    if (fwStepMinus5) fwStepMinus5.addEventListener('click', () => updateFairwayWidth(currentFairwayWidth - 5));
+    if (fwStepPlus5) fwStepPlus5.addEventListener('click', () => updateFairwayWidth(currentFairwayWidth + 5));
+    if (fwStepPlus10) fwStepPlus10.addEventListener('click', () => updateFairwayWidth(currentFairwayWidth + 10));
+
+    fwPresetChips.forEach(chip => {
+        chip.addEventListener('click', (e) => {
+            const fwVal = parseInt(e.target.getAttribute('data-fw'), 10);
+            updateFairwayWidth(fwVal);
+        });
+    });
+
+    // 4. Initialize Target Distance from Storage
     const savedDist = localStorage.getItem('sps_range_target_dist');
     if (savedDist) {
         currentTargetYards = parseInt(savedDist, 10);
-        if (targetInput) targetInput.value = currentTargetYards;
-        setTargetDistance(currentTargetYards);
     }
-    
+    if (tgtSlider) tgtSlider.value = currentTargetYards;
+    if (tgtCustomInput) tgtCustomInput.value = currentTargetYards;
+    if (tgtReadout) tgtReadout.innerText = `${currentTargetYards} yds`;
+    if (elTargetDistBadge) elTargetDistBadge.innerText = `${currentTargetYards}`;
+    setTargetDistance(currentTargetYards);
+
     function updateTarget(newYards) {
         if (isNaN(newYards) || newYards <= 0) return;
-        currentTargetYards = Math.max(30, Math.min(500, Math.round(newYards)));
-        if (targetInput && document.activeElement !== targetInput) {
-            targetInput.value = currentTargetYards;
-        }
+        currentTargetYards = Math.max(20, Math.min(500, Math.round(newYards)));
         setTargetDistance(currentTargetYards);
+        
+        if (tgtSlider) tgtSlider.value = currentTargetYards;
+        if (tgtCustomInput) tgtCustomInput.value = currentTargetYards;
+        if (tgtReadout) tgtReadout.innerText = `${currentTargetYards} yds`;
+        if (elTargetDistBadge) elTargetDistBadge.innerText = `${currentTargetYards}`;
+        
+        tgtPresetChips.forEach(chip => {
+            const val = parseInt(chip.getAttribute('data-tgt'), 10);
+            chip.classList.toggle('active', val === currentTargetYards);
+        });
+
         localStorage.setItem('sps_range_target_dist', currentTargetYards);
+        drawMinimap();
     }
-    
-    if (targetInput) {
-        targetInput.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            if (!isNaN(val) && val >= 30 && val <= 500) {
-                setTargetDistance(val);
-                currentTargetYards = val;
-                localStorage.setItem('sps_range_target_dist', currentTargetYards);
-            }
+
+    if (tgtSlider) {
+        tgtSlider.addEventListener('input', (e) => updateTarget(parseFloat(e.target.value)));
+    }
+    if (btnSetCustomTarget && tgtCustomInput) {
+        btnSetCustomTarget.addEventListener('click', () => {
+            const val = parseFloat(tgtCustomInput.value);
+            if (!isNaN(val) && val > 0) updateTarget(val);
         });
-        
-        targetInput.addEventListener('change', (e) => {
-            updateTarget(parseFloat(e.target.value));
-        });
-        
-        targetInput.addEventListener('keydown', (e) => {
+        tgtCustomInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                updateTarget(parseFloat(targetInput.value));
-                targetInput.blur();
+                const val = parseFloat(tgtCustomInput.value);
+                if (!isNaN(val) && val > 0) updateTarget(val);
             }
         });
     }
-    
-    if (btnMinus10) btnMinus10.addEventListener('click', () => updateTarget(currentTargetYards - 10));
-    if (btnMinus5) btnMinus5.addEventListener('click', () => updateTarget(currentTargetYards - 5));
-    if (btnPlus5) btnPlus5.addEventListener('click', () => updateTarget(currentTargetYards + 5));
-    if (btnPlus10) btnPlus10.addEventListener('click', () => updateTarget(currentTargetYards + 10));
-    
-    presetBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const yds = parseInt(e.target.getAttribute('data-yds'), 10);
+    if (targetBadgeContainer) {
+        targetBadgeContainer.addEventListener('click', () => {
+            if (settingsDrawer && !settingsDrawer.classList.contains('open')) {
+                if (gameModesDrawer) gameModesDrawer.classList.remove('open');
+                if (btnGameModes) btnGameModes.classList.remove('active');
+                settingsDrawer.classList.add('open');
+                if (btnSettingsToggle) btnSettingsToggle.classList.add('active');
+            }
+            if (tgtCustomInput) {
+                tgtCustomInput.focus();
+                tgtCustomInput.select();
+            }
+        });
+    }
+
+    if (tgtStepMinus10) tgtStepMinus10.addEventListener('click', () => updateTarget(currentTargetYards - 10));
+    if (tgtStepMinus5) tgtStepMinus5.addEventListener('click', () => updateTarget(currentTargetYards - 5));
+    if (tgtStepPlus5) tgtStepPlus5.addEventListener('click', () => updateTarget(currentTargetYards + 5));
+    if (tgtStepPlus10) tgtStepPlus10.addEventListener('click', () => updateTarget(currentTargetYards + 10));
+
+    tgtPresetChips.forEach(chip => {
+        chip.addEventListener('click', (e) => {
+            const yds = parseInt(e.target.getAttribute('data-tgt'), 10);
             updateTarget(yds);
         });
     });
-    
+
+    // 5. Drawer and Menu Actions
+    if (btnGameModes && gameModesDrawer) {
+        btnGameModes.addEventListener('click', () => {
+            if (settingsDrawer) {
+                settingsDrawer.classList.remove('open');
+                if (btnSettingsToggle) btnSettingsToggle.classList.remove('active');
+            }
+            gameModesDrawer.classList.toggle('open');
+            btnGameModes.classList.toggle('active', gameModesDrawer.classList.contains('open'));
+        });
+    }
+
+    if (btnCloseGameModes && gameModesDrawer) {
+        btnCloseGameModes.addEventListener('click', () => {
+            gameModesDrawer.classList.remove('open');
+            if (btnGameModes) btnGameModes.classList.remove('active');
+        });
+    }
+
+    if (btnSettingsToggle && settingsDrawer) {
+        btnSettingsToggle.addEventListener('click', () => {
+            if (gameModesDrawer) {
+                gameModesDrawer.classList.remove('open');
+                if (btnGameModes) btnGameModes.classList.remove('active');
+            }
+            settingsDrawer.classList.toggle('open');
+            btnSettingsToggle.classList.toggle('active', settingsDrawer.classList.contains('open'));
+        });
+    }
+
+    gameModeCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const mode = card.getAttribute('data-mode');
+            setGameMode(mode);
+            if (gameModesDrawer) gameModesDrawer.classList.remove('open');
+            if (btnGameModes) btnGameModes.classList.remove('active');
+        });
+    });
+
+    if (btnStudioMenu) {
+        btnStudioMenu.addEventListener('click', () => {
+            window.location.href = '/';
+        });
+    }
+
     window.addEventListener('keydown', (e) => {
-        if (document.activeElement === targetInput) return;
-        if (e.key === 'ArrowLeft') {
-            updateTarget(currentTargetYards - 5);
-        } else if (e.key === 'ArrowRight') {
-            updateTarget(currentTargetYards + 5);
-        } else if (e.key === 'ArrowUp') {
-            updateTarget(currentTargetYards + 10);
-        } else if (e.key === 'ArrowDown') {
-            updateTarget(currentTargetYards - 10);
+        if (e.target.tagName === 'INPUT') return;
+        if (e.key === 'g' || e.key === 'G') {
+            if (btnGameModes) btnGameModes.click();
+        } else if (e.key === 's' || e.key === 'S') {
+            if (btnSettingsToggle) btnSettingsToggle.click();
         }
     });
 
-    // Extract exact native OpenLaunch Nova & OpenGolfCoach telemetry
+    // 5. Telemetry Extraction
     function extractShotTelemetry(msg) {
         if (!msg) return null;
-        
         const raw = msg.data || msg.shot || msg;
         if (!raw || typeof raw !== 'object') return null;
-        
+
         const ogc = raw.open_golf_coach || (raw.shot && raw.shot.open_golf_coach) || {};
         const us = ogc.us_customary_units || raw.us_units || (raw.shot && raw.shot.us_units) || {};
-        
-        // 1. Ball Speed (MPH)
+
+        // Ball Speed (MPH)
         let ballSpeed = 0.0;
         if (us.ball_speed_mph !== undefined && us.ball_speed_mph !== null) {
             ballSpeed = parseFloat(us.ball_speed_mph);
@@ -103,214 +381,370 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             ballSpeed = parseFloat(raw.ball_speed_mph);
         } else if (raw.ball_speed !== undefined && raw.ball_speed !== null) {
             ballSpeed = parseFloat(raw.ball_speed);
-        } else if (raw.ballSpeed !== undefined && raw.ballSpeed !== null) {
-            ballSpeed = parseFloat(raw.ballSpeed);
-        }
-        
-        if (isNaN(ballSpeed) || ballSpeed < 5.0) {
-            return null; // Ignore invalid / zero shots
-        }
-        
-        // 2. Vertical Launch Angle (Degrees)
-        let vla = 14.0;
-        if (raw.vertical_launch_angle_degrees !== undefined && raw.vertical_launch_angle_degrees !== null) {
-            vla = parseFloat(raw.vertical_launch_angle_degrees);
-        } else if (us.vert_launch_angle_deg !== undefined && us.vert_launch_angle_deg !== null) {
-            vla = parseFloat(us.vert_launch_angle_deg);
-        } else if (raw.launch_angle !== undefined && raw.launch_angle !== null) {
-            vla = parseFloat(raw.launch_angle);
-        } else if (raw.vla !== undefined && raw.vla !== null) {
-            vla = parseFloat(raw.vla);
-        } else if (raw.verticalLaunchAngle !== undefined && raw.verticalLaunchAngle !== null) {
-            vla = parseFloat(raw.verticalLaunchAngle);
-        }
-        
-        // 3. Horizontal Launch Angle (Degrees)
-        let hla = 0.0;
-        if (raw.horizontal_launch_angle_degrees !== undefined && raw.horizontal_launch_angle_degrees !== null) {
-            hla = parseFloat(raw.horizontal_launch_angle_degrees);
-        } else if (us.horiz_launch_angle_deg !== undefined && us.horiz_launch_angle_deg !== null) {
-            hla = parseFloat(us.horiz_launch_angle_deg);
-        } else if (raw.hla !== undefined && raw.hla !== null) {
-            hla = parseFloat(raw.hla);
-        } else if (raw.horizontalLaunchAngle !== undefined && raw.horizontalLaunchAngle !== null) {
-            hla = parseFloat(raw.horizontalLaunchAngle);
-        }
-        
-        // 4. Total Spin (RPM)
-        let totalSpin = 3000.0;
-        if (raw.total_spin_rpm !== undefined && raw.total_spin_rpm !== null) {
-            totalSpin = parseFloat(raw.total_spin_rpm);
-        } else if (ogc.total_spin_rpm !== undefined && ogc.total_spin_rpm !== null) {
-            totalSpin = parseFloat(ogc.total_spin_rpm);
-        } else if (us.total_spin_rpm !== undefined && us.total_spin_rpm !== null) {
-            totalSpin = parseFloat(us.total_spin_rpm);
-        } else if (raw.total_spin !== undefined && raw.total_spin !== null) {
-            totalSpin = parseFloat(raw.total_spin);
-        } else if (raw.spinSpeed !== undefined && raw.spinSpeed !== null) {
-            totalSpin = parseFloat(raw.spinSpeed);
-        }
-        
-        // 5. Spin Axis (Degrees)
-        let spinAxis = 0.0;
-        if (raw.spin_axis_degrees !== undefined && raw.spin_axis_degrees !== null) {
-            spinAxis = parseFloat(raw.spin_axis_degrees);
-        } else if (ogc.spin_axis_degrees !== undefined && ogc.spin_axis_degrees !== null) {
-            spinAxis = parseFloat(ogc.spin_axis_degrees);
-        } else if (us.spin_axis_deg !== undefined && us.spin_axis_deg !== null) {
-            spinAxis = parseFloat(us.spin_axis_deg);
-        } else if (raw.spin_axis !== undefined && raw.spin_axis !== null) {
-            spinAxis = parseFloat(raw.spin_axis);
-        } else if (raw.spinAxis !== undefined && raw.spinAxis !== null) {
-            spinAxis = parseFloat(raw.spinAxis);
-        }
-        
-        // 6. Carry & Offline
-        let carryYds = null;
-        if (us.carry_distance_yards !== undefined && us.carry_distance_yards !== null) {
-            carryYds = parseFloat(us.carry_distance_yards);
-        } else if (raw.carry !== undefined && raw.carry !== null) {
-            carryYds = parseFloat(raw.carry);
-        } else if (ogc.carry_distance_meters !== undefined && ogc.carry_distance_meters !== null) {
-            carryYds = parseFloat(ogc.carry_distance_meters) * 1.09361;
         }
 
+        if (isNaN(ballSpeed) || ballSpeed < 5.0) return null;
+
+        // Launch Angles & Spin
+        const vla = parseFloat(raw.vertical_launch_angle_degrees || us.vert_launch_angle_deg || raw.launch_angle || 14.0);
+        const hla = parseFloat(raw.horizontal_launch_angle_degrees || us.horiz_launch_angle_deg || raw.hla || 0.0);
+        const totalSpin = parseFloat(raw.total_spin_rpm || ogc.total_spin_rpm || us.total_spin_rpm || raw.total_spin || 3000.0);
+        const spinAxis = parseFloat(raw.spin_axis_degrees || ogc.spin_axis_degrees || us.spin_axis_deg || raw.spin_axis || 0.0);
+        const sidespin = parseFloat(ogc.sidespin_rpm || raw.sidespin_rpm || raw.sidespin || (Math.sin(spinAxis * Math.PI / 180) * totalSpin));
+        const backspin = parseFloat(ogc.backspin_rpm || raw.backspin_rpm || raw.backspin || (Math.cos(spinAxis * Math.PI / 180) * totalSpin));
+        const descent = parseFloat(ogc.descent_angle_degrees || raw.descent_angle_degrees || raw.descent_angle || 45.0);
+
+        let carryYds = null;
+        if (us.carry_distance_yards !== undefined && us.carry_distance_yards !== null) carryYds = parseFloat(us.carry_distance_yards);
+        else if (raw.carry !== undefined && raw.carry !== null) carryYds = parseFloat(raw.carry);
+
+        let totalYds = null;
+        if (us.total_distance_yards !== undefined && us.total_distance_yards !== null) totalYds = parseFloat(us.total_distance_yards);
+        else if (raw.total !== undefined && raw.total !== null) totalYds = parseFloat(raw.total);
+
         let offlineYds = null;
-        if (us.offline_distance_yards !== undefined && us.offline_distance_yards !== null) {
-            offlineYds = parseFloat(us.offline_distance_yards);
-        } else if (raw.offline !== undefined && raw.offline !== null) {
-            offlineYds = parseFloat(raw.offline);
-        } else if (ogc.offline_distance_meters !== undefined && ogc.offline_distance_meters !== null) {
-            offlineYds = parseFloat(ogc.offline_distance_meters) * 1.09361;
+        if (us.offline_distance_yards !== undefined && us.offline_distance_yards !== null) offlineYds = parseFloat(us.offline_distance_yards);
+        else if (raw.offline !== undefined && raw.offline !== null) offlineYds = parseFloat(raw.offline);
+
+        let apexFt = null;
+        if (us.peak_height_yards !== undefined && us.peak_height_yards !== null) apexFt = parseFloat(us.peak_height_yards) * 3.0;
+        else if (raw.apex !== undefined && raw.apex !== null) apexFt = parseFloat(raw.apex) * 3.0;
+
+        // Club Analytics & Advanced Telemetry
+        const smash = parseFloat(ogc.smash_factor || raw.smash_factor || raw.smash || 1.35);
+        let clubSpeed = 0.0;
+        if (us.club_speed_mph !== undefined && us.club_speed_mph !== null) {
+            clubSpeed = parseFloat(us.club_speed_mph);
+        } else if (raw.club_speed_mph !== undefined && raw.club_speed_mph !== null) {
+            clubSpeed = parseFloat(raw.club_speed_mph);
+        } else if (raw.club_speed !== undefined && raw.club_speed !== null) {
+            clubSpeed = parseFloat(raw.club_speed);
+        } else {
+            clubSpeed = ballSpeed / Math.max(1.0, smash);
         }
+
+        const clubPath = parseFloat(ogc.club_path_degrees?.right_handed || raw.club_path || raw.club_path_degrees || 0.0);
+        const faceAngle = parseFloat(ogc.club_face_to_path_degrees?.right_handed || raw.face_to_path || raw.face_angle || 0.0);
+        const attackAngle = parseFloat(ogc.angle_of_attack_degrees?.right_handed || raw.angle_of_attack_degrees || raw.attack_angle || (vla * 0.3 - 4.5));
+        const dynamicLoft = parseFloat(ogc.dynamic_loft_degrees?.right_handed || raw.dynamic_loft_degrees || raw.dynamic_loft || (vla * 0.85));
+        const hangTime = parseFloat(ogc.hang_time_seconds || raw.hang_time_seconds || raw.hang_time || (2.0 * Math.sin(vla * Math.PI / 180) * (ballSpeed * 0.44704) / 9.81));
         
-        const shotClub = raw.club || ogc.club || "Club";
+        let closureRate = 0.0;
+        if (ogc.face_closure_rate_dps !== undefined) closureRate = parseFloat(ogc.face_closure_rate_dps);
+        else if (raw.face_closure_rate_dps !== undefined) closureRate = parseFloat(raw.face_closure_rate_dps);
+        else if (raw.closure_rate !== undefined) closureRate = parseFloat(raw.closure_rate);
+        else closureRate = Math.round(1800 + Math.abs(faceAngle) * 320 + (clubSpeed * 12.5));
+
+        const shotClub = raw.club || ogc.club || "7 Iron";
+        const clubColor = raw.club_color || ogc.club_color || null;
         const shotId = raw.shot_number || raw.timestamp || raw.id || `${ballSpeed.toFixed(1)}_${vla.toFixed(1)}_${totalSpin.toFixed(0)}`;
 
         return {
             shotId,
             club: shotClub,
+            clubColor: clubColor,
             ballSpeed,
+            clubSpeed,
+            smash,
+            closureRate,
+            clubPath,
+            faceAngle,
+            attackAngle,
+            dynamicLoft,
+            hangTime,
             verticalLaunchAngle: vla,
             horizontalLaunchAngle: hla,
             total_spin: totalSpin,
             spin_axis: spinAxis,
+            sidespin,
+            backspin,
+            descent,
             ogcCarry: carryYds,
-            ogcOffline: offlineYds
+            ogcTotal: totalYds,
+            ogcOffline: offlineYds,
+            apexFt
         };
     }
 
     function updateHUDTelemetry(shotData, simulatedCarry = null, simulatedOffline = null) {
-        if (!shotData || !telemetryDiv) return;
-        
+        if (!shotData) return;
+
         const carryYds = shotData.ogcCarry || simulatedCarry || 0.0;
+        const totalYds = shotData.ogcTotal || (carryYds * 1.08);
         const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : (simulatedOffline || 0.0);
-        const offlineDir = offlineYds >= 0 ? "R" : "L";
-        
+        const apexFt = shotData.apexFt || (carryYds * 0.42 * 3.0);
+
+        if (elBallSpeed) elBallSpeed.innerText = (typeof shotData.ballSpeed === 'number') ? shotData.ballSpeed.toFixed(1) : '--';
+        if (elClubSpeed) elClubSpeed.innerText = (typeof shotData.clubSpeed === 'number') ? shotData.clubSpeed.toFixed(1) : '--';
+        if (elSmash) elSmash.innerText = (typeof shotData.smash === 'number') ? shotData.smash.toFixed(2) : '--';
+        if (elCarry) elCarry.innerText = (typeof carryYds === 'number') ? carryYds.toFixed(1) : '--';
+        if (elTotal) elTotal.innerText = (typeof totalYds === 'number') ? totalYds.toFixed(1) : '--';
+        if (elLaunch) elLaunch.innerText = (typeof shotData.verticalLaunchAngle === 'number') ? shotData.verticalLaunchAngle.toFixed(1) : '--';
+        if (elHla) elHla.innerText = (typeof shotData.horizontalLaunchAngle === 'number') ? `${shotData.horizontalLaunchAngle >= 0 ? '+' : ''}${shotData.horizontalLaunchAngle.toFixed(1)}` : '--';
+        if (elClosureRate) elClosureRate.innerText = shotData.closureRate ? Math.round(shotData.closureRate) : Math.round(1800 + (shotData.ballSpeed || 100) * 10);
+        if (elClubPath) elClubPath.innerText = (typeof shotData.clubPath === 'number') ? `${shotData.clubPath >= 0 ? '+' : ''}${shotData.clubPath.toFixed(1)}°` : '--';
+        if (elFaceAngle) elFaceAngle.innerText = (typeof shotData.faceAngle === 'number') ? `${shotData.faceAngle >= 0 ? '+' : ''}${shotData.faceAngle.toFixed(1)}°` : '--';
+        if (elAttackAngle) elAttackAngle.innerText = (typeof shotData.attackAngle === 'number') ? `${shotData.attackAngle >= 0 ? '+' : ''}${shotData.attackAngle.toFixed(1)}°` : '--';
+        if (elDynamicLoft) elDynamicLoft.innerText = (typeof shotData.dynamicLoft === 'number') ? `${shotData.dynamicLoft.toFixed(1)}°` : '--';
+        if (elBackspin) elBackspin.innerText = Math.round(shotData.backspin || shotData.total_spin || 3000);
+        if (elSidespin) elSidespin.innerText = Math.round(shotData.sidespin || 0);
+        if (elOffline) elOffline.innerText = `${Math.abs(offlineYds).toFixed(1)} ${offlineYds >= 0 ? 'R' : 'L'}`;
+        if (elApex) elApex.innerText = Math.round(apexFt);
+        if (elDescent) elDescent.innerText = (typeof shotData.descent === 'number') ? `${shotData.descent.toFixed(1)}°` : '46.0°';
+        if (elHangTime) elHangTime.innerText = (typeof shotData.hangTime === 'number') ? `${shotData.hangTime.toFixed(1)}` : '--';
+
+        if (hudClubName) {
+            hudClubName.innerText = shotData.club || '7 Iron';
+            if (shotData.clubColor) hudClubName.style.color = shotData.clubColor;
+        }
+
+        // 1. Update Free Practice Status
+        if (practiceLastCarry) practiceLastCarry.innerText = `${carryYds.toFixed(1)} yds`;
+        if (practiceLastOffline) practiceLastOffline.innerText = `${Math.abs(offlineYds).toFixed(1)} ${offlineYds >= 0 ? 'R' : 'L'}`;
+
+        // 2. Calculate Proximity to Target & Game Scores
         const dx = offlineYds;
         const dz = carryYds - currentTargetYards;
-        const distToPinYds = Math.sqrt(dx * dx + dz * dz);
-        const onGreen = distToPinYds <= 10.0;
-        
-        const pinFeedback = onGreen 
-            ? `⛳ GREEN HIT! (${distToPinYds.toFixed(1)} yds to pin)` 
-            : `🎯 Pin Delta: ${distToPinYds.toFixed(1)} yds (${dz >= 0 ? '+' : ''}${dz.toFixed(1)}y)`;
-        
-        telemetryDiv.innerHTML = `Club: ${shotData.club || '7 Iron'}  •  Ball Speed: ${shotData.ballSpeed.toFixed(1)} mph\n` +
-                                 `Launch: ${shotData.verticalLaunchAngle.toFixed(1)}° (H: ${shotData.horizontalLaunchAngle >= 0 ? '+' : ''}${shotData.horizontalLaunchAngle.toFixed(1)}°)\n` +
-                                 `Spin: ${Math.round(shotData.total_spin)} rpm (Axis: ${shotData.spin_axis.toFixed(1)}°)\n` +
-                                 `Carry: ${carryYds.toFixed(1)} yds (${Math.abs(offlineYds).toFixed(1)}y ${offlineDir})\n` +
-                                 `${pinFeedback}`;
-                                 
-        if (replayBtn) {
-            replayBtn.style.display = 'inline-block';
+        const pinDeltaYds = Math.sqrt(dx * dx + dz * dz);
+        const pinDeltaFt = pinDeltaYds * 3.0;
+
+        let points = 0;
+        if (pinDeltaYds <= 4.0) points = 5;      // Bullseye
+        else if (pinDeltaYds <= 9.0) points = 3; // Mid Ring
+        else if (pinDeltaYds <= 16.0) points = 1;// Outer Green
+
+        if (currentRangeMode === 'challenge') {
+            totalChallengeScore += points;
+            if (elTargetPts) elTargetPts.innerText = totalChallengeScore;
+            if (elPinProx) elPinProx.innerText = pinDeltaFt < 100 ? `${pinDeltaFt.toFixed(1)} ft` : `${pinDeltaYds.toFixed(0)} yds`;
+        } else if (currentRangeMode === 'ladder') {
+            const targetGreenRadiusYds = currentTargetYards <= 40 ? 6.0 : (currentTargetYards <= 100 ? 10.0 : 14.0);
+            const isGreenHit = pinDeltaYds <= targetGreenRadiusYds;
+
+            if (isGreenHit) {
+                ladderLevel++;
+                ladderStreak++;
+                // Random increment between 10 and 20 yards
+                const inc = Math.floor(Math.random() * 11) + 10;
+                const nextDist = Math.min(500, currentTargetYards + inc);
+                showBanner('🎉', `LADDER LEVEL ${ladderLevel}! (+${inc}y)`, `Great Shot (${pinDeltaFt.toFixed(1)} ft)! Moving from ${currentTargetYards}y ➔ ${nextDist}y`);
+                updateTarget(nextDist);
+                if (practiceLastCarry) practiceLastCarry.innerText = `LEVEL ${ladderLevel}`;
+                if (practiceLastOffline) practiceLastOffline.innerText = `${ladderStreak} STREAK`;
+            } else {
+                ladderStreak = 0;
+                showBanner('⚠️', `MISSED GREEN (${pinDeltaFt.toFixed(1)} ft away)`, `Target remains at ${currentTargetYards} yds. Try again!`);
+                if (practiceLastCarry) practiceLastCarry.innerText = `LEVEL ${ladderLevel}`;
+                if (practiceLastOffline) practiceLastOffline.innerText = `0 STREAK`;
+            }
+        } else if (currentRangeMode === 'closest-pin') {
+            if (pinDeltaFt < bestPinProx) bestPinProx = pinDeltaFt;
+            if (elTargetPts) elTargetPts.innerText = `${bestPinProx.toFixed(1)} ft`;
+            if (elPinProx) elPinProx.innerText = `${pinDeltaFt.toFixed(1)} ft`;
+        } else if (currentRangeMode === 'long-drive') {
+            const isFairway = Math.abs(offlineYds) <= (currentFairwayWidth / 2);
+            if (isFairway && carryYds > bestLongDrive) bestLongDrive = carryYds;
+            if (practiceLastCarry) practiceLastCarry.innerText = `${carryYds.toFixed(1)} yds`;
+            if (practiceLastOffline) practiceLastOffline.innerText = isFairway ? 'FAIRWAY' : 'ROUGH';
         }
+
+        lastLandingPt = { x: offlineYds, z: carryYds };
+
+        // Draw on Minimap
+        drawMinimap();
     }
 
     function fireShot(shotData) {
         if (!shotData) return;
-        
-        console.log('[+] Live Nova Shot Received:', shotData);
         lastShotTelemetry = shotData;
         lastShotId = shotData.shotId;
-        
+
         const trajectory = physicsEngine.calculateTrajectory(shotData);
-        
         const finalPt = trajectory[trajectory.length - 1];
         const carryYds = shotData.ogcCarry || Math.abs(finalPt.z);
         const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : finalPt.x;
-        
+
         updateHUDTelemetry(shotData, carryYds, offlineYds);
-        
+
         cameraController.setLandingPosition(new THREE.Vector3(finalPt.x, 0.05, finalPt.z));
-        ball.launch(trajectory);
+        ball.launch(trajectory, shotData.clubColor);
     }
-    
+
+    // 6. Realistic Shot Generator for Demo Shots
     function generateRealisticShotForDistance(targetYds) {
         let speed, vla, spin;
-        
         if (targetYds <= 80) {
-            speed = 52 + (targetYds - 50) * 0.45;
+            speed = 54 + (targetYds - 50) * 0.45;
             vla = 30.0 - (targetYds - 50) * 0.1;
             spin = 8200 - (targetYds - 50) * 15;
-        } else if (targetYds <= 120) {
-            speed = 65 + (targetYds - 80) * 0.55;
-            vla = 26.0 - (targetYds - 80) * 0.12;
-            spin = 7500 - (targetYds - 80) * 20;
-        } else if (targetYds <= 170) {
-            speed = 88 + (targetYds - 120) * 0.52;
-            vla = 21.0 - (targetYds - 120) * 0.09;
-            spin = 6400 - (targetYds - 120) * 25;
-        } else if (targetYds <= 220) {
-            speed = 114 + (targetYds - 170) * 0.45;
-            vla = 16.5 - (targetYds - 170) * 0.06;
-            spin = 4800 - (targetYds - 170) * 20;
+        } else if (targetYds <= 130) {
+            speed = 68 + (targetYds - 80) * 0.55;
+            vla = 25.0 - (targetYds - 80) * 0.10;
+            spin = 7200 - (targetYds - 80) * 20;
+        } else if (targetYds <= 180) {
+            speed = 92 + (targetYds - 130) * 0.48;
+            vla = 20.5 - (targetYds - 130) * 0.08;
+            spin = 6200 - (targetYds - 130) * 22;
+        } else if (targetYds <= 240) {
+            speed = 118 + (targetYds - 180) * 0.42;
+            vla = 16.0 - (targetYds - 180) * 0.05;
+            spin = 4600 - (targetYds - 180) * 18;
         } else {
-            speed = 138 + (targetYds - 220) * 0.40;
-            vla = 13.5 - Math.min(3.0, (targetYds - 220) * 0.03);
-            spin = 3200 - Math.min(1000, (targetYds - 220) * 10);
+            speed = 142 + (targetYds - 240) * 0.38;
+            vla = 13.0 - Math.min(2.5, (targetYds - 240) * 0.03);
+            spin = 3100 - Math.min(800, (targetYds - 240) * 10);
         }
-        
+
+        const demoHla = (Math.random() * 1.6 - 0.8);
+        const demoClubPath = demoHla * 0.8 + (Math.random() * 0.6 - 0.3);
+        const demoFaceAngle = demoHla * 0.5 + (Math.random() * 0.4 - 0.2);
+        const demoSmash = 1.38 + Math.random() * 0.08;
+        const demoClubSpeed = speed / demoSmash;
+        const demoAttack = vla * 0.3 - 4.5;
+        const demoDynLoft = vla * 0.85;
+        const demoHangTime = (2.0 * Math.sin(vla * Math.PI / 180) * (speed * 0.44704) / 9.81);
+        const demoClosure = Math.round(1800 + Math.abs(demoFaceAngle) * 320 + (demoClubSpeed * 12.5));
+
         return {
             shotId: `demo_${Date.now()}`,
-            club: "Demo Club",
+            club: "7 Iron",
+            clubColor: "#00E5FF",
             ballSpeed: speed + (Math.random() * 2.0 - 1.0),
-            verticalLaunchAngle: vla + (Math.random() * 1.0 - 0.5),
-            horizontalLaunchAngle: (Math.random() * 2.0 - 1.0),
+            clubSpeed: demoClubSpeed,
+            smash: demoSmash,
+            closureRate: demoClosure,
+            clubPath: demoClubPath,
+            faceAngle: demoFaceAngle,
+            attackAngle: demoAttack,
+            dynamicLoft: demoDynLoft,
+            hangTime: demoHangTime,
+            verticalLaunchAngle: vla + (Math.random() * 0.8 - 0.4),
+            horizontalLaunchAngle: demoHla,
             total_spin: spin + (Math.random() * 200 - 100),
             spin_axis: (Math.random() * 2.0 - 1.0),
+            sidespin: (Math.random() * 120 - 60),
+            backspin: spin,
+            descent: 46.0 + Math.random() * 2.0,
             ogcCarry: null,
-            ogcOffline: null
+            ogcTotal: null,
+            ogcOffline: null,
+            apexFt: null
         };
     }
-    
-    // Demo Shot Button
+
+    // 7. Event Listeners
     if (demoBtn) {
         demoBtn.addEventListener('click', () => {
-            const demoShot = generateRealisticShotForDistance(currentTargetYards);
-            fireShot(demoShot);
+            const demo = generateRealisticShotForDistance(currentTargetYards);
+            fireShot(demo);
         });
     }
-    
-    // Replay Last Shot Button
+
     if (replayBtn) {
         replayBtn.addEventListener('click', () => {
-            if (lastShotTelemetry) {
-                fireShot(lastShotTelemetry);
-            }
+            if (lastShotTelemetry) fireShot(lastShotTelemetry);
         });
     }
-    
+
     window.addEventListener('keydown', (e) => {
-        if (document.activeElement === targetInput) return;
+        if (e.target.tagName === 'INPUT') return;
         if (e.code === 'Space') {
+            e.preventDefault();
             if (demoBtn) demoBtn.click();
         } else if (e.key === 'r' || e.key === 'R') {
             if (replayBtn && lastShotTelemetry) replayBtn.click();
+        } else if (e.key === 'p' || e.key === 'P') {
+            togglePressureTile();
         }
     });
-    
-    // Connect to WebSocket Server on Port 9321
+
+    // 8. 2D Radar Minimap Renderer
+    function drawMinimap() {
+        if (!minimapCtx || !minimapCanvas) return;
+        const w = minimapCanvas.width;
+        const h = minimapCanvas.height;
+
+        minimapCtx.clearRect(0, 0, w, h);
+
+        // Fairway Background
+        minimapCtx.fillStyle = '#13211a';
+        minimapCtx.fillRect(0, 0, w, h);
+
+        const maxRange = Math.max(380, currentTargetYards + 40);
+        const toY = (yds) => h - 15 - (yds / maxRange) * (h - 30);
+        const toX = (xYds) => w / 2 + (xYds / 120) * (w / 2);
+
+        // Tree Boundaries (Left & Right Corridor)
+        const halfFw = currentFairwayWidth / 2;
+        const leftX = toX(-halfFw);
+        const rightX = toX(+halfFw);
+
+        minimapCtx.fillStyle = '#0a140e';
+        minimapCtx.fillRect(0, 0, leftX, h);
+        minimapCtx.fillRect(rightX, 0, w - rightX, h);
+
+        minimapCtx.strokeStyle = '#22c55e';
+        minimapCtx.lineWidth = 1;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(leftX, 0); minimapCtx.lineTo(leftX, h);
+        minimapCtx.moveTo(rightX, 0); minimapCtx.lineTo(rightX, h);
+        minimapCtx.stroke();
+
+        // Fairway Dashed Centerline
+        minimapCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+        minimapCtx.setLineDash([3, 3]);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(w / 2, h - 15);
+        minimapCtx.lineTo(w / 2, 10);
+        minimapCtx.stroke();
+        minimapCtx.setLineDash([]);
+
+        // Target Green (Clean Natural Putting Green + Center Pin)
+        const tgtY = toY(currentTargetYards);
+        const tgtX = w / 2;
+
+        minimapCtx.beginPath();
+        minimapCtx.arc(tgtX, tgtY, 10, 0, Math.PI * 2);
+        minimapCtx.fillStyle = '#55a338';
+        minimapCtx.fill();
+        minimapCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+        minimapCtx.lineWidth = 1.0;
+        minimapCtx.stroke();
+
+        // Pin Hole Center
+        minimapCtx.fillStyle = '#ffffff';
+        minimapCtx.beginPath();
+        minimapCtx.arc(tgtX, tgtY, 1.5, 0, Math.PI * 2);
+        minimapCtx.fill();
+
+        // Tee Box
+        minimapCtx.fillStyle = '#4ade80';
+        minimapCtx.beginPath();
+        minimapCtx.arc(w / 2, h - 15, 3.5, 0, Math.PI * 2);
+        minimapCtx.fill();
+
+        // Last Shot Landing Marker & Flight Line
+        if (lastLandingPt) {
+            const landX = toX(lastLandingPt.x);
+            const landY = toY(lastLandingPt.z);
+
+            minimapCtx.strokeStyle = '#facc15';
+            minimapCtx.lineWidth = 1.5;
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(w / 2, h - 15);
+            minimapCtx.lineTo(landX, landY);
+            minimapCtx.stroke();
+
+            minimapCtx.fillStyle = '#facc15';
+            minimapCtx.beginPath();
+            minimapCtx.arc(landX, landY, 4, 0, Math.PI * 2);
+            minimapCtx.fill();
+        }
+    }
+
+    drawMinimap();
+
+    // 9. WebSocket Connection (Port 9321)
     function connectWS() {
         let wsUrl;
         if (window.location.protocol === 'file:') {
@@ -319,32 +753,34 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             wsUrl = `${protocol}//${window.location.host || 'localhost:9321'}`;
         }
-        
-        console.log('[+] Connecting to WebSocket:', wsUrl);
+
         const ws = new WebSocket(wsUrl);
-        
+
         ws.onopen = () => {
             console.log('[✓] Connected to Shanktuary WebSocket server');
-            if (statusBadge) {
-                statusBadge.innerText = '● Live';
-                statusBadge.style.color = '#00FF66';
-                statusBadge.style.borderColor = '#00FF66';
-                statusBadge.style.background = 'rgba(0,255,102,0.15)';
-            }
+            if (lmStatusText) lmStatusText.innerText = 'Nova Connected';
         };
-        
+
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                console.log('[+] Received WebSocket message type:', msg.type);
-                
                 if (msg.type === 'shot') {
                     const parsed = extractShotTelemetry(msg);
-                    if (parsed) {
-                        fireShot(parsed);
+                    if (parsed) fireShot(parsed);
+                } else if (msg.type === 'pressure' && msg.data) {
+                    const p = msg.data;
+                    pressureRenderer.pushSample(p);
+                    if (rangePressureTile && rangePressureTile.style.display !== 'none') {
+                        if (hudPressurePhase) {
+                            hudPressurePhase.innerText = (p.phase || 'ADDRESS').toUpperCase();
+                        }
+                        if (hudPctLeft) hudPctLeft.innerText = `${Math.round(p.pct_left || 50)}% L`;
+                        if (hudPctRight) hudPctRight.innerText = `${Math.round(p.pct_right || 50)}% R`;
+                        if (hudBarFillLeft) hudBarFillLeft.style.width = `${p.pct_left || 50}%`;
+                        if (rangeHeatmapCanvas) pressureRenderer.renderHeatmap(rangeHeatmapCanvas, p);
+                        if (rangeCopCanvas) pressureRenderer.renderCOPDot(rangeCopCanvas, p);
                     }
                 } else if (msg.type === 'init' && msg.data) {
-                    console.log('[+] Processing init shot data:', msg.data);
                     const parsed = extractShotTelemetry(msg.data);
                     if (parsed) {
                         lastShotTelemetry = parsed;
@@ -353,23 +789,17 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     }
                 }
             } catch (err) {
-                console.error('[!] Error parsing WebSocket message:', err);
+                console.error('[!] WebSocket JSON parse error:', err);
             }
         };
-        
+
         ws.onclose = () => {
-            console.log('[!] WebSocket disconnected, reconnecting in 2s...');
-            if (statusBadge) {
-                statusBadge.innerText = '○ Offline (reconnecting)';
-                statusBadge.style.color = '#FFD600';
-                statusBadge.style.borderColor = '#FFD600';
-                statusBadge.style.background = 'rgba(255,214,0,0.15)';
-            }
+            if (lmStatusText) lmStatusText.innerText = 'Reconnecting...';
             setTimeout(connectWS, 2000);
         };
     }
-    
-    // HTTP Fallback Polling in case WebSockets are blocked
+
+    // 10. HTTP Fallback Poller
     async function pollShotAPI() {
         try {
             const res = await fetch('/api/shot');
@@ -378,16 +808,16 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 if (data && Object.keys(data).length > 0) {
                     const parsed = extractShotTelemetry(data);
                     if (parsed && parsed.shotId && parsed.shotId !== lastShotId) {
-                        console.log('[+] HTTP Poll detected new shot:', parsed);
                         fireShot(parsed);
                     }
                 }
             }
         } catch (e) {
-            // Ignore fetch errors during polling
+            // Ignore fetch poll errors
         }
     }
     setInterval(pollShotAPI, 2500);
-    
+
     connectWS();
 }
+

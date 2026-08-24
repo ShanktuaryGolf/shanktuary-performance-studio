@@ -3,213 +3,1052 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Driving Range</title>
+    <title>3D Driving Range - Shanktuary Studio</title>
     <style>
+        :root {
+            --bg-glass: rgba(18, 22, 28, 0.72);
+            --bg-glass-hover: rgba(28, 34, 44, 0.85);
+            --border-glass: rgba(255, 255, 255, 0.12);
+            --border-accent: rgba(56, 189, 248, 0.45);
+            --accent-cyan: #38bdf8;
+            --accent-green: #4ade80;
+            --accent-yellow: #facc15;
+            --accent-red: #f87171;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #0b141a;
+            background-color: #070a0f;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            user-select: none;
+            color: var(--text-primary);
         }
-        #hud {
+
+        canvas#three-canvas {
             position: absolute;
-            top: 20px;
-            left: 20px;
-            color: white;
-            background: rgba(16, 17, 22, 0.88);
-            padding: 16px 20px;
-            border-radius: 12px;
-            border: 1px solid rgba(0, 229, 255, 0.35);
-            backdrop-filter: blur(10px);
-            z-index: 10;
-            min-width: 280px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-            pointer-events: none;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            z-index: 1;
         }
-        #hud > * {
+
+        /* Top Navigation Header */
+        #top-bar {
+            position: absolute;
+            top: 16px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        #top-bar > * {
             pointer-events: auto;
         }
-        .header-row {
+
+        .glass-panel {
+            background: var(--bg-glass);
+            border: 1px solid var(--border-glass);
+            border-radius: 12px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        }
+
+        .btn-glass {
+            background: var(--bg-glass);
+            border: 1px solid var(--border-glass);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+        }
+
+        .btn-glass:hover {
+            background: var(--bg-glass-hover);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            transform: translateY(-1px);
+        }
+
+        /* Center Target / Challenge Pill */
+        #challenge-pill {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px 24px;
+            min-width: 260px;
+        }
+
+        #challenge-pill .title {
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        #challenge-pill .stats-row {
+            display: flex;
+            align-items: baseline;
+            gap: 20px;
+        }
+
+        #challenge-pill .stat-item {
+            text-align: center;
+        }
+
+        #challenge-pill .stat-val {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #ffffff;
+            font-family: 'Consolas', monospace;
+            line-height: 1;
+        }
+
+        #challenge-pill .stat-val.cyan {
+            color: var(--accent-cyan);
+        }
+
+        #challenge-pill .stat-unit {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-left: 2px;
+        }
+
+        #challenge-pill .target-scoring-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 6px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .score-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+
+        /* Top Right Icon Toolbar */
+        .toolbar-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            cursor: pointer;
+            border: 1px solid var(--border-glass);
+            background: var(--bg-glass);
+            color: var(--text-primary);
+            backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+        }
+
+        .icon-btn:hover, .icon-btn.active {
+            background: var(--bg-glass-hover);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+
+        /* Left Side Telemetry Card Stack (Matching Reference Software) */
+        #telemetry-column {
+            position: absolute;
+            top: 76px;
+            left: 20px;
+            bottom: 68px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 148px;
+            z-index: 20;
+            pointer-events: none;
+            overflow-y: auto;
+        }
+
+        #telemetry-column > * {
+            pointer-events: auto;
+        }
+
+        .tele-card {
+            background: rgba(15, 20, 26, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 8px 12px;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 52px;
+            transition: all 0.2s ease;
+        }
+
+        .tele-card:hover {
+            border-color: rgba(56, 189, 248, 0.4);
+            background: rgba(22, 28, 38, 0.88);
+        }
+
+        .tele-label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            color: #8b99ad;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        .tele-val-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+
+        .tele-val {
+            font-size: 1.18rem;
+            font-weight: 800;
+            color: #ffffff;
+            font-family: 'Consolas', monospace;
+            letter-spacing: -0.5px;
+        }
+
+        .tele-val.highlight {
+            color: var(--accent-green);
+        }
+
+        .tele-unit {
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+
+        /* Settings / Sliders Drawer (Top Right Slide-in) */
+        #settings-drawer, #game-modes-drawer {
+            position: absolute;
+            top: 72px;
+            right: 20px;
+            width: 330px;
+            padding: 18px 20px;
+            z-index: 30;
+            display: none;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        #settings-drawer.open, #game-modes-drawer.open {
+            display: flex;
+        }
+
+        .game-mode-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .game-mode-card:hover {
+            background: rgba(56, 189, 248, 0.08);
+            border-color: rgba(56, 189, 248, 0.35);
+            transform: translateY(-1px);
+        }
+
+        .game-mode-card.active {
+            background: rgba(56, 189, 248, 0.12);
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.18);
+        }
+
+        .game-mode-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 6px;
         }
-        #hud h2 {
-            margin: 0;
-            font-size: 1.15rem;
-            color: #00E5FF;
-            letter-spacing: 1px;
+
+        .game-mode-title {
+            font-weight: 800;
+            font-size: 0.9rem;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
-        #camera-mode-label {
+
+        .game-mode-tag {
+            font-size: 0.65rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(74, 222, 128, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+        }
+
+        .game-mode-desc {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            line-height: 1.35;
+        }
+
+        /* Floating Ladder & Target Notification Banner */
+        #ladder-banner {
+            position: absolute;
+            top: 86px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: rgba(15, 23, 42, 0.94);
+            border: 2px solid var(--accent-cyan);
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.45);
+            border-radius: 12px;
+            padding: 10px 22px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 50;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            backdrop-filter: blur(14px);
+        }
+
+        #ladder-banner.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        #ladder-banner .banner-title {
+            font-weight: 800;
+            font-size: 1.05rem;
+            color: #ffffff;
+        }
+
+        #ladder-banner .banner-sub {
             font-size: 0.82rem;
-            color: #8E94A5;
-            margin-bottom: 12px;
+            color: var(--accent-cyan);
+            font-family: 'Consolas', monospace;
+            font-weight: 700;
         }
-        
-        /* Direct Number Input Target Box */
-        .target-control-box {
-            background: rgba(0, 229, 255, 0.08);
-            border: 1px solid rgba(0, 229, 255, 0.25);
-            padding: 10px 12px;
-            border-radius: 8px;
-            margin-bottom: 12px;
-        }
-        .target-label-row {
+
+        .drawer-section-title {
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 1.2px;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
             display: flex;
             justify-content: space-between;
-            font-weight: 700;
-            font-size: 0.88rem;
-            color: #00E5FF;
+            align-items: center;
             margin-bottom: 8px;
         }
-        .input-row {
+
+        .slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .slider-readout-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.88rem;
+        }
+
+        .slider-val-badge {
+            font-family: 'Consolas', monospace;
+            font-weight: 800;
+            color: var(--accent-green);
+            background: rgba(74, 222, 128, 0.12);
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(74, 222, 128, 0.3);
+        }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: #1e293b;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+            transition: transform 0.1s ease;
+        }
+
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .stepper-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .step-pill {
+            flex: 1;
+            padding: 5px 0;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-glass);
+            border-radius: 6px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .step-pill:hover {
+            background: var(--accent-cyan);
+            color: #0b141a;
+        }
+
+        .presets-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+        }
+
+        .preset-chip {
+            padding: 6px 4px;
+            text-align: center;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-glass);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .preset-chip:hover, .preset-chip.active {
+            background: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            color: #0b141a;
+            font-weight: 700;
+        }
+
+        .custom-dist-row {
             display: flex;
             gap: 6px;
             align-items: center;
-            margin-bottom: 8px;
+            margin-top: 4px;
         }
-        #target-dist-input {
-            background: #101116;
-            border: 1px solid #00E5FF;
-            color: #00FF66;
-            font-family: 'Consolas', monospace;
-            font-size: 1.2rem;
-            font-weight: bold;
-            padding: 6px 10px;
-            border-radius: 6px;
-            width: 90px;
-            text-align: center;
-            outline: none;
-        }
-        #target-dist-input:focus {
-            box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
-            border-color: #00FF66;
-        }
-        .step-btn {
-            background: rgba(255, 255, 255, 0.12);
-            color: #fff;
-            padding: 6px 10px;
-            font-size: 0.85rem;
-            font-weight: bold;
-            border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .step-btn:hover {
-            background: #00E5FF;
-            color: #101116;
-        }
-        .presets-row {
-            display: flex;
-            gap: 4px;
-            justify-content: space-between;
-        }
-        .preset-btn {
-            background: rgba(255, 255, 255, 0.08);
-            color: #ccc;
-            padding: 4px 6px;
-            font-size: 0.75rem;
-            border-radius: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            cursor: pointer;
+
+        .custom-dist-input {
             flex: 1;
-            text-align: center;
-        }
-        .preset-btn:hover {
-            background: #00FF66;
-            color: #101116;
-            font-weight: 700;
-        }
-        
-        #telemetry-data {
-            font-family: 'Consolas', monospace;
-            font-size: 0.95rem;
-            white-space: pre-wrap;
-            color: #00FF66;
-            line-height: 1.4;
-            background: rgba(0, 0, 0, 0.45);
-            padding: 8px 12px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(56, 189, 248, 0.3);
             border-radius: 6px;
-            border-left: 3px solid #00FF66;
+            color: #ffffff;
+            font-family: 'Consolas', monospace;
+            font-size: 0.92rem;
+            font-weight: 700;
+            padding: 6px 10px;
+            outline: none;
+            transition: all 0.15s ease;
         }
-        .controls {
-            margin-top: 12px;
-            display: flex;
-            gap: 10px;
+
+        .custom-dist-input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
         }
-        .action-btn {
-            padding: 8px 14px;
-            cursor: pointer;
-            background: #00E5FF;
-            color: #101116;
+
+        .custom-dist-btn {
+            padding: 6px 14px;
+            background: var(--accent-cyan);
+            color: #0b141a;
             border: none;
             border-radius: 6px;
-            font-weight: 700;
+            font-weight: 800;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .custom-dist-btn:hover {
+            filter: brightness(1.15);
+            transform: scale(1.02);
+        }
+
+        .target-clickable-badge {
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border-radius: 6px;
+            padding: 2px 6px;
+        }
+
+        .target-clickable-badge:hover {
+            background: rgba(56, 189, 248, 0.15);
+            outline: 1px solid rgba(56, 189, 248, 0.4);
+        }
+
+        /* Bottom Left Status */
+        #bottom-left-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            z-index: 20;
+        }
+
+        .club-badge {
+            background: var(--bg-glass);
+            border: 1px solid var(--border-glass);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-weight: 800;
             font-size: 0.85rem;
+            color: #ffffff;
+            backdrop-filter: blur(12px);
+        }
+
+        .lm-status-pill {
+            background: rgba(74, 222, 128, 0.12);
+            border: 1px solid rgba(74, 222, 128, 0.35);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-weight: 700;
+            font-size: 0.78rem;
+            color: var(--accent-green);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(12px);
+        }
+
+        /* Bottom Right Minimap Radar */
+        #minimap-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 140px;
+            height: 180px;
+            border-radius: 12px;
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 20;
+        }
+
+        .minimap-title {
+            font-size: 0.65rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        #minimap-canvas {
+            width: 128px;
+            height: 150px;
+            border-radius: 8px;
+            background: #0d131a;
+        }
+
+        /* Swing Lab Pressure Mat Floating Tile */
+        #range-pressure-tile {
+            position: absolute;
+            bottom: 68px;
+            left: 180px;
+            width: 320px;
+            background: rgba(15, 23, 42, 0.88);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 12px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 25;
+            backdrop-filter: blur(14px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
             transition: all 0.2s ease;
+        }
+
+        .pressure-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pressure-title {
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pressure-phase-badge {
+            font-size: 0.65rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .pressure-body {
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pressure-balance-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            padding: 4px 8px;
+        }
+
+        .p-pct {
+            font-size: 0.75rem;
+            font-weight: 800;
+            font-family: 'Consolas', monospace;
+            color: #ffffff;
+        }
+
+        .p-track {
             flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
         }
-        .action-btn:hover {
-            background: #00FF66;
-            transform: translateY(-1px);
-        }
-        #btn-demo-shot {
-            background: #00FF66;
-        }
-        #btn-demo-shot:hover {
-            background: #40C4FF;
-        }
-        canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
+
+        .p-fill-l {
+            height: 100%;
+            background: var(--accent-cyan);
+            border-radius: 3px 0 0 3px;
+            transition: width 0.1s ease;
         }
     </style>
+    <script>
+        // Suppress Three.js r150+ deprecation warning for legacy UMD build
+        (function() {
+            const _warn = console.warn;
+            console.warn = function() {
+                if (arguments[0] && typeof arguments[0] === 'string' &&
+                    arguments[0].includes('are deprecated with r150+')) return;
+                _warn.apply(console, arguments);
+            };
+        })();
+    </script>
     <script src="/range/js/three.min.js"></script>
     <script src="/range/js/GLTFLoader.js"></script>
 </head>
 <body>
-    <div id="hud">
-        <div class="header-row">
-            <h2>🏌️ 3D DRIVING RANGE</h2>
-            <span id="ws-status-badge" style="font-size:0.75rem; color:#00FF66; background:rgba(0,255,102,0.15); border:1px solid #00FF66; padding:2px 8px; border-radius:12px; font-weight:bold;">● Live</span>
-        </div>
-        <div id="camera-mode-label">🎥 Cam: Golfer View [V]</div>
-        
-        <!-- Direct Number Input & Stepper Controls -->
-        <div class="target-control-box">
-            <div class="target-label-row">
-                <span>🎯 TARGET PIN DISTANCE</span>
-                <span style="font-size: 0.8rem; color: #8E94A5;">Type or Step</span>
+    <canvas id="three-canvas"></canvas>
+
+    <!-- Top Navigation Bar -->
+    <div id="top-bar">
+        <!-- Left: Studio Menu Button -->
+        <button class="btn-glass" id="btn-studio-menu">
+            <span>☰</span> Shanktuary Studio
+        </button>
+
+        <!-- Center: Range Status / Game Mode Header -->
+        <div class="glass-panel" id="challenge-pill">
+            <div class="title" id="range-mode-title">⛳ DRIVING RANGE</div>
+            <div class="stats-row" id="range-stats-row">
+                <!-- Target Distance (Always Visible) -->
+                <div class="stat-item target-clickable-badge" id="target-dist-badge-container" title="Click to enter custom distance">
+                    <span class="stat-val cyan" id="target-dist-badge">150</span>
+                    <span class="stat-unit">yds ✎</span>
+                </div>
+
+                <!-- Free Practice Status (Default Mode) -->
+                <div class="stat-item" id="practice-carry-container">
+                    <span class="stat-val" id="practice-last-carry">--</span>
+                    <span class="stat-unit">carry</span>
+                </div>
+                <div class="stat-item" id="practice-offline-container">
+                    <span class="stat-val" id="practice-last-offline">--</span>
+                    <span class="stat-unit">offline</span>
+                </div>
+
+                <!-- Target Challenge Scoring Stats (Shown when Target Challenge is Active) -->
+                <div class="stat-item" id="challenge-pts-container" style="display:none;">
+                    <span class="stat-val cyan" id="target-pts-val">0</span>
+                    <span class="stat-unit">/ 75 pts</span>
+                </div>
+                <div class="stat-item" id="challenge-prox-container" style="display:none;">
+                    <span class="stat-val" id="pin-proximity-badge">--</span>
+                    <span class="stat-unit">prox</span>
+                </div>
             </div>
-            <div class="input-row">
-                <input type="number" id="target-dist-input" min="30" max="500" step="1" value="150">
-                <button class="step-btn" id="btn-step-minus-10">-10</button>
-                <button class="step-btn" id="btn-step-minus-5">-5</button>
-                <button class="step-btn" id="btn-step-plus-5">+5</button>
-                <button class="step-btn" id="btn-step-plus-10">+10</button>
-            </div>
-            <div class="presets-row">
-                <button class="preset-btn" data-yds="75">75y</button>
-                <button class="preset-btn" data-yds="100">100y</button>
-                <button class="preset-btn" data-yds="150">150y</button>
-                <button class="preset-btn" data-yds="200">200y</button>
-                <button class="preset-btn" data-yds="250">250y</button>
-                <button class="preset-btn" data-yds="300">300y</button>
+            <div class="target-scoring-row" id="target-scoring-legend" style="display:none;">
+                <span><span class="score-dot" style="background:#1e3a8a;"></span>5 pts (Bullseye)</span>
+                <span><span class="score-dot" style="background:#60a5fa;"></span>3 pts</span>
+                <span><span class="score-dot" style="background:#f8fafc;"></span>1 pt</span>
             </div>
         </div>
 
-        <div id="telemetry-data">Ready for shot...</div>
-        
-        <div class="controls">
-            <button class="action-btn" id="btn-demo-shot">🚀 DEMO SHOT</button>
-            <button class="action-btn" id="btn-replay-shot" style="display:none; background:#00E5FF; color:#101116;">🔄 REPLAY</button>
-            <button class="action-btn" id="btn-cam-switch">🎥 CAM [V]</button>
+        <!-- Right: Toolbar Controls -->
+        <div class="toolbar-group">
+            <button class="icon-btn" id="btn-pressure-toggle" title="Toggle Swing Lab Pressure Mat [P]">⚖️</button>
+            <button class="icon-btn" id="btn-replay-shot" title="Replay Last Shot [R]">🔄</button>
+            <button class="icon-btn" id="btn-demo-shot" title="Launch Demo Shot [Space]">🚀</button>
+            <button class="icon-btn" id="btn-cam-switch" title="Camera Mode [V]">🎥</button>
+            <button class="icon-btn" id="btn-game-modes" title="Game Modes [G]">🎮</button>
+            <button class="icon-btn" id="btn-settings-toggle" title="Fairway & Range Settings [S]">🎛️</button>
         </div>
     </div>
+
+    <!-- Game Modes Selection Drawer -->
+    <div class="glass-panel" id="game-modes-drawer">
+        <div class="drawer-section-title">
+            <span>🎮 Range Game Modes</span>
+            <button class="icon-btn" id="btn-close-game-modes" style="width:24px; height:24px; font-size:0.75rem; border-radius:6px;">✕</button>
+        </div>
+        <div class="game-mode-card active" data-mode="practice">
+            <div class="game-mode-header">
+                <div class="game-mode-title">⛳ Free Practice</div>
+                <span class="game-mode-tag" id="tag-practice">Active</span>
+            </div>
+            <div class="game-mode-desc">Standard open driving range with full telemetry, custom target distance & fairway corridors. No game scoring rules.</div>
+        </div>
+        <div class="game-mode-card" data-mode="challenge">
+            <div class="game-mode-header">
+                <div class="game-mode-title">🎯 Target Challenge</div>
+                <span class="game-mode-tag" id="tag-challenge" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">10-shot / 75-point precision game. Hit concentric rings on the target green to score points and earn proximity awards.</div>
+        </div>
+        <div class="game-mode-card" data-mode="ladder">
+            <div class="game-mode-header">
+                <div class="game-mode-title">🪜 Distance Ladder</div>
+                <span class="game-mode-tag" id="tag-ladder" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Starts at 20 yards. Hit the green to climb the ladder as the pin moves back by a random 10 to 20 yards on every successful shot!</div>
+        </div>
+        <div class="game-mode-card" data-mode="closest-pin">
+            <div class="game-mode-header">
+                <div class="game-mode-title">📍 Closest to Pin</div>
+                <span class="game-mode-tag" id="tag-closest-pin" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">3-shot shootout measuring closest distance to the pin in feet. Test your approach accuracy.</div>
+        </div>
+        <div class="game-mode-card" data-mode="long-drive">
+            <div class="game-mode-header">
+                <div class="game-mode-title">💥 Long Drive</div>
+                <span class="game-mode-tag" id="tag-long-drive" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Max distance shootout. Only shots that finish within the fairway boundary corridor qualify.</div>
+        </div>
+    </div>
+
+    <!-- Floating Ladder & Target Progression Banner -->
+    <div id="ladder-banner">
+        <span id="ladder-banner-icon" style="font-size: 1.5rem;">🪜</span>
+        <div>
+            <div class="banner-title" id="ladder-banner-title">LADDER UP!</div>
+            <div class="banner-sub" id="ladder-banner-sub">Target moving to 37 yds (+17y)</div>
+        </div>
+    </div>
+
+    <!-- Left Telemetry Card Stack (Key Launch Monitor & Club Analytics Metrics) -->
+    <div id="telemetry-column">
+        <div class="tele-card">
+            <div class="tele-label">Ball Speed</div>
+            <div class="tele-val-row">
+                <span class="tele-val highlight" id="tele-ball-speed">--</span>
+                <span class="tele-unit">mph</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Club Speed</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-club-speed">--</span>
+                <span class="tele-unit">mph</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Smash Factor</div>
+            <div class="tele-val-row">
+                <span class="tele-val highlight" id="tele-smash">--</span>
+                <span class="tele-unit">ratio</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Carry Distance</div>
+            <div class="tele-val-row">
+                <span class="tele-val highlight" id="tele-carry">--</span>
+                <span class="tele-unit">yds</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Total Distance</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-total">--</span>
+                <span class="tele-unit">yds</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Launch Angle</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-launch">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Horizontal Launch</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-hla">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Closure Rate</div>
+            <div class="tele-val-row">
+                <span class="tele-val highlight" id="tele-closure-rate">--</span>
+                <span class="tele-unit">deg/s</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Club Path</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-club-path">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Face to Path</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-face-angle">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Attack Angle</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-attack-angle">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Dynamic Loft</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-dynamic-loft">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Backspin</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-backspin">--</span>
+                <span class="tele-unit">rpm</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Sidespin</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-sidespin">--</span>
+                <span class="tele-unit">rpm</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Offline</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-offline">--</span>
+                <span class="tele-unit">yds</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Apex Height</div>
+            <div class="tele-val-row">
+                <span class="tele-val highlight" id="tele-apex">--</span>
+                <span class="tele-unit">ft</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Descent Angle</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-descent">--</span>
+                <span class="tele-unit">deg</span>
+            </div>
+        </div>
+
+        <div class="tele-card">
+            <div class="tele-label">Hang Time</div>
+            <div class="tele-val-row">
+                <span class="tele-val" id="tele-hang-time">--</span>
+                <span class="tele-unit">sec</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings & Fairway Corridor Slider Drawer -->
+    <div class="glass-panel" id="settings-drawer">
+        <!-- 1. Fairway Width Tree Corridor Slider -->
+        <div class="slider-container">
+            <div class="drawer-section-title">
+                <span>🌲 Fairway Width</span>
+                <span class="slider-val-badge" id="fairway-width-readout">60 yds</span>
+            </div>
+            <input type="range" id="fairway-width-slider" min="30" max="120" step="5" value="60">
+            <div class="stepper-row">
+                <button class="step-pill" id="fw-step-minus-10">-10y</button>
+                <button class="step-pill" id="fw-step-minus-5">-5y</button>
+                <button class="step-pill" id="fw-step-plus-5">+5y</button>
+                <button class="step-pill" id="fw-step-plus-10">+10y</button>
+            </div>
+            <div class="presets-grid">
+                <button class="preset-chip" data-fw="35">35y Narrow</button>
+                <button class="preset-chip" data-fw="50">50y Tour</button>
+                <button class="preset-chip active" data-fw="60">60y Standard</button>
+                <button class="preset-chip" data-fw="80">80y Wide</button>
+                <button class="preset-chip" data-fw="100">100y Open</button>
+                <button class="preset-chip" data-fw="120">120y Max</button>
+            </div>
+        </div>
+
+        <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin: 4px 0;">
+
+        <!-- 2. Target Pin Distance Custom Input & Slider -->
+        <div class="slider-container">
+            <div class="drawer-section-title">
+                <span>🎯 Target Distance</span>
+                <span class="slider-val-badge" id="target-dist-readout">150 yds</span>
+            </div>
+
+            <!-- Custom Direct Distance Input -->
+            <div class="custom-dist-row">
+                <input type="number" id="target-custom-input" min="20" max="500" placeholder="Custom yds (e.g. 379)" class="custom-dist-input">
+                <button id="btn-set-custom-target" class="custom-dist-btn">Set</button>
+            </div>
+
+            <input type="range" id="target-dist-slider" min="20" max="500" step="1" value="150">
+            <div class="stepper-row">
+                <button class="step-pill" id="tgt-step-minus-10">-10y</button>
+                <button class="step-pill" id="tgt-step-minus-5">-5y</button>
+                <button class="step-pill" id="tgt-step-plus-5">+5y</button>
+                <button class="step-pill" id="tgt-step-plus-10">+10y</button>
+            </div>
+            <div class="presets-grid">
+                <button class="preset-chip" data-tgt="75">75y</button>
+                <button class="preset-chip" data-tgt="100">100y</button>
+                <button class="preset-chip active" data-tgt="150">150y</button>
+                <button class="preset-chip" data-tgt="200">200y</button>
+                <button class="preset-chip" data-tgt="250">250y</button>
+                <button class="preset-chip" data-tgt="300">300y</button>
+                <button class="preset-chip" data-tgt="350">350y</button>
+                <button class="preset-chip" data-tgt="400">400y</button>
+                <button class="preset-chip" data-tgt="450">450y</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating / Dockable Swing Lab Pressure Mat Tile -->
+    <div class="glass-panel" id="range-pressure-tile" style="display: none;">
+        <div class="pressure-header">
+            <span class="pressure-title">⚖️ SWING LAB</span>
+            <span class="pressure-phase-badge" id="hud-pressure-phase">ADDRESS</span>
+            <button class="icon-btn" id="btn-close-pressure-tile" style="width:20px; height:20px; font-size:0.65rem; border-radius:4px;">✕</button>
+        </div>
+        <div class="pressure-body">
+            <canvas id="range-heatmap-canvas" width="150" height="120"></canvas>
+            <canvas id="range-cop-canvas" width="120" height="120"></canvas>
+        </div>
+        <div class="pressure-balance-row">
+            <span class="p-pct" id="hud-pct-left">50% L</span>
+            <div class="p-track">
+                <div class="p-fill-l" id="hud-bar-fill-left" style="width: 50%;"></div>
+            </div>
+            <span class="p-pct" id="hud-pct-right">50% R</span>
+        </div>
+    </div>
+
+    <!-- Bottom Left Status -->
+    <div id="bottom-left-bar">
+        <div class="club-badge" id="hud-club-name">7 Iron</div>
+        <div class="lm-status-pill" id="lm-status-indicator">
+            <span style="font-size:0.6rem;">●</span>
+            <span id="lm-status-text">Nova Connected</span>
+        </div>
+    </div>
+
+    <!-- Bottom Right Minimap Radar -->
+    <div class="glass-panel" id="minimap-container">
+        <div class="minimap-title">RADAR MINIMAP</div>
+        <canvas id="minimap-canvas" width="128" height="150"></canvas>
+    </div>
+
     <script type="module" src="/range/js/main.js"></script>
 </body>
 </html>

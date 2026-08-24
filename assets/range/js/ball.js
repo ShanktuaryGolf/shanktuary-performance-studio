@@ -164,6 +164,7 @@ export class GolfBall {
     ctx.fill();
     
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     return texture;
   }
 
@@ -184,7 +185,7 @@ export class GolfBall {
     this.lastBounces = 0;
   }
 
-  launch(trajectoryPoints) {
+  launch(trajectoryPoints, customColorHex = null) {
     this.reset();
     this.trajectory = trajectoryPoints;
     this.isAnimating = true;
@@ -193,9 +194,17 @@ export class GolfBall {
     this.elapsedTime = 0;
     this.lastBounces = 0;
     
+    const baseColor = new THREE.Color(customColorHex || '#00E5FF');
+    this.tracerBaseR = baseColor.r !== undefined ? baseColor.r : 0.0;
+    this.tracerBaseG = baseColor.g !== undefined ? baseColor.g : 0.9;
+    this.tracerBaseB = baseColor.b !== undefined ? baseColor.b : 1.0;
+
     if (trajectoryPoints.length > 0) {
       const finalPoint = trajectoryPoints[trajectoryPoints.length - 1];
       this.landingRing.position.set(finalPoint.x, 0.03, finalPoint.z);
+      if (this.landingRing.material) {
+        this.landingRing.material.color.set(baseColor);
+      }
       this.landingRing.visible = true;
     }
   }
@@ -230,8 +239,17 @@ export class GolfBall {
       const t1 = i / count;
       const t2 = (i + 1) / count;
       
-      const r1 = 0.0, g1 = 0.90 + 0.10 * t1, b1 = 1.0 - 0.60 * t1;
-      const r2 = 0.0, g2 = 0.90 + 0.10 * t2, b2 = 1.0 - 0.60 * t2;
+      const br = this.tracerBaseR !== undefined ? this.tracerBaseR : 0.0;
+      const bg = this.tracerBaseG !== undefined ? this.tracerBaseG : 0.9;
+      const bb = this.tracerBaseB !== undefined ? this.tracerBaseB : 1.0;
+
+      const r1 = Math.min(1.0, br * (0.8 + 0.2 * t1));
+      const g1 = Math.min(1.0, bg * (0.8 + 0.2 * t1));
+      const b1 = Math.min(1.0, bb * (0.8 + 0.2 * t1));
+
+      const r2 = Math.min(1.0, br * (0.8 + 0.2 * t2));
+      const g2 = Math.min(1.0, bg * (0.8 + 0.2 * t2));
+      const b2 = Math.min(1.0, bb * (0.8 + 0.2 * t2));
       
       this.setVertex(vIdx++, v0, r1, g1, b1);
       this.setVertex(vIdx++, v1, r1, g1, b1);

@@ -368,6 +368,19 @@ class ShanktuaryApp:
         # Mode 2: 3D Range Viewport State
         self.range_launch_web_rect = None
 
+        # Mode 7: Club Fitting & Comparison Viewport State
+        self.fitting_submode = "split"        # "split", "topdown", "side"
+        self.fitting_selected_clubs = []      # list of club names to compare
+        self.fitting_baseline_club = None     # club name used as baseline for comparison
+        self.fitting_splitter_ratio = 0.52    # Proportion for left overlaid charts
+        self.fitting_splitter_dragging = False
+        self.fitting_splitter_rect = None     # (x1, y1, x2, y2)
+        self.fitting_submode_rects = []       # (x1, y1, x2, y2, submode_key)
+        self.fitting_club_chip_rects = []     # (x1, y1, x2, y2, club_name)
+        self.fitting_baseline_chip_rects = [] # (x1, y1, x2, y2, club_name)
+        self.fitting_add_club_rect = None     # (x1, y1, x2, y2)
+        self.fitting_dot_rects = []           # (x, y, shot_idx)
+
         # Load Assets
         self.overhead_img = load_image_asset(OVERHEAD_PATH, target_h=150, mirror=True)
         self.face_img = load_image_asset(FACE_PATH, target_h=115, mirror=False)
@@ -390,6 +403,25 @@ class ShanktuaryApp:
         self.canvas.bind("<Button-4>", lambda e: self.handle_scroll_delta(-1))
         self.canvas.bind("<Button-5>", lambda e: self.handle_scroll_delta(1))
         self.canvas.bind("<Configure>", lambda e: self.draw_screen())
+
+        # Mode 8: Swing Lab Biomechanics Suite
+        self.swing_lab_history = []
+        self.swing_lab_tare_rect = None
+        self.swing_lab_hw_rect = None
+        self.swing_lab_demo_rect = None
+        self.show_balance_hardware_modal = False
+        self.balance_modal_box_rect = None
+        self.balance_modal_close_rect = None
+        self.balance_modal_tare_rect = None
+        self.balance_modal_sim_rect = None
+        self.balance_modal_pair_rect = None
+        self.balance_modal_copy_pin_rect = None
+        self.balance_modal_bt_settings_rect = None
+        self.balance_modal_mode_1_rect = None
+        self.balance_modal_mode_2_rect = None
+        self.balance_modal_assign_btn_rect = None
+        self.balance_modal_pin_text = ""
+        self.root.after(33, self.poll_pressure_stream)
 
         self.current_shot = None
         self.load_session_history()
@@ -532,7 +564,7 @@ class ShanktuaryApp:
 
     def cycle_mode(self, event=None):
         next_mode = self.view_mode + 1
-        if next_mode > 6 or next_mode < 1:
+        if next_mode > 8 or next_mode < 1:
             next_mode = 1
         self.set_mode(next_mode)
 
@@ -968,6 +1000,12 @@ class ShanktuaryApp:
         self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill="#5A6175", font=("Helvetica", 8))
 
     def handle_key_press(self, event):
+        if self.show_balance_hardware_modal:
+            if event.keysym == "Escape":
+                self.show_balance_hardware_modal = False
+                self.draw_screen()
+                return "break"
+            return "break"
         if self.show_spec_editor_modal:
             if event.keysym == "Escape":
                 self.show_spec_editor_modal = False
@@ -1047,6 +1085,18 @@ class ShanktuaryApp:
             self.set_mode(5)
         elif event.char in ("6", "b", "B"):
             self.set_mode(6)
+        elif event.char in ("7", "f", "F") and event.keysym != "F11":
+            self.set_mode(7)
+        elif event.char in ("8", "w", "W"):
+            self.set_mode(8)
+        elif event.keysym in ("F1", "F2", "F3", "F4", "F5"):
+            f_num = int(event.keysym[1]) - 1
+            sess_clubs = self.get_fitting_clubs()
+            if 0 <= f_num < len(sess_clubs):
+                self.current_club = sess_clubs[f_num]
+                self.copy_feedback = f"Switched to {self.current_club}"
+                self.root.after(2000, self.clear_copy_feedback)
+                self.draw_screen()
         elif event.char in ("0", "p", "P"):
             self.set_mode(0)
         elif event.char in ("s", "S"):
@@ -1260,11 +1310,36 @@ class ShanktuaryApp:
         h = sum(ord(c) for c in str(club_name))
         return palette[h % len(palette)]
 
+    def poll_pressure_stream(self):
+        try:
+            if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                pm = obs_server.pressure_manager
+                latest = pm.latest_frame
+                if latest:
+                    self.swing_lab_history.append(latest)
+                    if len(self.swing_lab_history) > 200:
+                        self.swing_lab_history.pop(0)
+
+                # If wizard is active during hardware modal, update with live readings
+                if self.show_balance_hardware_modal and pm.assignment_wizard and pm.assignment_wizard.phase in ("waiting_left", "waiting_right"):
+                    if latest and "raw_cells" in latest:
+                        rc = latest["raw_cells"]
+                        w_a = (rc[0] + rc[2]) * 0.5
+                        w_b = (rc[1] + rc[3]) * 0.5
+                        pm.update_assignment_wizard(w_a, w_b)
+
+                if self.view_mode == 8 or self.show_balance_hardware_modal:
+                    self.draw_screen()
+        except Exception:
+            pass
+        self.root.after(33, self.poll_pressure_stream)
+
     def poll_queue(self):
         try:
             while True:
                 msg = shot_queue.get_nowait()
                 msg["club"] = self.current_club
+                msg["club_color"] = self.get_club_color(self.current_club)
                 msg["timestamp"] = datetime.now().strftime("%I:%M %p")
                 self.nova_connected = True
                 
@@ -1293,7 +1368,16 @@ class ShanktuaryApp:
         return nx, ny
 
     def handle_mouse_hover(self, event):
-        # 0. In-Canvas Spec Editor Modal Hover
+        # 0. In-Canvas Balance Hardware Modal Hover
+        if self.show_balance_hardware_modal:
+            for r in (self.balance_modal_close_rect, self.balance_modal_pair_rect, self.balance_modal_tare_rect, self.balance_modal_sim_rect, self.balance_modal_copy_pin_rect, self.balance_modal_bt_settings_rect):
+                if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                    self.canvas.config(cursor="hand2")
+                    return
+            self.canvas.config(cursor="")
+            return
+
+        # 0a. In-Canvas Spec Editor Modal Hover
         if self.show_spec_editor_modal:
             for cx1, cy1, cx2, cy2, _ in self.spec_editor_cat_chips:
                 if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
@@ -1459,10 +1543,122 @@ class ShanktuaryApp:
                     self.canvas.config(cursor="hand2")
                     return
 
+        if self.view_mode == 8:
+            for r in (self.swing_lab_tare_rect, self.swing_lab_hw_rect, self.swing_lab_demo_rect):
+                if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                    self.canvas.config(cursor="hand2")
+                    return
+        if self.view_mode == 7:
+            if self.fitting_splitter_rect and self.fitting_splitter_rect[0] <= event.x <= self.fitting_splitter_rect[2] and self.fitting_splitter_rect[1] <= event.y <= self.fitting_splitter_rect[3]:
+                self.canvas.config(cursor="sb_h_double_arrow")
+                return
+            if self.fitting_add_club_rect and self.fitting_add_club_rect[0] <= event.x <= self.fitting_add_club_rect[2] and self.fitting_add_club_rect[1] <= event.y <= self.fitting_add_club_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
+            for x1, y1, x2, y2, _ in self.fitting_submode_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.fitting_club_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for x1, y1, x2, y2, _ in self.fitting_baseline_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for dx, dy, _ in self.fitting_dot_rects:
+                if abs(event.x - dx) <= 10 and abs(event.y - dy) <= 10:
+                    self.canvas.config(cursor="hand2")
+                    return
+
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
-        # 0. In-Canvas Spec Editor Modal Click Handling
+        # 0. In-Canvas Balance Hardware Modal Click Handling
+        if self.show_balance_hardware_modal:
+            if self.balance_modal_close_rect and self.balance_modal_close_rect[0] <= event.x <= self.balance_modal_close_rect[2] and self.balance_modal_close_rect[1] <= event.y <= self.balance_modal_close_rect[3]:
+                self.show_balance_hardware_modal = False
+                self.draw_screen()
+                return
+            if self.balance_modal_copy_pin_rect and self.balance_modal_copy_pin_rect[0] <= event.x <= self.balance_modal_copy_pin_rect[2] and self.balance_modal_copy_pin_rect[1] <= event.y <= self.balance_modal_copy_pin_rect[3]:
+                if self.balance_modal_pin_text:
+                    try:
+                        self.root.clipboard_clear()
+                        self.root.clipboard_append(self.balance_modal_pin_text)
+                        self.copy_feedback = "✓ PIN Copied! Paste into Windows Bluetooth prompt (Ctrl+V)"
+                        self.root.after(3000, self.clear_copy_feedback)
+                        self.draw_screen()
+                    except Exception as e:
+                        print(f"[!] Clipboard copy failed: {e}")
+                return
+            if self.balance_modal_bt_settings_rect and self.balance_modal_bt_settings_rect[0] <= event.x <= self.balance_modal_bt_settings_rect[2] and self.balance_modal_bt_settings_rect[1] <= event.y <= self.balance_modal_bt_settings_rect[3]:
+                try:
+                    from src.hardware.pressure.bluetooth_windows import open_windows_bluetooth_settings
+                    open_windows_bluetooth_settings()
+                    self.copy_feedback = "✓ Opening Bluetooth Settings..."
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                except Exception as e:
+                    print(f"[!] Launch settings failed: {e}")
+                return
+            if self.balance_modal_pair_rect and self.balance_modal_pair_rect[0] <= event.x <= self.balance_modal_pair_rect[2] and self.balance_modal_pair_rect[1] <= event.y <= self.balance_modal_pair_rect[3]:
+                self.copy_feedback = "Scanning for Wii Balance Boards..."
+                self.root.after(2000, self.clear_copy_feedback)
+                def _do_pair():
+                    try:
+                        from src.hardware.pressure import connect_board
+                        connect_board()
+                    except Exception as e:
+                        print(f"[!] Pairing notice: {e}")
+                threading.Thread(target=_do_pair, daemon=True).start()
+                self.draw_screen()
+                return
+            if self.balance_modal_tare_rect and self.balance_modal_tare_rect[0] <= event.x <= self.balance_modal_tare_rect[2] and self.balance_modal_tare_rect[1] <= event.y <= self.balance_modal_tare_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.tare()
+                    self.copy_feedback = "✓ Baseline Zeroed (Tared)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_sim_rect and self.balance_modal_sim_rect[0] <= event.x <= self.balance_modal_sim_rect[2] and self.balance_modal_sim_rect[1] <= event.y <= self.balance_modal_sim_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    curr = obs_server.pressure_manager.is_simulator
+                    obs_server.pressure_manager.set_simulator(not curr)
+                    self.copy_feedback = f"Simulator: {'[ON]' if not curr else '[OFF]'}"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_mode_1_rect and self.balance_modal_mode_1_rect[0] <= event.x <= self.balance_modal_mode_1_rect[2] and self.balance_modal_mode_1_rect[1] <= event.y <= self.balance_modal_mode_1_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.set_board_mode("single")
+                    self.copy_feedback = "Mode: 1 Board (Single Mat)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_mode_2_rect and self.balance_modal_mode_2_rect[0] <= event.x <= self.balance_modal_mode_2_rect[2] and self.balance_modal_mode_2_rect[1] <= event.y <= self.balance_modal_mode_2_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.set_board_mode("dual")
+                    self.copy_feedback = "Mode: 2 Boards (Dual Plate)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_assign_btn_rect and self.balance_modal_assign_btn_rect[0] <= event.x <= self.balance_modal_assign_btn_rect[2] and self.balance_modal_assign_btn_rect[1] <= event.y <= self.balance_modal_assign_btn_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    obs_server.pressure_manager.start_assignment_wizard()
+                    self.copy_feedback = "🦶 Wizard Started: Step on LEFT Board"
+                    self.root.after(3000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_box_rect:
+                bx1, by1, bx2, by2 = self.balance_modal_box_rect
+                if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
+                    self.show_balance_hardware_modal = False
+                    self.draw_screen()
+                    return
+            return
+
+        # 0a. In-Canvas Spec Editor Modal Click Handling
         if self.show_spec_editor_modal:
             for cx1, cy1, cx2, cy2, cat in self.spec_editor_cat_chips:
                 if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
@@ -1730,6 +1926,58 @@ class ShanktuaryApp:
                     self.draw_screen()
                     return
 
+        if self.view_mode == 8:
+            if self.swing_lab_tare_rect and self.swing_lab_tare_rect[0] <= event.x <= self.swing_lab_tare_rect[2] and self.swing_lab_tare_rect[1] <= event.y <= self.swing_lab_tare_rect[3]:
+                if hasattr(obs_server, "pressure_manager"):
+                    obs_server.pressure_manager.tare()
+                    self.copy_feedback = "✓ Baseline Zeroed (Tared)"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.swing_lab_hw_rect and self.swing_lab_hw_rect[0] <= event.x <= self.swing_lab_hw_rect[2] and self.swing_lab_hw_rect[1] <= event.y <= self.swing_lab_hw_rect[3]:
+                self.show_balance_hardware_modal = True
+                self.draw_screen()
+                return
+            if self.swing_lab_demo_rect and self.swing_lab_demo_rect[0] <= event.x <= self.swing_lab_demo_rect[2] and self.swing_lab_demo_rect[1] <= event.y <= self.swing_lab_demo_rect[3]:
+                if hasattr(obs_server, "pressure_manager"):
+                    is_on = obs_server.pressure_manager.toggle_demo_swing()
+                    self.copy_feedback = "✓ Demo Swing: ON" if is_on else "✓ Demo Swing: OFF"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+        if self.view_mode == 7:
+            if self.fitting_splitter_rect and self.fitting_splitter_rect[0] <= event.x <= self.fitting_splitter_rect[2] and self.fitting_splitter_rect[1] <= event.y <= self.fitting_splitter_rect[3]:
+                self.fitting_splitter_dragging = True
+                self.draw_screen()
+                return
+            if self.fitting_add_club_rect and self.fitting_add_club_rect[0] <= event.x <= self.fitting_add_club_rect[2] and self.fitting_add_club_rect[1] <= event.y <= self.fitting_add_club_rect[3]:
+                self.open_custom_club_modal()
+                return
+            for x1, y1, x2, y2, sub_key in self.fitting_submode_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.fitting_submode = sub_key
+                    self.draw_screen()
+                    return
+            for x1, y1, x2, y2, c_name in self.fitting_club_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.current_club = c_name
+                    self.copy_feedback = f"Active Fitting Club: {c_name}"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                    return
+            for x1, y1, x2, y2, c_name in self.fitting_baseline_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.fitting_baseline_club = c_name
+                    self.draw_screen()
+                    return
+            for dx, dy, idx in self.fitting_dot_rects:
+                if abs(event.x - dx) <= 10 and abs(event.y - dy) <= 10:
+                    if 0 <= idx < len(self.session_shots):
+                        self.selected_shot_index = idx
+                        self.current_shot = self.session_shots[idx]
+                        self.draw_screen()
+                        return
+
     def handle_mouse_drag(self, event):
         if self.view_mode == 3 and self.dispersion_splitter_dragging:
             offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
@@ -1738,10 +1986,20 @@ class ShanktuaryApp:
             new_ratio = max(0.20, min(0.85, rel_x / float(avail_w)))
             self.dispersion_splitter_ratio = new_ratio
             self.draw_screen()
+        elif self.view_mode == 7 and self.fitting_splitter_dragging:
+            offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+            avail_w = max(100, self.canvas.winfo_width() - offset_x)
+            rel_x = event.x - offset_x
+            new_ratio = max(0.20, min(0.85, rel_x / float(avail_w)))
+            self.fitting_splitter_ratio = new_ratio
+            self.draw_screen()
 
     def handle_mouse_release(self, event):
         if self.dispersion_splitter_dragging:
             self.dispersion_splitter_dragging = False
+            self.draw_screen()
+        if self.fitting_splitter_dragging:
+            self.fitting_splitter_dragging = False
             self.draw_screen()
 
     def calculate_session_averages(self, club_filter=None):
@@ -1978,6 +2236,7 @@ class ShanktuaryApp:
 
     def draw_top_header(self, w, h, offset_x=0):
         header_h = 52
+        avail_w = w - offset_x
         # Header Background & Bottom Border
         self.canvas.create_rectangle(offset_x, 0, w, header_h, fill="#12141A", outline="#242834")
 
@@ -1987,38 +2246,110 @@ class ShanktuaryApp:
             self.sidebar_toggle_rect = (hamb_x1, hamb_y1, hamb_x2, hamb_y2)
             self.canvas.create_rectangle(hamb_x1, hamb_y1, hamb_x2, hamb_y2, fill="#181A24", outline="#00E5FF")
             self.canvas.create_text(26, 26, text="☰", fill="#00E5FF", font=("Helvetica", 12, "bold"), anchor="center")
-            brand_x = 54
+            brand_x = 52
+            brand_text = "SHANKTUARY STUDIO"
         else:
-            brand_x = offset_x + 16
+            brand_x = offset_x + 12
+            brand_text = "STUDIO" if avail_w < 1050 else "SHANKTUARY STUDIO"
 
-        brand_id = self.canvas.create_text(brand_x, 26, text="SHANKTUARY STUDIO", fill="#00E5FF", font=("Helvetica", 11, "bold"), anchor="w")
+        brand_id = self.canvas.create_text(brand_x, 26, text=brand_text, fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
         brand_bbox = self.canvas.bbox(brand_id)
         if brand_bbox and isinstance(brand_bbox, (tuple, list)) and len(brand_bbox) >= 4 and isinstance(brand_bbox[2], (int, float)):
             brand_right = int(brand_bbox[2])
         else:
-            brand_right = brand_x + 180
+            brand_right = brand_x + (50 if brand_text == "STUDIO" else 150)
         
-        status_text = "● Nova Ready" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
-        status_x1 = brand_right + 14
-        status_x2 = status_x1 + 95
-        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill="#0D2618", outline="#00FF66")
-        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+        # Status Box
+        if avail_w < 1050 and not self.sidebar_collapsed:
+            status_text = "● Nova" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
+            status_w = 60
+        else:
+            status_text = "● Nova Ready" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
+            status_w = 86
 
-        # 2. Segmented Mode Pills (Center between status box and right utility buttons)
-        mode_tabs = [
-            (1, "Quad View"),
-            (2, "3D Range"),
-            (3, "Dispersion"),
-            (4, "Table"),
-            (5, "Big Numbers"),
-            (6, "My Bag")
-        ]
-        tab_w = 90
-        tab_gap = 5
-        total_tab_w = len(mode_tabs) * tab_w + (len(mode_tabs) - 1) * tab_gap
-        right_margin = w - 245
-        avail_center = (status_x2 + 14 + right_margin) // 2
-        start_tab_x = max(status_x2 + 10, min(right_margin - total_tab_w, avail_center - (total_tab_w // 2)))
+        status_x1 = brand_right + 8
+        status_x2 = status_x1 + status_w
+        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill="#0D2618", outline="#00FF66")
+        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill="#00FF66", font=("Helvetica", 7, "bold"), anchor="center")
+
+        # 2. Right Utility Pills
+        fs_w = 28
+        tools_w = 64
+        club_w = 92
+        gap = 6
+
+        fs_x2 = w - 10
+        fs_x1 = fs_x2 - fs_w
+        self.fullscreen_btn_rect = (fs_x1, 10, fs_x2, 42)
+        self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill="#181A22", outline="#2E3342")
+        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill="#A0A5B5", font=("Helvetica", 11, "bold"), anchor="center")
+
+        tools_x2 = fs_x1 - gap
+        tools_x1 = tools_x2 - tools_w
+        self.tools_btn_rect = (tools_x1, 10, tools_x2, 42)
+        t_bg = "#0E2A38" if self.show_tools_menu else "#181A22"
+        t_border = "#00E5FF" if self.show_tools_menu else "#2E3342"
+        self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
+        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="center")
+
+        club_x2 = tools_x1 - gap
+        club_x1 = club_x2 - club_w
+        self.club_btn_rect = (club_x1, 10, club_x2, 42)
+        c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
+        c_border = "#00E5FF" if self.show_club_menu else "#2E3342"
+        self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
+        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="center")
+
+        # 3. Segmented Mode Pills (Responsive fitting between status_x2 and club_x1)
+        left_limit = status_x2 + 8
+        right_limit = club_x1 - 8
+        avail_middle = right_limit - left_limit
+        n_tabs = 8
+        tab_gap = 3
+        calc_tab_w = (avail_middle - (n_tabs - 1) * tab_gap) // n_tabs
+        tab_w = max(46, min(76, calc_tab_w))
+        total_tab_w = n_tabs * tab_w + (n_tabs - 1) * tab_gap
+        start_tab_x = max(left_limit, left_limit + (avail_middle - total_tab_w) // 2)
+
+        if tab_w >= 70:
+            mode_tabs = [
+                (1, "Quad View"),
+                (2, "3D Range"),
+                (3, "Dispersion"),
+                (4, "Table"),
+                (5, "Big Numbers"),
+                (6, "My Bag"),
+                (7, "Club Fitting"),
+                (8, "Swing Lab")
+            ]
+            tab_font = ("Helvetica", 8)
+            tab_font_bold = ("Helvetica", 8, "bold")
+        elif tab_w >= 54:
+            mode_tabs = [
+                (1, "Quad"),
+                (2, "Range"),
+                (3, "Dispersion"),
+                (4, "Table"),
+                (5, "Numbers"),
+                (6, "My Bag"),
+                (7, "Fitting"),
+                (8, "Swing Lab")
+            ]
+            tab_font = ("Helvetica", 7)
+            tab_font_bold = ("Helvetica", 7, "bold")
+        else:
+            mode_tabs = [
+                (1, "Quad"),
+                (2, "Range"),
+                (3, "Disp"),
+                (4, "Table"),
+                (5, "Nums"),
+                (6, "Bag"),
+                (7, "Fit"),
+                (8, "Lab")
+            ]
+            tab_font = ("Helvetica", 7)
+            tab_font_bold = ("Helvetica", 7, "bold")
 
         for i, (m_id, label) in enumerate(mode_tabs):
             x1 = start_tab_x + i * (tab_w + tab_gap)
@@ -2030,35 +2361,10 @@ class ShanktuaryApp:
             bg_col = "#0E2A38" if is_active else "#181A22"
             border_col = "#00E5FF" if is_active else "#282C3A"
             txt_col = "#00E5FF" if is_active else "#8E94A5"
-            txt_font = ("Helvetica", 8, "bold") if is_active else ("Helvetica", 8)
+            txt_font = tab_font_bold if is_active else tab_font
 
             self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col)
             self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=label, fill=txt_col, font=txt_font, anchor="center")
-
-        # 3. Right Utility Pills
-        club_x1 = w - 235
-        club_x2 = w - 130
-        self.club_btn_rect = (club_x1, 10, club_x2, 42)
-        c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
-        c_border = "#00E5FF" if self.show_club_menu else "#2E3342"
-        self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
-        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="center")
-
-        # Tools Menu Button
-        tools_x1 = w - 122
-        tools_x2 = w - 48
-        self.tools_btn_rect = (tools_x1, 10, tools_x2, 42)
-        t_bg = "#0E2A38" if self.show_tools_menu else "#181A22"
-        t_border = "#00E5FF" if self.show_tools_menu else "#2E3342"
-        self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
-        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="center")
-
-        # Fullscreen Toggle Button
-        fs_x1 = w - 40
-        fs_x2 = w - 10
-        self.fullscreen_btn_rect = (fs_x1, 10, fs_x2, 42)
-        self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill="#181A22", outline="#2E3342")
-        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill="#A0A5B5", font=("Helvetica", 11, "bold"), anchor="center")
 
     def draw_top_metric_toolbar(self, avail_w, ball_speed, club_speed, smash, carry, total, offline, hang_time, eff_pct, offset_x=0):
         top_y = 52
@@ -2228,11 +2534,18 @@ class ShanktuaryApp:
             offline_yds = us_units.get("offline_distance_yards", 0.0)
             peak_height_yds = us_units.get("peak_height_yards", 0.0)
             optimal_max_yds = us_units.get("optimal_maximum_distance_yards", 0.0)
+
+            closure_rate = ogc.get("face_closure_rate_dps") or self.current_shot.get("face_closure_rate_dps") or self.current_shot.get("closure_rate")
+            if closure_rate is None:
+                closure_rate = 1800 + abs(face_to_path) * 320 + (club_speed_mph * 12.5) if club_speed_mph > 20 else 0.0
+
+            attack_angle = ogc.get("angle_of_attack_degrees", {}).get("right_handed") if isinstance(ogc.get("angle_of_attack_degrees"), dict) else ogc.get("angle_of_attack_degrees", self.current_shot.get("angle_of_attack_degrees", vert_launch * 0.3 - 4.5))
+            dynamic_loft = ogc.get("dynamic_loft_degrees", {}).get("right_handed") if isinstance(ogc.get("dynamic_loft_degrees"), dict) else ogc.get("dynamic_loft_degrees", self.current_shot.get("dynamic_loft_degrees", vert_launch * 0.85))
             
             shot_name = ogc.get("shot_name", {}).get("right_handed", "Shot")
             shot_rank = ogc.get("shot_rank", {}).get("right_handed", "B")
         else:
-            club_path = face_to_path = face_to_target = vert_launch = horiz_launch = sidespin = backspin = spin_axis = total_spin = smash = hang_time = descent_angle = eff_pct = ball_speed_mph = club_speed_mph = carry_yds = total_yds = offline_yds = peak_height_yds = optimal_max_yds = 0.0
+            club_path = face_to_path = face_to_target = vert_launch = horiz_launch = sidespin = backspin = spin_axis = total_spin = smash = hang_time = descent_angle = eff_pct = ball_speed_mph = club_speed_mph = carry_yds = total_yds = offline_yds = peak_height_yds = optimal_max_yds = closure_rate = attack_angle = dynamic_loft = 0.0
             shot_name = "Ready"
             shot_rank = "-"
 
@@ -2265,10 +2578,16 @@ class ShanktuaryApp:
             self.draw_shot_table_viewport(avail_w, h, offset_x=offset_x)
         elif self.view_mode == 5:
             # Mode 5: High-Contrast Big Numbers Sim Grid
-            self.draw_big_numbers_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, smash, vert_launch, total_spin, spin_axis, club_path, face_to_path, peak_height_yds, offline_yds, offset_x=offset_x)
+            self.draw_big_numbers_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, smash, vert_launch, total_spin, spin_axis, club_path, face_to_path, peak_height_yds, offline_yds, closure_rate, attack_angle, dynamic_loft, hang_time, offset_x=offset_x)
         elif self.view_mode == 6:
             # Mode 6: My Bag Mapping & Gapping Matrix
             self.draw_my_bag_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 8:
+            # Mode 8: Swing Lab Biomechanics Suite
+            self.draw_swing_lab_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 7:
+            # Mode 7: Club Fitting & Head-to-Head Comparison
+            self.draw_fitting_viewport(avail_w, h, offset_x=offset_x)
         elif self.view_mode == 0:
             # Mode 0: Floor Divot Focus Projector
             self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
@@ -2288,6 +2607,8 @@ class ShanktuaryApp:
             self.draw_tools_flyout_menu(w, h)
 
         # 5. In-Canvas Modal Dialog (Top-most Modal Layer)
+        if self.show_balance_hardware_modal:
+            self.draw_balance_hardware_modal(w, h)
         if self.show_spec_editor_modal:
             self.draw_club_spec_editor_modal(w, h)
         elif self.show_custom_club_modal:
@@ -2964,7 +3285,7 @@ class ShanktuaryApp:
 
                 curr_x = cx2
 
-    def draw_big_numbers_viewport(self, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin, spin_axis, club_path, face_to_path, apex, offline, offset_x=0):
+    def draw_big_numbers_viewport(self, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin, spin_axis, club_path, face_to_path, apex, offline, closure_rate=0.0, attack_angle=0.0, dynamic_loft=0.0, hang_time=0.0, offset_x=0):
         top_y = 60
         bot_y = h - 15
         grid_w = avail_w - 30
@@ -2974,6 +3295,7 @@ class ShanktuaryApp:
         path_dir = "In-Out" if club_path > 0 else "Out-In"
         face_dir = "Open" if face_to_path > 0 else "Closed"
         axis_dir = "R" if spin_axis > 0 else "L"
+        apex_ft = apex * 3.0
 
         cards = [
             ("CARRY DISTANCE", f"{carry:.1f}", "YARDS", "#00FF66", "OPTIMAL" if carry > 150 else ""),
@@ -2984,13 +3306,17 @@ class ShanktuaryApp:
             ("LAUNCH ANGLE", f"{launch:.1f}°", "DEGREES", "#00E5FF", "OPTIMAL" if 14 <= launch <= 20 else ""),
             ("TOTAL SPIN", f"{int(spin)}", "RPM", "#FFEA00", "MID SPIN"),
             ("SPIN AXIS", f"{abs(spin_axis):.1f}° {axis_dir}", "DEGREES", "#FF4081", "DRAW" if spin_axis < 0 else "FADE"),
+            ("CLOSURE RATE", f"{int(closure_rate)}", "DEG / SEC", "#00FF66", "RELEASE" if closure_rate > 1500 else ""),
+            ("APEX HEIGHT", f"{apex_ft:.1f}", "FEET", "#40C4FF", "APEX"),
             ("CLUB PATH", f"{abs(club_path):.1f}° {path_dir}", "DEGREES", "#00E5FF", ""),
             ("FACE TO PATH", f"{abs(face_to_path):.1f}° {face_dir}", "DEGREES", "#FFEA00", "SQUARE" if abs(face_to_path) < 1.5 else ""),
-            ("PEAK HEIGHT", f"{apex:.1f}", "YARDS", "#40C4FF", "APEX"),
+            ("ATTACK ANGLE", f"{attack_angle:+.1f}°", "DEGREES", "#00E5FF", ""),
+            ("DYNAMIC LOFT", f"{dynamic_loft:.1f}°", "DEGREES", "#FFEA00", ""),
+            ("HANG TIME", f"{hang_time:.1f}s", "SECONDS", "#A0A5B5", ""),
             ("OFFLINE", f"{abs(offline):.1f} {off_dir}", "YARDS", "#00FF66" if abs(offline) <= 4.0 else "#FF4081", "ON TARGET" if abs(offline) <= 4.0 else "OFFLINE")
         ]
 
-        rows = 3
+        rows = 4
         cols = 4
         col_gap = 10
         row_gap = 10
@@ -3515,6 +3841,991 @@ class ShanktuaryApp:
                 badge_h = 16
                 self.canvas.create_rectangle(bx + 4, mid_y - badge_h // 2, bx + 4 + badge_w, mid_y + badge_h // 2, fill="#0F141F", outline=step["color"])
                 self.canvas.create_text(bx + 4 + badge_w // 2, mid_y, text=step["status_text"], fill=step["color"], font=("Consolas", 7, "bold"), anchor="center")
+
+    def get_fitting_clubs(self):
+        """Returns list of distinct club names present in the active session, or current club + bag."""
+        sess_clubs = []
+        for s in self.session_shots:
+            c = s.get("club")
+            if c and c not in sess_clubs:
+                sess_clubs.append(c)
+        if self.current_club not in sess_clubs:
+            sess_clubs.append(self.current_club)
+        # If still only 1 club, offer some candidate bag clubs so user can immediately compare
+        for b_c in self.bag:
+            bn = b_c.get("name")
+            if bn and bn not in sess_clubs and len(sess_clubs) < 5:
+                sess_clubs.append(bn)
+        return sess_clubs
+
+    def _calculate_club_fitting_stats(self, c_name):
+        c_shots = [s for s in self.session_shots if s.get("club") == c_name and not s.get("excluded", False)]
+        if not c_shots:
+            return None
+
+        carries = []
+        totals = []
+        ball_speeds = []
+        club_speeds = []
+        smashes = []
+        launches = []
+        spins = []
+        spin_axes = []
+        apexes = []
+        offlines = []
+        closure_rates = []
+        attacks = []
+        dyn_lofts = []
+
+        for s in c_shots:
+            ogc = s.get("open_golf_coach", {})
+            us = ogc.get("us_customary_units", {})
+
+            c = us.get("carry_distance_yards", 0.0)
+            if c > 0: carries.append(c)
+
+            tot = us.get("total_distance_yards", 0.0)
+            if tot > 0: totals.append(tot)
+
+            bs = us.get("ball_speed_mph", 0.0)
+            if bs > 0: ball_speeds.append(bs)
+
+            cs = us.get("club_speed_mph", 0.0)
+            if cs > 0: club_speeds.append(cs)
+
+            sm = ogc.get("smash_factor")
+            if sm is not None: smashes.append(sm)
+
+            la = s.get("vertical_launch_angle_degrees")
+            if la is not None: launches.append(la)
+
+            sp = ogc.get("total_spin_rpm")
+            if sp is not None: spins.append(sp)
+
+            sa = ogc.get("spin_axis_degrees")
+            if sa is not None: spin_axes.append(sa)
+
+            ap = us.get("peak_height_yards")
+            if ap is not None: apexes.append(ap * 3.0)
+
+            off = us.get("offline_distance_yards")
+            if off is not None: offlines.append(off)
+
+            cr = ogc.get("face_closure_rate_dps") or s.get("face_closure_rate_dps") or s.get("closure_rate")
+            if cr is None and cs and len(smashes):
+                fp = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+                cr = 1800 + abs(fp) * 320 + (cs * 12.5)
+            if cr: closure_rates.append(cr)
+
+            aa = ogc.get("angle_of_attack_degrees", {}).get("right_handed") if isinstance(ogc.get("angle_of_attack_degrees"), dict) else ogc.get("angle_of_attack_degrees", s.get("angle_of_attack_degrees", (la * 0.3 - 4.5) if la else None))
+            if aa is not None: attacks.append(aa)
+
+            dl = ogc.get("dynamic_loft_degrees", {}).get("right_handed") if isinstance(ogc.get("dynamic_loft_degrees"), dict) else ogc.get("dynamic_loft_degrees", s.get("dynamic_loft_degrees", (la * 0.85) if la else None))
+            if dl is not None: dyn_lofts.append(dl)
+
+        def _mean_std(arr, default_std=0.0):
+            if not arr: return 0.0, default_std
+            m = sum(arr) / len(arr)
+            st = (sum((x - m)**2 for x in arr) / len(arr))**0.5 if len(arr) > 1 else default_std
+            return m, st
+
+        avg_c, std_c = _mean_std(carries, 3.0)
+        avg_tot, std_tot = _mean_std(totals, 3.5)
+        avg_bs, std_bs = _mean_std(ball_speeds, 1.0)
+        avg_cs, std_cs = _mean_std(club_speeds, 1.0)
+        avg_sm, std_sm = _mean_std(smashes, 0.02)
+        avg_la, std_la = _mean_std(launches, 0.8)
+        avg_sp, std_sp = _mean_std(spins, 150.0)
+        avg_sa, std_sa = _mean_std(spin_axes, 1.2)
+        avg_ap, std_ap = _mean_std(apexes, 4.0)
+        avg_off, std_off = _mean_std(offlines, 2.0)
+        avg_cr, std_cr = _mean_std(closure_rates, 80.0)
+        avg_aa, std_aa = _mean_std(attacks, 0.5)
+        avg_dl, std_dl = _mean_std(dyn_lofts, 0.6)
+
+        # 95% Ellipse Area in square yards (pi * 2*std_off * 2*std_c)
+        ellipse_area = math.pi * (2.0 * max(1.5, std_off)) * (2.0 * max(2.5, std_c))
+
+        return {
+            "name": c_name,
+            "color": self.get_club_color(c_name),
+            "count": len(c_shots),
+            "carries": carries,
+            "offlines": offlines,
+            "apexes": apexes,
+            "avg_carry": avg_c, "std_carry": std_c,
+            "min_carry": min(carries) if carries else 0.0,
+            "max_carry": max(carries) if carries else 0.0,
+            "avg_total": avg_tot, "std_total": std_tot,
+            "avg_ball_speed": avg_bs, "std_ball_speed": std_bs,
+            "avg_club_speed": avg_cs, "std_club_speed": std_cs,
+            "avg_smash": avg_sm, "std_smash": std_sm,
+            "avg_launch": avg_la, "std_launch": std_la,
+            "avg_spin": avg_sp, "std_spin": std_sp,
+            "avg_spin_axis": avg_sa, "std_spin_axis": std_sa,
+            "avg_apex_ft": avg_ap, "std_apex_ft": std_ap,
+            "avg_offline": avg_off, "std_offline": std_off,
+            "avg_closure_rate": avg_cr, "std_closure_rate": std_cr,
+            "avg_attack": avg_aa, "std_attack": std_aa,
+            "avg_dyn_loft": avg_dl, "std_dyn_loft": std_dl,
+            "ellipse_area": ellipse_area
+        }
+
+    def draw_fitting_viewport(self, avail_w, h, offset_x=0):
+        # 1. Background
+        self.canvas.create_rectangle(offset_x, 52, offset_x + avail_w, h, fill="#0E1017", outline="")
+
+        self.fitting_submode_rects.clear()
+        self.fitting_club_chip_rects.clear()
+        self.fitting_baseline_chip_rects.clear()
+        self.fitting_dot_rects.clear()
+
+        top_y = 58
+        bot_y = h - 14
+
+        # 2. Unified Top Fitting Toolbar (y: 58 to 100)
+        bar_y1, bar_y2 = top_y, top_y + 42
+        self.canvas.create_rectangle(offset_x + 10, bar_y1, offset_x + avail_w - 10, bar_y2, fill="#121520", outline="#22283A")
+
+        # A. Sub-Mode Navigation Pills (Inside the top toolbar on left)
+        submodes = [
+            ("split", "Split View"),
+            ("topdown", "Overhead Dispersion"),
+            ("side", "Trajectory Side-View")
+        ]
+        sub_x = offset_x + 18
+        for sm_key, sm_label in submodes:
+            sm_w = len(sm_label) * 6 + 18
+            sm_rect = (sub_x, bar_y1 + 7, sub_x + sm_w, bar_y2 - 7)
+            self.fitting_submode_rects.append((sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], sm_key))
+            is_active = (self.fitting_submode == sm_key)
+            self.canvas.create_rectangle(sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], fill="#0E2838" if is_active else "#181B26", outline="#00E5FF" if is_active else "#282E40")
+            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill="#00E5FF" if is_active else "#8E94A5", font=("Helvetica", 8, "bold" if is_active else "normal"))
+            sub_x += sm_w + 6
+
+        # Vertical separator between view modes and club chips
+        sep_x = sub_x + 8
+        self.canvas.create_line(sep_x, bar_y1 + 6, sep_x, bar_y2 - 6, fill="#252B3B", width=1)
+
+        # B. Session fitting clubs
+        session_clubs = []
+        for s in self.session_shots:
+            c = s.get("club")
+            if c and c not in session_clubs:
+                session_clubs.append(c)
+        if self.current_club not in session_clubs:
+            session_clubs.append(self.current_club)
+
+        # Baseline Club Selection (default to first club with shots)
+        if not self.fitting_baseline_club or self.fitting_baseline_club not in session_clubs:
+            self.fitting_baseline_club = session_clubs[0] if session_clubs else self.current_club
+
+        # C. Competitor Club Chips (Inside the top toolbar, middle section)
+        chip_x = sep_x + 14
+        for i, c_name in enumerate(session_clubs[:5]):
+            c_color = self.get_club_color(c_name)
+            c_count = len([s for s in self.session_shots if s.get("club") == c_name and not s.get("excluded", False)])
+            is_active = (c_name == self.current_club)
+            is_baseline = (c_name == self.fitting_baseline_club)
+
+            chip_text = f"{c_name} ({c_count})"
+            base_badge_w = 46 if is_baseline else 0
+            chip_w = len(chip_text) * 7 + 28 + base_badge_w
+            cx1 = chip_x
+            cx2 = cx1 + chip_w
+            cy1 = bar_y1 + 7
+            cy2 = bar_y2 - 7
+            self.fitting_club_chip_rects.append((cx1, cy1, cx2, cy2, c_name))
+
+            bg = "#0E2838" if is_active else "#181B26"
+            border = c_color if is_active else "#282E40"
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=bg, outline=border, width=2 if is_active else 1)
+
+            # Color dot
+            mid_y_chip = (cy1 + cy2) // 2
+            self.canvas.create_oval(cx1 + 8, mid_y_chip - 4, cx1 + 16, mid_y_chip + 4, fill=c_color, outline="")
+            self.canvas.create_text(cx1 + 22, mid_y_chip, text=chip_text, fill="#FFFFFF" if is_active else "#8E94A5", font=("Helvetica", 8, "bold" if is_active else "normal"), anchor="w")
+
+            # Dedicated non-overlapping Baseline pill
+            if is_baseline:
+                bx1 = cx2 - 42
+                bx2 = cx2 - 6
+                by1 = cy1 + 3
+                by2 = cy2 - 3
+                self.fitting_baseline_chip_rects.append((bx1, by1, bx2, by2, c_name))
+                self.canvas.create_rectangle(bx1, by1, bx2, by2, fill="#0D2618", outline="#00FF66", width=1)
+                self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="BASE", fill="#00FF66", font=("Helvetica", 7, "bold"), anchor="center")
+
+            chip_x += chip_w + 8
+
+        # D. + New Club button (Far right of top toolbar)
+        add_w = 92
+        add_x2 = offset_x + avail_w - 24
+        add_x1 = add_x2 - add_w
+        self.fitting_add_club_rect = (add_x1, bar_y1 + 7, add_x2, bar_y2 - 7)
+        self.canvas.create_rectangle(add_x1, bar_y1 + 7, add_x2, bar_y2 - 7, fill="#0D261A", outline="#00FF66", width=1)
+        self.canvas.create_text((add_x1 + add_x2) // 2, (bar_y1 + bar_y2) // 2, text="+ New Club", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+
+        # 3. Dual-Pane Dimensions & Splitter
+        content_top = bar_y2 + 8
+        content_h = bot_y - content_top
+        plot_w = int(avail_w * self.fitting_splitter_ratio)
+        plot_w = max(260, min(avail_w - 240, plot_w))
+
+        split_x1 = offset_x + plot_w + 3
+        split_x2 = split_x1 + 8
+        self.fitting_splitter_rect = (split_x1 - 4, content_top, split_x2 + 4, bot_y)
+
+        gap_x1 = split_x2 + 6
+        gap_w = (offset_x + avail_w) - gap_x1 - 12
+
+        # Calculate fitting stats for all competitor clubs
+        stats_by_club = {}
+        grouped_shots = {}
+        for c_name in session_clubs:
+            st = self._calculate_club_fitting_stats(c_name)
+            if st and st["count"] > 0:
+                stats_by_club[c_name] = st
+            c_items = [(idx, s) for idx, s in enumerate(self.session_shots) if s.get("club") == c_name and not s.get("excluded", False)]
+            if c_items:
+                grouped_shots[c_name] = c_items
+
+        chart_top = content_top
+        chart_h = bot_y - chart_top
+        plot_x1 = offset_x + 10
+        plot_x2 = offset_x + plot_w
+        max_x_yds = 350.0
+        max_h_yds = 60.0
+
+        # Draw Left Pane Overlaid Charts
+        self._draw_fitting_overlaid_charts(plot_x1, chart_top, plot_x2, bot_y, max_x_yds, max_h_yds, stats_by_club, grouped_shots)
+
+        # Draw Splitter Handle
+        is_dragging = self.fitting_splitter_dragging
+        self.canvas.create_rectangle(split_x1, content_top, split_x2, bot_y, fill="#00E5FF" if is_dragging else "#161924", outline="#00E5FF" if is_dragging else "#252B3B")
+        mid_y = (content_top + bot_y) // 2
+        for dy in [-16, -8, 0, 8, 16]:
+            self.canvas.create_line(split_x1 + 2, mid_y + dy, split_x2 - 2, mid_y + dy, fill="#FFFFFF" if is_dragging else "#50586D", width=1)
+
+        # Draw Right Pane Head-to-Head Delta Matrix & Best Fit Summary
+        self._draw_fitting_h2h_matrix(gap_x1, content_top, gap_w, bot_y, stats_by_club, session_clubs)
+
+    def _draw_fitting_overlaid_charts(self, plot_x1, plot_y1, plot_x2, plot_y2, max_x_yds, max_h_yds, stats_by_club, grouped_shots):
+        content_h = plot_y2 - plot_y1
+        chart_w = max(100, plot_x2 - plot_x1 - 50)
+        margin_x = plot_x1 + 45
+
+        if self.fitting_submode == "split":
+            side_h = int(content_h * 0.44)
+            side_y1 = plot_y1
+            side_y2 = side_y1 + side_h
+
+            disp_y1 = side_y2 + 10
+            disp_y2 = plot_y2
+
+            self._draw_fitting_side_chart(plot_x1, side_y1, plot_x2, side_y2, margin_x, chart_w, max_x_yds, max_h_yds, stats_by_club, grouped_shots)
+            self._draw_fitting_topdown_chart(plot_x1, disp_y1, plot_x2, disp_y2, max_x_yds, stats_by_club, grouped_shots)
+        elif self.fitting_submode == "side":
+            self._draw_fitting_side_chart(plot_x1, plot_y1, plot_x2, plot_y2, margin_x, chart_w, max_x_yds, max_h_yds, stats_by_club, grouped_shots)
+        else: # "topdown"
+            self._draw_fitting_topdown_chart(plot_x1, plot_y1, plot_x2, plot_y2, max_x_yds, stats_by_club, grouped_shots)
+
+    def _draw_fitting_topdown_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, max_range_yds, stats_by_club, grouped_shots):
+        self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill="#12141D", outline="#232736")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="OVERLAID DISPERSION & CONFIDENCE ELLIPSES", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        plot_w = plot_x2 - plot_x1
+        cx = (plot_x1 + plot_x2) // 2
+        tee_y = plot_y2 - 16
+        plot_h = tee_y - plot_y1 - 26
+        max_lat_yds = 45.0
+
+        # Centerline & Lateral guides
+        self.canvas.create_line(cx, tee_y, cx, plot_y1 + 22, fill="#2B3142", width=2, dash=(6, 4))
+        for lat in [-30, -15, 15, 30]:
+            lx = cx + int((lat / max_lat_yds) * (plot_w * 0.45))
+            self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill="#1C202C", width=1, dash=(2, 4))
+            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill="#5A6175", font=("Consolas", 7))
+
+        # Concentric distance arcs
+        for yds in [50, 100, 150, 200, 250, 300, 350]:
+            frac = yds / max_range_yds
+            arc_y = tee_y - int(frac * plot_h)
+            self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill="#1E2332", width=1, dash=(3, 3))
+            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill="#6B7285", font=("Consolas", 7))
+
+        if not stats_by_club:
+            self.canvas.create_text(cx, (plot_y1 + plot_y2) // 2, text="No shots recorded yet for fitting clubs", fill="#464E62", font=("Helvetica", 9))
+            return
+
+        # Render Multi-Club Overlaid Ellipses
+        for c_name, st in stats_by_club.items():
+            c_color = st["color"]
+            mu_c = st["avg_carry"]
+            mu_o = st["avg_offline"]
+            std_c = st["std_carry"]
+            std_o = st["std_offline"]
+
+            cen_x = cx + int((mu_o / max_lat_yds) * (plot_w * 0.45))
+            cen_y = tee_y - int((mu_c / max_range_yds) * plot_h)
+            rx1 = int((std_o / max_lat_yds) * (plot_w * 0.45))
+            ry1 = int((std_c / max_range_yds) * plot_h)
+
+            # 2-Sigma outer dashed ellipse (95% confidence)
+            self.canvas.create_oval(cen_x - rx1 * 2, cen_y - ry1 * 2, cen_x + rx1 * 2, cen_y + ry1 * 2, fill="", outline=c_color, width=1, dash=(4, 4))
+            # 1-Sigma inner solid ellipse (68% confidence)
+            self.canvas.create_oval(cen_x - rx1, cen_y - ry1, cen_x + rx1, cen_y + ry1, fill=c_color, outline=c_color, width=2, stipple="gray25")
+            # Mean crosshair marker
+            self.canvas.create_line(cen_x - 6, cen_y, cen_x + 6, cen_y, fill="#FFFFFF", width=2)
+            self.canvas.create_line(cen_x, cen_y - 6, cen_x, cen_y + 6, fill="#FFFFFF", width=2)
+            # Label badge
+            self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y (±{std_c:.1f}y)", fill=c_color, font=("Helvetica", 7, "bold"))
+
+        # Render Dots for each shot
+        for c_name, items in grouped_shots.items():
+            c_color = self.get_club_color(c_name)
+            for real_idx, s in items:
+                ogc = s.get("open_golf_coach", {})
+                us = ogc.get("us_customary_units", {})
+                c_yds = us.get("carry_distance_yards", 0.0)
+                o_yds = us.get("offline_distance_yards", 0.0)
+                if c_yds <= 0:
+                    continue
+
+                dx = cx + int((o_yds / max_lat_yds) * (plot_w * 0.45))
+                dy = tee_y - int((c_yds / max_range_yds) * plot_h)
+                self.fitting_dot_rects.append((dx, dy, real_idx))
+
+                is_sel = (real_idx == self.selected_shot_index)
+                r = 5 if is_sel else 3
+                self.canvas.create_oval(dx - r, dy - r, dx + r, dy + r, fill="#FFEA00" if is_sel else c_color, outline="#FFFFFF" if is_sel else "")
+
+    def _draw_fitting_side_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, margin_x, chart_w, max_x_yds, max_h_yds, stats_by_club, grouped_shots):
+        self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill="#12141D", outline="#232736")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="TRAJECTORY PROFILES & APEX HEIGHT COMPARISON", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        base_y = plot_y2 - 22
+        chart_h = max(30, base_y - plot_y1 - 32)
+
+        # X distance ticks
+        for t in [0, 50, 100, 150, 200, 250, 300, 350]:
+            tx = margin_x + int((t / max_x_yds) * chart_w)
+            self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill="#1D202C", width=1, dash=(2, 2))
+            self.canvas.create_text(tx, base_y + 10, text=str(t), fill="#5A6174", font=("Consolas", 7))
+
+        # Y height grid lines
+        for hy in [0, 20, 40, 60]:
+            ty = base_y - int((hy / max_h_yds) * chart_h)
+            self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill="#1D202C", width=1, dash=(2, 2))
+            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill="#5A6174", font=("Consolas", 7))
+
+        # Ground baseline
+        self.canvas.create_line(margin_x, base_y, margin_x + chart_w, base_y, fill="#00FF66", width=1)
+
+        if not stats_by_club:
+            self.canvas.create_text(margin_x + chart_w // 2, (plot_y1 + plot_y2) // 2, text="No trajectory data recorded yet", fill="#464E62", font=("Helvetica", 9))
+            return
+
+        # Render Overlaid Flight Arcs
+        for c_name, st in stats_by_club.items():
+            c_color = st["color"]
+            avg_c = st["avg_carry"]
+            avg_apex_y = st["avg_apex_ft"] / 3.0 # convert ft to yds
+            if avg_c <= 0:
+                continue
+
+            pts = []
+            for step in range(0, 101, 4):
+                frac = step / 100.0
+                curr_x = avg_c * frac
+                curr_h = math.sin(frac * math.pi) * avg_apex_y
+                cx_px = margin_x + int((curr_x / max_x_yds) * chart_w)
+                cy_px = base_y - int((curr_h / max_h_yds) * chart_h)
+                pts.extend([cx_px, cy_px])
+
+            if len(pts) >= 4:
+                self.canvas.create_line(pts, fill=c_color, width=2, smooth=True)
+
+            # Apex callout badge
+            apex_x_px = margin_x + int((avg_c * 0.5 / max_x_yds) * chart_w)
+            apex_y_px = base_y - int((avg_apex_y / max_h_yds) * chart_h)
+            self.canvas.create_oval(apex_x_px - 3, apex_y_px - 3, apex_x_px + 3, apex_y_px + 3, fill=c_color, outline="#FFFFFF")
+            self.canvas.create_text(apex_x_px, apex_y_px - 8, text=f"{c_name}: {st['avg_apex_ft']:.0f}ft", fill=c_color, font=("Helvetica", 7, "bold"))
+
+            # Carry Landing Flag marker
+            land_x = margin_x + int((avg_c / max_x_yds) * chart_w)
+            self.canvas.create_oval(land_x - 4, base_y - 4, land_x + 4, base_y + 4, fill=c_color, outline="#FFFFFF")
+
+    def _draw_fitting_h2h_matrix(self, gap_x1, top_y, gap_w, bot_y, stats_by_club, session_clubs):
+        self.canvas.create_rectangle(gap_x1, top_y, gap_x1 + gap_w, bot_y, fill="#12141D", outline="#232736")
+        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="HEAD-TO-HEAD STAT MATRIX & DELTAS", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+
+        baseline_name = self.fitting_baseline_club or (session_clubs[0] if session_clubs else None)
+        base_st = stats_by_club.get(baseline_name)
+
+        if not stats_by_club or len(stats_by_club) == 0:
+            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 160, text="No competitor clubs recorded.\nHit shots or select clubs from the top bar to compare.", fill="#464E62", font=("Helvetica", 10), justify="center")
+            return
+
+        # Baseline indicator strip
+        base_text = f"Baseline Club: {baseline_name}" if baseline_name else "Baseline"
+        self.canvas.create_text(gap_x1 + gap_w - 14, top_y + 16, text=base_text, fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="e")
+
+        clubs_to_render = [c for c in session_clubs if c in stats_by_club]
+        if not clubs_to_render:
+            return
+
+        # Side-by-side club columns
+        num_clubs = min(3, len(clubs_to_render))
+        card_w = (gap_w - 20 - (num_clubs - 1) * 10) // num_clubs
+        card_start_y = top_y + 34
+        card_h = max(240, bot_y - card_start_y - 85)
+
+        for col_i, c_name in enumerate(clubs_to_render[:num_clubs]):
+            st = stats_by_club[c_name]
+            cx1 = gap_x1 + 10 + col_i * (card_w + 10)
+            cx2 = cx1 + card_w
+            cy1 = card_start_y
+            cy2 = cy1 + card_h
+            c_color = st["color"]
+            is_base = (c_name == baseline_name)
+
+            # Club Card Container
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill="#161924", outline=c_color if is_base else "#252B3B", width=2 if is_base else 1)
+            # Top Club Name Banner
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy1 + 24, fill="#1C2030", outline="")
+            self.canvas.create_rectangle(cx1, cy1, cx1 + 5, cy1 + 24, fill=c_color, outline="")
+            self.canvas.create_text(cx1 + 12, cy1 + 12, text=c_name, fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
+            self.canvas.create_text(cx2 - 8, cy1 + 12, text=f"{st['count']} shots", fill="#8E94A5", font=("Consolas", 7), anchor="e")
+
+            # Metrics with Deltas vs Baseline
+            metrics = [
+                ("Carry", f"{st['avg_carry']:.1f} yds", st['avg_carry'] - (base_st['avg_carry'] if base_st else st['avg_carry']), "yds", True),
+                ("Total", f"{st['avg_total']:.1f} yds", st['avg_total'] - (base_st['avg_total'] if base_st else st['avg_total']), "yds", True),
+                ("Ball Speed", f"{st['avg_ball_speed']:.1f} mph", st['avg_ball_speed'] - (base_st['avg_ball_speed'] if base_st else st['avg_ball_speed']), "mph", True),
+                ("Smash", f"{st['avg_smash']:.2f}", st['avg_smash'] - (base_st['avg_smash'] if base_st else st['avg_smash']), "", True),
+                ("Launch", f"{st['avg_launch']:.1f}°", st['avg_launch'] - (base_st['avg_launch'] if base_st else st['avg_launch']), "°", None),
+                ("Total Spin", f"{int(st['avg_spin'])} rpm", st['avg_spin'] - (base_st['avg_spin'] if base_st else st['avg_spin']), "rpm", None),
+                ("Apex", f"{st['avg_apex_ft']:.0f} ft", st['avg_apex_ft'] - (base_st['avg_apex_ft'] if base_st else st['avg_apex_ft']), "ft", None),
+                ("Closure Rate", f"{int(st['avg_closure_rate'])} °/s", st['avg_closure_rate'] - (base_st['avg_closure_rate'] if base_st else st['avg_closure_rate']), "°/s", None),
+                ("Dispersion (σ)", f"±{st['std_offline']:.1f}y", st['std_offline'] - (base_st['std_offline'] if base_st else st['std_offline']), "y", False),
+                ("Ellipse Area", f"{int(st['ellipse_area'])} yd²", st['ellipse_area'] - (base_st['ellipse_area'] if base_st else st['ellipse_area']), "yd²", False),
+            ]
+
+            row_y = cy1 + 32
+            row_h = (card_h - 40) // len(metrics)
+            for m_label, m_val, delta, unit, higher_is_better in metrics:
+                self.canvas.create_text(cx1 + 10, row_y + 4, text=m_label, fill="#7E8799", font=("Helvetica", 7), anchor="w")
+                
+                # Primary Val
+                self.canvas.create_text(cx1 + card_w // 2 + 4, row_y + 4, text=m_val, fill="#FFFFFF", font=("Consolas", 7, "bold"), anchor="w")
+
+                # Delta vs baseline (if not baseline itself)
+                if not is_base and base_st:
+                    if abs(delta) > 0.05:
+                        if higher_is_better is True:
+                            d_col = "#00FF66" if delta > 0 else "#FF4081"
+                        elif higher_is_better is False:
+                            d_col = "#00FF66" if delta < 0 else "#FF4081" # Lower dispersion is better
+                        else:
+                            d_col = "#00E5FF"
+                        d_str = f"{delta:+.1f}{unit}" if isinstance(delta, float) else f"{int(delta):+d}{unit}"
+                    else:
+                        d_col = "#5A6175"
+                        d_str = "0.0"
+                    self.canvas.create_text(cx2 - 8, row_y + 4, text=d_str, fill=d_col, font=("Consolas", 7, "bold"), anchor="e")
+
+                row_y += row_h
+
+        # 5. Best Fit Summary Award Banner (Bottom of right pane)
+        summary_y1 = bot_y - 72
+        summary_y2 = bot_y - 8
+        self.canvas.create_rectangle(gap_x1 + 10, summary_y1, gap_x1 + gap_w - 10, summary_y2, fill="#0E1624", outline="#00E5FF", width=1)
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 14, text="FITTING WINNER & RECOMMENDATION", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+
+        # Calculate winners
+        best_carry_club = max(clubs_to_render, key=lambda c: stats_by_club[c]["avg_carry"])
+        best_tight_club = min(clubs_to_render, key=lambda c: stats_by_club[c]["ellipse_area"])
+        best_smash_club = max(clubs_to_render, key=lambda c: stats_by_club[c]["avg_smash"])
+
+        w1 = f"Longest Carry: {best_carry_club} ({stats_by_club[best_carry_club]['avg_carry']:.1f} yds)"
+        w2 = f"Tightest Dispersion: {best_tight_club} ({int(stats_by_club[best_tight_club]['ellipse_area'])} yd²)"
+        w3 = f"Highest Efficiency: {best_smash_club} ({stats_by_club[best_smash_club]['avg_smash']:.2f} smash)"
+
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 34, text=f"• {w1}", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 50, text=f"• {w2}   |   • {w3}", fill="#FFFFFF", font=("Helvetica", 8), anchor="w")
+
+
+    def draw_swing_lab_viewport(self, avail_w, h, offset_x=0):
+        # 1. Background
+        self.canvas.create_rectangle(offset_x, 52, offset_x + avail_w, h, fill="#0A0D14", outline="")
+
+        top_y = 58
+        bot_y = h - 14
+        bar_y1, bar_y2 = top_y, top_y + 44
+        bar_w = avail_w - 20
+        bar_x1 = offset_x + 10
+        bar_x2 = bar_x1 + bar_w
+
+        # 2. Top Toolbar
+        self.canvas.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill="#121622", outline="#22283A")
+
+        # Get latest pressure sample
+        latest = None
+        if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+            latest = obs_server.pressure_manager.latest_frame
+        if not latest and self.current_shot and self.current_shot.get("pressure_trace"):
+            trace = self.current_shot["pressure_trace"]
+            if trace: latest = trace[-1]
+
+        phase_str = latest.get("phase", "Address").upper() if latest else "READY"
+        total_kg = latest.get("total_kg", 80.0) if latest else 80.0
+        force_bw = latest.get("force_bw", 1.0) if latest else 1.0
+        pct_l = latest.get("pct_left", 50.0) if latest else 50.0
+        pct_r = latest.get("pct_right", 50.0) if latest else 50.0
+        torque_nm = latest.get("torque_nm", 0.0) if latest else 0.0
+        cop_x = latest.get("cop_x", 0.0) if latest else 0.0
+        cop_y = latest.get("cop_y", 0.0) if latest else 0.0
+
+        # 1. Phase Pill (Generous width for long phase strings like FOLLOW-THROUGH)
+        p_col = "#00FF66" if phase_str in ("ADDRESS", "READY") else ("#FFB800" if "BACK" in phase_str else ("#FF3366" if "IMPACT" in phase_str else "#00E5FF"))
+        p_pill_w = max(142, len(phase_str) * 8 + 36)
+        pill_x1 = bar_x1 + 8
+        pill_x2 = pill_x1 + p_pill_w
+        self.canvas.create_rectangle(pill_x1, bar_y1 + 8, pill_x2, bar_y2 - 8, fill="#0D1F2D", outline=p_col)
+        self.canvas.create_text((pill_x1 + pill_x2) // 2, (bar_y1 + bar_y2) // 2, text=f"● {phase_str}", fill=p_col, font=("Helvetica", 8, "bold"), anchor="center")
+
+        # 2. Weight & Force Stats (Left-aligned, dedicated width)
+        wt_x1 = pill_x2 + 14
+        wt_w = 135
+        wt_x2 = wt_x1 + wt_w
+        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 - 6, text="TOTAL WEIGHT", fill="#6B7280", font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{total_kg:.1f} kg ({force_bw:.2f} BW)", fill="#FFFFFF", font=("Consolas", 8, "bold"), anchor="w")
+
+        # 3. L/R Balance Gauge (Strict left-to-right flow, no backwards anchor!)
+        bg_x1 = wt_x2 + 14
+        lbl_l_w = 38
+        b_bar_x1 = bg_x1 + lbl_l_w
+        b_bar_w = 60 if avail_w < 950 else 75
+        b_bar_x2 = b_bar_x1 + b_bar_w
+        b_bar_cy = (bar_y1 + bar_y2) // 2
+
+        self.canvas.create_text(bg_x1, b_bar_cy, text=f"{int(pct_l)}% L", fill="#00E5FF", font=("Consolas", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, b_bar_x2, b_bar_cy + 4, fill="#1E2330", outline="#2C3446")
+        fill_x = b_bar_x1 + int((pct_l / 100.0) * (b_bar_x2 - b_bar_x1))
+        self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, fill_x, b_bar_cy + 4, fill="#00E5FF", outline="")
+        self.canvas.create_line((b_bar_x1 + b_bar_x2) // 2, b_bar_cy - 7, (b_bar_x1 + b_bar_x2) // 2, b_bar_cy + 7, fill="#FFFFFF", width=1)
+        self.canvas.create_text(b_bar_x2 + 6, b_bar_cy, text=f"{int(pct_r)}% R", fill="#FF4081", font=("Consolas", 8, "bold"), anchor="w")
+        bg_x2 = b_bar_x2 + 44
+
+        # 4. Torque
+        torq_x1 = bg_x2 + 12
+        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 - 6, text="TORQUE", fill="#6B7280", font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{torque_nm:+.1f} N·m", fill="#00FF66" if torque_nm >= 0 else "#FF3366", font=("Consolas", 8, "bold"), anchor="w")
+
+        # 5. Right Action Buttons (Right-aligned with 12px fixed gap and generous width)
+        btn_w = 96 if avail_w >= 1000 else 88
+        btn_h = 26
+        btn_gap = 12
+        tare_x2 = bar_x2 - 10
+        tare_x1 = tare_x2 - btn_w
+        hw_x2 = tare_x1 - btn_gap
+        hw_x1 = hw_x2 - btn_w
+        demo_x2 = hw_x1 - btn_gap
+        demo_x1 = demo_x2 - btn_w
+        btn_y1 = (bar_y1 + bar_y2 - btn_h) // 2
+        btn_y2 = btn_y1 + btn_h
+
+        # Check if simulator/demo is active
+        is_demo_on = obs_server.pressure_manager.is_simulator if hasattr(obs_server, "pressure_manager") else False
+
+        self.swing_lab_demo_rect = (demo_x1, btn_y1, demo_x2, btn_y2)
+        demo_bg = "#122534" if is_demo_on else "#161A24"
+        demo_border = "#00E5FF" if is_demo_on else "#2A3448"
+        demo_txt = "■ Stop Demo" if is_demo_on else "▶ Demo Swing"
+        demo_col = "#00E5FF" if is_demo_on else "#D0D5DD"
+        self.canvas.create_rectangle(demo_x1, btn_y1, demo_x2, btn_y2, fill=demo_bg, outline=demo_border, width=1)
+        self.canvas.create_text((demo_x1 + demo_x2) // 2, (btn_y1 + btn_y2) // 2, text=demo_txt, fill=demo_col, font=("Helvetica", 8, "bold" if is_demo_on else "normal"), anchor="center")
+
+        self.swing_lab_hw_rect = (hw_x1, btn_y1, hw_x2, btn_y2)
+        self.canvas.create_rectangle(hw_x1, btn_y1, hw_x2, btn_y2, fill="#161A24", outline="#2A3448", width=1)
+        self.canvas.create_text((hw_x1 + hw_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚙ Hardware", fill="#D0D5DD", font=("Helvetica", 8), anchor="center")
+
+        self.swing_lab_tare_rect = (tare_x1, btn_y1, tare_x2, btn_y2)
+        self.canvas.create_rectangle(tare_x1, btn_y1, tare_x2, btn_y2, fill="#161A24", outline="#2A3448", width=1)
+        self.canvas.create_text((tare_x1 + tare_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚖ Tare Zero", fill="#D0D5DD", font=("Helvetica", 8), anchor="center")
+
+        # 3. Main Workspace Split (Left: Heatmap, Right: COP & Curves)
+        content_y1 = bar_y2 + 10
+        content_h = bot_y - content_y1
+        left_w = int(bar_w * 0.48)
+        right_w = bar_w - left_w - 10
+        left_x1 = bar_x1
+        left_x2 = left_x1 + left_w
+        right_x1 = left_x2 + 10
+        right_x2 = right_x1 + right_w
+
+        # --- LEFT PANE: DUAL-FOOT PRESSURE HEATMAP ---
+        self.canvas.create_rectangle(left_x1, content_y1, left_x2, bot_y, fill="#10131D", outline="#22283A")
+        self.canvas.create_text(left_x1 + 14, content_y1 + 16, text="🦶 DUAL-FOOT PRESSURE HEATMAP", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+
+        # Draw Footbeds
+        foot_w = (left_w - 50) // 2
+        foot_h = content_h - 70
+        l_foot_x1 = left_x1 + 16
+        r_foot_x1 = l_foot_x1 + foot_w + 18
+        foot_y1 = content_y1 + 38
+
+        # Left Foot Box & Right Foot Box
+        self.draw_single_foot_heatmap(l_foot_x1, foot_y1, foot_w, foot_h, is_left=True, latest=latest)
+        self.draw_single_foot_heatmap(r_foot_x1, foot_y1, foot_w, foot_h, is_left=False, latest=latest)
+
+        # --- RIGHT PANE: COP TRAJECTORY & FORCE CURVES ---
+        cop_h = int(content_h * 0.56)
+        curves_h = content_h - cop_h - 10
+        cop_y1 = content_y1
+        cop_y2 = cop_y1 + cop_h
+        curves_y1 = cop_y2 + 10
+        curves_y2 = bot_y
+
+        # Top Right: COP Stance Box
+        self.canvas.create_rectangle(right_x1, cop_y1, right_x2, cop_y2, fill="#10131D", outline="#22283A")
+        self.canvas.create_text(right_x1 + 14, cop_y1 + 16, text="🎯 CENTER OF PRESSURE (COP) TRAIL", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="w")
+        self.draw_cop_trajectory_canvas(right_x1, cop_y1 + 28, right_w, cop_h - 32, latest=latest)
+
+        # Bottom Right: Timeline Curves
+        self.canvas.create_rectangle(right_x1, curves_y1, right_x2, curves_y2, fill="#10131D", outline="#22283A")
+        self.canvas.create_text(right_x1 + 14, curves_y1 + 14, text="📈 WEIGHT TRANSFER & FORCE CURVES", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+        self.draw_force_timeline_canvas(right_x1, curves_y1 + 26, right_w, curves_h - 30)
+
+    def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
+        x2, y2 = x1 + w, y1 + h
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#151926", outline="#242B3E", width=1)
+        foot_label = "LEAD FOOT (LEFT)" if is_left else "TRAIL FOOT (RIGHT)"
+        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill="#8E94A5", font=("Helvetica", 7, "bold"))
+
+        # Foot Outline
+        cx = (x1 + x2) // 2
+        f_top = y1 + 28
+        f_bot = y2 - 28
+        f_half_w = (w - 24) // 2
+
+        # Draw anatomical shoe/foot contour
+        pts = [
+            cx - f_half_w * 0.7, f_top + 15,
+            cx, f_top + 4,
+            cx + f_half_w * 0.7, f_top + 15,
+            cx + f_half_w * 0.85, f_top + int(h * 0.35),
+            cx + f_half_w * 0.55, f_top + int(h * 0.60),
+            cx + f_half_w * 0.65, f_bot - 10,
+            cx, f_bot,
+            cx - f_half_w * 0.65, f_bot - 10,
+            cx - f_half_w * 0.55, f_top + int(h * 0.60),
+            cx - f_half_w * 0.85, f_top + int(h * 0.35),
+        ]
+        self.canvas.create_polygon(pts, fill="#0F121C", outline="#283046", width=2)
+
+        # 4 Load Sensors for this foot
+        raw = latest.get("raw_cells", [20.0, 20.0, 20.0, 20.0]) if latest else [20.0, 20.0, 20.0, 20.0]
+        # raw_cells: [TL, TR, BL, BR]
+        if is_left:
+            tl_kg, tr_kg = raw[0] * 0.55, raw[0] * 0.45
+            bl_kg, br_kg = raw[2] * 0.55, raw[2] * 0.45
+            tot_foot = latest.get("pct_left", 50.0) if latest else 50.0
+        else:
+            tl_kg, tr_kg = raw[1] * 0.45, raw[1] * 0.55
+            bl_kg, br_kg = raw[3] * 0.45, raw[3] * 0.55
+            tot_foot = latest.get("pct_right", 50.0) if latest else 50.0
+
+        sensors = [
+            (cx - f_half_w * 0.45, f_top + int(h * 0.25), tl_kg, "Toe In"),
+            (cx + f_half_w * 0.45, f_top + int(h * 0.25), tr_kg, "Toe Out"),
+            (cx - f_half_w * 0.35, f_bot - int(h * 0.20), bl_kg, "Heel In"),
+            (cx + f_half_w * 0.35, f_bot - int(h * 0.20), br_kg, "Heel Out"),
+        ]
+
+        for sx, sy, kg, name in sensors:
+            # Color based on load intensity
+            intensity = min(1.0, max(0.05, kg / 35.0))
+            rad = int(14 + intensity * 22)
+            
+            # Draw gradient rings
+            glow_col = "#FF3366" if intensity > 0.75 else ("#FFB800" if intensity > 0.5 else ("#00FF66" if intensity > 0.25 else "#00E5FF"))
+            self.canvas.create_oval(sx - rad, sy - rad, sx + rad, sy + rad, fill="", outline=glow_col, width=2)
+            self.canvas.create_oval(sx - rad // 2, sy - rad // 2, sx + rad // 2, sy + rad // 2, fill=glow_col, outline="")
+            self.canvas.create_text(sx, sy + rad + 9, text=f"{kg:.1f}kg", fill="#FFFFFF", font=("Consolas", 7, "bold"))
+
+        # Foot Total Badge
+        self.canvas.create_rectangle(x1 + 10, y2 - 24, x2 - 10, y2 - 6, fill="#111624", outline="#22283A")
+        self.canvas.create_text((x1 + x2) // 2, y2 - 15, text=f"Total: {int(tot_foot)}%", fill="#00E5FF" if is_left else "#FF4081", font=("Helvetica", 8, "bold"))
+
+    def draw_cop_trajectory_canvas(self, x1, y1, w, h, latest=None):
+        x2, y2 = x1 + w, y1 + h
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        max_r = min(w, h) // 2 - 20
+
+        # Grid lines & Rings
+        for r_frac, label in [(0.33, "50mm"), (0.66, "100mm"), (1.0, "150mm")]:
+            r = int(max_r * r_frac)
+            self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill="", outline="#1A2234", dash=(2, 4))
+            self.canvas.create_text(cx + r + 4, cy - 6, text=label, fill="#475569", font=("Helvetica", 6), anchor="w")
+
+        # Crosshairs
+        self.canvas.create_line(x1 + 20, cy, x2 - 20, cy, fill="#1E293B", width=1)
+        self.canvas.create_line(cx, y1 + 10, cx, y2 - 10, fill="#1E293B", width=1)
+        self.canvas.create_text(cx - max_r + 10, cy - 8, text="◀ LEAD (L)", fill="#00E5FF", font=("Helvetica", 6, "bold"))
+        self.canvas.create_text(cx + max_r - 10, cy - 8, text="TRAIL (R) ▶", fill="#FF4081", font=("Helvetica", 6, "bold"))
+        self.canvas.create_text(cx + 6, y1 + 14, text="▲ TOES", fill="#64748B", font=("Helvetica", 6))
+        self.canvas.create_text(cx + 6, y2 - 14, text="▼ HEELS", fill="#64748B", font=("Helvetica", 6))
+
+        # Scale: 150mm maps to max_r
+        scale = max_r / 150.0
+
+        # Draw Trail from history
+        trail = self.swing_lab_history
+        if self.current_shot and self.current_shot.get("pressure_trace"):
+            trail = self.current_shot["pressure_trace"]
+
+        if len(trail) > 1:
+            pts = []
+            for item in trail[-120:]:
+                tx = cx + int(item.get("cop_x", 0.0) * scale)
+                ty = cy - int(item.get("cop_y", 0.0) * scale)
+                pts.append((tx, ty, item.get("phase", "Address")))
+            
+            for i in range(len(pts) - 1):
+                p1, p2 = pts[i], pts[i + 1]
+                ph = p2[2]
+                seg_col = "#00FF66" if "ADDR" in ph.upper() else ("#FFB800" if "BACK" in ph.upper() else ("#FF3366" if "IMPACT" in ph.upper() else "#00E5FF"))
+                self.canvas.create_line(p1[0], p1[1], p2[0], p2[1], fill=seg_col, width=2)
+
+        # Current COP Bullseye Dot
+        cur_cop_x = latest.get("cop_x", 0.0) if latest else 0.0
+        cur_cop_y = latest.get("cop_y", 0.0) if latest else 0.0
+        dot_x = cx + int(cur_cop_x * scale)
+        dot_y = cy - int(cur_cop_y * scale)
+
+        self.canvas.create_oval(dot_x - 12, dot_y - 12, dot_x + 12, dot_y + 12, fill="", outline="#00E5FF", width=2)
+        self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5, fill="#00E5FF", outline="#FFFFFF")
+        self.canvas.create_text(dot_x + 14, dot_y, text=f"({cur_cop_x:+.0f}, {cur_cop_y:+.0f})", fill="#FFFFFF", font=("Consolas", 7, "bold"), anchor="w")
+
+    def draw_force_timeline_canvas(self, x1, y1, w, h):
+        x2, y2 = x1 + w, y1 + h
+        self.canvas.create_rectangle(x1 + 10, y1 + 4, x2 - 10, y2 - 6, fill="#0C0E16", outline="#1A2234")
+
+        trail = self.swing_lab_history
+        if self.current_shot and self.current_shot.get("pressure_trace"):
+            trail = self.current_shot["pressure_trace"]
+
+        if len(trail) < 2:
+            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Awaiting Swing Data...", fill="#475569", font=("Helvetica", 8))
+            return
+
+        graph_x1 = x1 + 20
+        graph_x2 = x2 - 20
+        graph_y1 = y1 + 10
+        graph_y2 = y2 - 12
+        gw = graph_x2 - graph_x1
+        gh = graph_y2 - graph_y1
+
+        # Center 50% line
+        mid_y = graph_y1 + gh // 2
+        self.canvas.create_line(graph_x1, mid_y, graph_x2, mid_y, fill="#1E293B", dash=(2, 4))
+        self.canvas.create_text(graph_x1 - 4, mid_y, text="50%", fill="#475569", font=("Helvetica", 6), anchor="e")
+
+        samples = trail[-100:]
+        n = len(samples)
+
+        # Plot Left % (Cyan) and Right % (Magenta) Curves
+        pts_l = []
+        pts_r = []
+        for i, s in enumerate(samples):
+            px = graph_x1 + int((i / float(max(1, n - 1))) * gw)
+            pct_l = s.get("pct_left", 50.0)
+            pct_r = s.get("pct_right", 100.0 - pct_l)
+            py_l = graph_y2 - int((pct_l / 100.0) * gh)
+            py_r = graph_y2 - int((pct_r / 100.0) * gh)
+            pts_l.append((px, py_l))
+            pts_r.append((px, py_r))
+
+        for i in range(len(pts_l) - 1):
+            self.canvas.create_line(pts_l[i][0], pts_l[i][1], pts_l[i+1][0], pts_l[i+1][1], fill="#00E5FF", width=2)
+            self.canvas.create_line(pts_r[i][0], pts_r[i][1], pts_r[i+1][0], pts_r[i+1][1], fill="#FF4081", width=2)
+
+        # Legend
+        leg_x2 = x2 - 20
+        # Right Foot % Legend (Magenta)
+        self.canvas.create_line(leg_x2 - 82, y1 + 10, leg_x2 - 64, y1 + 10, fill="#FF4081", width=2)
+        self.canvas.create_text(leg_x2 - 60, y1 + 10, text="Right Foot %", fill="#FF4081", font=("Helvetica", 7, "bold"), anchor="w")
+
+        # Left Foot % Legend (Cyan)
+        self.canvas.create_line(leg_x2 - 164, y1 + 10, leg_x2 - 146, y1 + 10, fill="#00E5FF", width=2)
+        self.canvas.create_text(leg_x2 - 142, y1 + 10, text="Left Foot %", fill="#00E5FF", font=("Helvetica", 7, "bold"), anchor="w")
+
+    def draw_balance_hardware_modal(self, w, h):
+        # Modal dark backdrop
+        self.canvas.create_rectangle(0, 0, w, h, fill="#000000", stipple="gray50")
+        mw, mh = 580, 540
+        mx1, my1 = (w - mw) // 2, (h - mh) // 2
+        mx2, my2 = mx1 + mw, my1 + mh
+        self.balance_modal_box_rect = (mx1, my1, mx2, my2)
+
+        # Modal Window Container
+        self.canvas.create_rectangle(mx1, my1, mx2, my2, fill="#121622", outline="#00E5FF", width=2)
+        self.canvas.create_text(mx1 + 20, my1 + 22, text="⚙️ WII BALANCE BOARD HARDWARE & PAIRING", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+
+        # Close button [X]
+        self.balance_modal_close_rect = (mx2 - 36, my1 + 10, mx2 - 12, my1 + 34)
+        self.canvas.create_rectangle(mx2 - 36, my1 + 10, mx2 - 12, my1 + 34, fill="#1E222E", outline="#383E50")
+        self.canvas.create_text(mx2 - 24, my1 + 22, text="✕", fill="#FFFFFF", font=("Helvetica", 9, "bold"))
+
+        pm = obs_server.pressure_manager if hasattr(obs_server, "pressure_manager") else None
+        board_mode = pm.board_mode if pm else "single"
+        is_dual = (board_mode == "dual")
+
+        # --- SECTION 0: 1-BOARD VS 2-BOARDS MODE SELECTOR ---
+        mode_y1 = my1 + 42
+        mode_y2 = mode_y1 + 30
+        half_mw = (mx2 - mx1 - 50) // 2
+        m1_x1, m1_x2 = mx1 + 20, mx1 + 20 + half_mw
+        m2_x1, m2_x2 = m1_x2 + 10, mx2 - 20
+
+        self.balance_modal_mode_1_rect = (m1_x1, mode_y1, m1_x2, mode_y2)
+        bg1 = "#0E2838" if not is_dual else "#161A24"
+        bd1 = "#00E5FF" if not is_dual else "#2A3448"
+        col1 = "#00E5FF" if not is_dual else "#94A3B8"
+        self.canvas.create_rectangle(m1_x1, mode_y1, m1_x2, mode_y2, fill=bg1, outline=bd1, width=2 if not is_dual else 1)
+        self.canvas.create_text((m1_x1 + m1_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶 1 Board (Single Mat)", fill=col1, font=("Helvetica", 8, "bold" if not is_dual else "normal"))
+
+        self.balance_modal_mode_2_rect = (m2_x1, mode_y1, m2_x2, mode_y2)
+        bg2 = "#0E2838" if is_dual else "#161A24"
+        bd2 = "#00E5FF" if is_dual else "#2A3448"
+        col2 = "#00E5FF" if is_dual else "#94A3B8"
+        self.canvas.create_rectangle(m2_x1, mode_y1, m2_x2, mode_y2, fill=bg2, outline=bd2, width=2 if is_dual else 1)
+        self.canvas.create_text((m2_x1 + m2_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶🦶 2 Boards (Dual Plate)", fill=col2, font=("Helvetica", 8, "bold" if is_dual else "normal"))
+
+        # --- SECTION 0B: DUAL-BOARD FOOT ASSIGNMENT WIZARD CARD (When Dual Mode is Active) ---
+        next_y = mode_y2 + 8
+        if is_dual:
+            wiz = pm.assignment_wizard if pm else None
+            wiz_status = wiz.get_status() if wiz else {"phase": "idle", "message": "Click Calibrate to begin assignment", "board_a_weight": 0.0, "board_b_weight": 0.0}
+            wiz_phase = wiz_status.get("phase", "idle")
+            w_a = wiz_status.get("board_a_weight", 0.0)
+            w_b = wiz_status.get("board_b_weight", 0.0)
+
+            card_h = 56
+            card_y1 = next_y
+            card_y2 = card_y1 + card_h
+            self.canvas.create_rectangle(mx1 + 20, card_y1, mx2 - 20, card_y2, fill="#0F172A", outline="#38BDF8" if wiz_phase != "idle" else "#1E293B")
+
+            # Status Message
+            if wiz_phase == "waiting_left":
+                p_text = "🦶 Step on the board under your LEFT foot (>5kg)"
+                p_col = "#00FF66"
+            elif wiz_phase == "waiting_right":
+                p_text = "🦶 Now step on the board under your RIGHT foot (>5kg)"
+                p_col = "#FFB800"
+            elif wiz_phase == "complete":
+                p_text = "✓ Both boards assigned (Left: Board A, Right: Board B)"
+                p_col = "#00E5FF"
+            else:
+                p_text = "Step on boards to assign Left & Right feet:"
+                p_col = "#CBD5E1"
+
+            self.canvas.create_text(mx1 + 32, card_y1 + 16, text=p_text, fill=p_col, font=("Helvetica", 8, "bold"), anchor="w")
+            self.canvas.create_text(mx1 + 32, card_y1 + 38, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill="#94A3B8", font=("Consolas", 8), anchor="w")
+
+            # Calibrate / Start Button
+            btn_w = 140
+            b_x2 = mx2 - 32
+            b_x1 = b_x2 - btn_w
+            b_y1 = card_y1 + 12
+            b_y2 = card_y2 - 12
+            self.balance_modal_assign_btn_rect = (b_x1, b_y1, b_x2, b_y2)
+            btn_lbl = "🎯 Re-Assign" if wiz_phase == "complete" else ("⏳ Detecting..." if wiz_phase in ("waiting_left", "waiting_right") else "🎯 Start Wizard")
+            self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill="#0284C7" if wiz_phase != "idle" else "#1E293B", outline="#38BDF8")
+            self.canvas.create_text((b_x1 + b_x2) // 2, (b_y1 + b_y2) // 2, text=btn_lbl, fill="#FFFFFF", font=("Helvetica", 8, "bold"))
+
+            next_y = card_y2 + 8
+        else:
+            self.balance_modal_assign_btn_rect = None
+
+        # --- SECTION 1: BLUETOOTH PAIRING PIN CARD ---
+        from src.hardware.pressure.bluetooth_windows import (
+            get_host_bluetooth_mac,
+            mac_to_wii_pin,
+            mac_to_wii_pin_display,
+            format_mac_display,
+        )
+        mac = get_host_bluetooth_mac() or ""
+        if mac:
+            pin_raw = mac_to_wii_pin(mac)
+            pin_disp = mac_to_wii_pin_display(mac)
+            mac_disp = format_mac_display(mac)
+        else:
+            mac_disp = "Default / Auto (38:FC:98:3B:B4:DC)"
+            pin_raw = mac_to_wii_pin("38FC983BB4DC")
+            pin_disp = mac_to_wii_pin_display("38FC983BB4DC")
+
+        self.balance_modal_pin_text = pin_raw
+
+        pin_card_y1 = next_y
+        pin_card_y2 = pin_card_y1 + 130
+        self.canvas.create_rectangle(mx1 + 20, pin_card_y1, mx2 - 20, pin_card_y2, fill="#171B2A", outline="#22283A")
+        self.canvas.create_text(mx1 + 32, pin_card_y1 + 14, text="WINDOWS BLUETOOTH PAIRING PIN", fill="#6B7280", font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(mx1 + 32, pin_card_y1 + 28, text=f"Host Adapter MAC: {mac_disp}", fill="#94A3B8", font=("Consolas", 8), anchor="w")
+
+        # Big Glowing PIN Box
+        p_box_y1 = pin_card_y1 + 40
+        p_box_y2 = p_box_y1 + 44
+        self.canvas.create_rectangle(mx1 + 32, p_box_y1, mx2 - 32, p_box_y2, fill="#0B0F17", outline="#00E5FF", width=1)
+        self.canvas.create_text((mx1 + mx2) // 2, (p_box_y1 + p_box_y2) // 2, text=pin_disp, fill="#00E5FF", font=("Consolas", 16, "bold"))
+
+        # Action Buttons under PIN (Copy PIN + Open BT Settings)
+        act_y1 = p_box_y2 + 8
+        act_y2 = act_y1 + 28
+        half_w = (mx2 - mx1 - 74) // 2
+        btn_copy_x1 = mx1 + 32
+        btn_copy_x2 = btn_copy_x1 + half_w
+        btn_open_x1 = btn_copy_x2 + 10
+        btn_open_x2 = mx2 - 32
+
+        self.balance_modal_copy_pin_rect = (btn_copy_x1, act_y1, btn_copy_x2, act_y2)
+        self.canvas.create_rectangle(btn_copy_x1, act_y1, btn_copy_x2, act_y2, fill="#0E2838", outline="#00E5FF")
+        self.canvas.create_text((btn_copy_x1 + btn_copy_x2) // 2, (act_y1 + act_y2) // 2, text="📋 Copy PIN to Clipboard", fill="#00E5FF", font=("Helvetica", 8, "bold"))
+
+        self.balance_modal_bt_settings_rect = (btn_open_x1, act_y1, btn_open_x2, act_y2)
+        self.canvas.create_rectangle(btn_open_x1, act_y1, btn_open_x2, act_y2, fill="#1E2A3A", outline="#38BDF8")
+        self.canvas.create_text((btn_open_x1 + btn_open_x2) // 2, (act_y1 + act_y2) // 2, text="🌐 Open Bluetooth Settings", fill="#38BDF8", font=("Helvetica", 8, "bold"))
+
+        # --- SECTION 2: HARDWARE CONTROLS ---
+        hw_y1 = pin_card_y2 + 10
+        hw_y2 = hw_y1 + 40
+        is_sim = pm.is_simulator if pm else False
+
+        self.balance_modal_tare_rect = (mx1 + 20, hw_y1, mx1 + 265, hw_y2)
+        self.canvas.create_rectangle(mx1 + 20, hw_y1, mx1 + 265, hw_y2, fill="#1A2234", outline="#00FF66")
+        self.canvas.create_text((mx1 + 20 + mx1 + 265) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare / Zero Baseline", fill="#00FF66", font=("Helvetica", 8, "bold"))
+
+        self.balance_modal_sim_rect = (mx1 + 280, hw_y1, mx2 - 20, hw_y2)
+        sim_col = "#00E5FF" if is_sim else "#475569"
+        self.canvas.create_rectangle(mx1 + 280, hw_y1, mx2 - 20, hw_y2, fill="#151926", outline=sim_col)
+        self.canvas.create_text((mx1 + 280 + mx2 - 20) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator Mode: {'[ON]' if is_sim else '[OFF]'}", fill="#FFFFFF", font=("Helvetica", 8, "bold"))
+
+        # --- SECTION 3: STEP-BY-STEP PAIRING INSTRUCTIONS ---
+        guide_y1 = hw_y2 + 8
+        guide_y2 = my2 - 12
+        self.canvas.create_rectangle(mx1 + 20, guide_y1, mx2 - 20, guide_y2, fill="#141824", outline="#1F2536")
+        self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill="#64748B", font=("Helvetica", 7, "bold"), anchor="w")
+
+        steps = [
+            "1. Press red SYNC button on board(s) (4 LEDs blink) → Open BT Settings → Paste PIN.",
+            "2. For 2-Board setups: Select '2 Boards' above and click 'Start Wizard' to identify feet.",
+            "3. Step on Left board first, then Right board when prompted.",
+            "4. Stand evenly on board(s) and click 'Tare Zero' to calibrate baseline."
+        ]
+        for idx, s in enumerate(steps):
+            self.canvas.create_text(mx1 + 32, guide_y1 + 26 + (idx * 14), text=s, fill="#CBD5E1", font=("Helvetica", 7), anchor="w")
 
 def main():
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
