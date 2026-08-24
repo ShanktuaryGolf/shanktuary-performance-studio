@@ -11,7 +11,8 @@ export const CameraModes = {
 export class CameraController {
     constructor(camera) {
         this.camera = camera;
-        this.mode = CameraModes.GOLFER;
+        const savedMode = parseInt(localStorage.getItem('sps_range_camera_mode') || '0', 10);
+        this.mode = (savedMode >= 0 && savedMode <= 4) ? savedMode : CameraModes.GOLFER;
         
         this.target = new THREE.Vector3(0, 1.10, -70);
         this.currentPosition = new THREE.Vector3(0, 1.75, 4.6);
@@ -41,11 +42,17 @@ export class CameraController {
     
     cycleMode() {
         this.mode = (this.mode + 1) % 5;
+        try {
+            localStorage.setItem('sps_range_camera_mode', this.mode.toString());
+        } catch (e) {}
         this.updateModeUI();
     }
     
     setMode(mode) {
         this.mode = mode;
+        try {
+            localStorage.setItem('sps_range_camera_mode', this.mode.toString());
+        } catch (e) {}
         this.updateModeUI();
     }
     

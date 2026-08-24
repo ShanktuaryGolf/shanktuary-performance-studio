@@ -22,10 +22,9 @@ function start() {
     const ball = new GolfBall(scene);
     const cameraController = new CameraController(camera);
     
-    // 3-Second Auto-Reset: Return camera to Golfer View at Tee Box
+    // 3-Second Auto-Reset: Return ball to Tee Box, keeping user's selected camera view
     ball.onResetCallback = () => {
-        console.log('[+] Shot complete: Returning camera & ball to Tee Box');
-        cameraController.setMode(CameraModes.GOLFER);
+        console.log('[+] Shot complete: Returning ball to Tee Box (preserving camera view)');
     };
     
     // WebSocket & UI Controls
