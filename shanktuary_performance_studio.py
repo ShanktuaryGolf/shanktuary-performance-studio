@@ -2368,10 +2368,10 @@ class ShanktuaryApp:
         self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill="#00FF66", font=("Helvetica", 7, "bold"), anchor="center")
 
         # 2. Right Utility Pills
-        fs_w = 28
-        tools_w = 70
-        dex_w = 64
-        club_w = 94
+        fs_w = 32
+        tools_w = 76
+        dex_w = 46
+        club_w = 98
         gap = 6
 
         fs_x2 = w - 10
@@ -2386,7 +2386,7 @@ class ShanktuaryApp:
         t_bg = "#0E2A38" if self.show_tools_menu else "#181A22"
         t_border = "#00E5FF" if self.show_tools_menu else "#2E3342"
         self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
-        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools ▼", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="center")
 
         dex_x2 = tools_x1 - gap
         dex_x1 = dex_x2 - dex_w
@@ -2394,9 +2394,9 @@ class ShanktuaryApp:
         dex_bg = "#2A180E" if self.is_left_handed else "#181A22"
         dex_border = "#FF9900" if self.is_left_handed else "#2E3342"
         dex_fg = "#FF9900" if self.is_left_handed else "#D0D5DD"
-        dex_label = "🏌️‍♀️ LH" if self.is_left_handed else "🏌️‍♂️ RH"
+        dex_label = "LH" if self.is_left_handed else "RH"
         self.canvas.create_rectangle(dex_x1, 10, dex_x2, 42, fill=dex_bg, outline=dex_border)
-        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 9, "bold"), anchor="center")
 
         club_x2 = dex_x1 - gap
         club_x1 = club_x2 - club_w
@@ -2404,7 +2404,7 @@ class ShanktuaryApp:
         c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
         c_border = "#00E5FF" if self.show_club_menu else "#2E3342"
         self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
-        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club} ▼", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="center")
 
         # 3. Segmented Mode Pills (Responsive fitting between status_x2 and club_x1)
         left_limit = status_x2 + 8
@@ -2507,7 +2507,7 @@ class ShanktuaryApp:
 
     def draw_club_dropdown(self, w, h):
         box_w = 180
-        x1 = w - 245
+        x1 = self.club_btn_rect[0] if self.club_btn_rect else w - 245
         x2 = x1 + box_w
         y1 = 48
         item_h = 24
@@ -2545,7 +2545,7 @@ class ShanktuaryApp:
 
     def draw_tools_flyout_menu(self, w, h):
         box_w = 320
-        x2 = w - 16
+        x2 = self.tools_btn_rect[2] if self.tools_btn_rect else w - 16
         x1 = x2 - box_w
         y1 = 48
         y2 = y1 + 395
