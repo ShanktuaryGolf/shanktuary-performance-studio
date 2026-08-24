@@ -142,19 +142,20 @@ class BoardAssignmentWizard:
         self.board_b_weight = max(0.0, weight_b)
 
         if self.phase == AssignmentPhase.WAITING_LEFT:
-            if self.board_a_weight > self.threshold and self.board_b_weight < self.threshold:
+            diff = self.board_a_weight - self.board_b_weight
+            if self.board_a_weight > self.threshold and diff >= self.threshold:
                 self.left_board = self.board_a
                 self.right_board = self.board_b
                 self.phase = AssignmentPhase.WAITING_RIGHT
                 self.message = "Now step on the board under your RIGHT foot"
-            elif self.board_b_weight > self.threshold and self.board_a_weight < self.threshold:
+            elif self.board_b_weight > self.threshold and -diff >= self.threshold:
                 self.left_board = self.board_b
                 self.right_board = self.board_a
                 self.phase = AssignmentPhase.WAITING_RIGHT
                 self.message = "Now step on the board under your RIGHT foot"
 
         elif self.phase == AssignmentPhase.WAITING_RIGHT:
-            right_weight = self.board_a_weight if self.right_board is self.board_a else self.board_b_weight
+            right_weight = self.board_a_weight if self.right_board == self.board_a else self.board_b_weight
             if right_weight > self.threshold:
                 self.phase = AssignmentPhase.COMPLETE
                 self.message = "✓ Both boards successfully assigned!"
