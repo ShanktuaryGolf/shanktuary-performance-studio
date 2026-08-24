@@ -306,6 +306,7 @@ class ShanktuaryApp:
         self.show_tools_menu = False
         self.copy_feedback = None
         self.nova_connected = False
+        self.is_left_handed = False
 
         # Hit testing regions for top header & interactive menus
         self.sidebar_toggle_rect = None       # Hamburger [ ☰ ] or collapse [ ◀ ]
@@ -320,6 +321,7 @@ class ShanktuaryApp:
 
         self.mode_pill_rects = {}             # mode_id -> (x1, y1, x2, y2)
         self.club_btn_rect = None             # (x1, y1, x2, y2)
+        self.dexterity_btn_rect = None        # (x1, y1, x2, y2) [ 🏌️‍♂️ RH ] / [ 🏌️‍♀️ LH ]
         self.tools_btn_rect = None            # (x1, y1, x2, y2)
         self.fullscreen_btn_rect = None       # (x1, y1, x2, y2)
         self.club_menu_items = []             # (x1, y1, x2, y2, club_name)
@@ -614,6 +616,7 @@ class ShanktuaryApp:
                 for c in data.get("custom_clubs", []):
                     if c and c not in self.clubs:
                         self.clubs.append(c)
+                self.is_left_handed = bool(data.get("is_left_handed", False))
             if not self.bag:
                 self.init_default_bag()
             for club_item in self.bag:
@@ -631,12 +634,54 @@ class ShanktuaryApp:
             payload = {
                 "sessions": self.sessions,
                 "custom_clubs": custom_clubs,
-                "bag": self.bag
+                "bag": self.bag,
+                "is_left_handed": self.is_left_handed
             }
             with open(SESSION_LOG_PATH, "w") as f:
                 json.dump(payload, f, indent=2)
         except Exception as e:
             print(f"[!] Error saving session: {e}")
+
+    def get_scaled_club_asset(self, path, target_h, mirror=False):
+        key = (path, target_h, mirror)
+        if key in self.img_cache:
+            return self.img_cache[key]
+        img = load_image_asset(path, target_h=target_h, mirror=mirror)
+        if img:
+            photo = ImageTk.PhotoImage(img)
+            self.img_cache[key] = photo
+            return photo
+        return None
+
+    def get_rotated_overhead_asset(self, target_h, face_angle, mirror=False):
+        raw_key = (OVERHEAD_PATH, target_h, mirror, round(face_angle, 1))
+        if raw_key in self.img_cache:
+            return self.img_cache[raw_key]
+        
+        if os.path.exists(OVERHEAD_PATH):
+            try:
+                base_img = Image.open(OVERHEAD_PATH).convert("RGBA")
+                # Default overhead sprite faces right; for RH it needs mirror=True, for LH mirror=False (facing left)
+                actual_mirror = not mirror
+                if actual_mirror:
+                    base_img = ImageOps.mirror(base_img)
+                w, h = base_img.size
+                target_w = int(w * (target_h / h))
+                resized = base_img.resize((target_w, target_h), resample=Image.LANCZOS)
+                
+                dim = max(target_w, target_h) + 60
+                canvas_img = Image.new("RGBA", (dim, dim), (0, 0, 0, 0))
+                canvas_img.paste(resized, ((dim - target_w) // 2, (dim - target_h) // 2), resized)
+                
+                # For RH, -face_angle; For LH, +face_angle
+                rot_deg = -face_angle if not mirror else face_angle
+                rotated = canvas_img.rotate(rot_deg, resample=Image.BICUBIC, expand=True)
+                photo = ImageTk.PhotoImage(rotated)
+                self.img_cache[raw_key] = photo
+                return photo
+            except Exception as e:
+                print(f"[!] Error creating overhead asset: {e}")
+        return None
 
     def init_default_bag(self):
         self.bag = [dict(c) for c in DEFAULT_BAG]
@@ -1865,6 +1910,16 @@ class ShanktuaryApp:
             self.draw_screen()
             return
 
+        if self.dexterity_btn_rect and self.dexterity_btn_rect[0] <= event.x <= self.dexterity_btn_rect[2] and self.dexterity_btn_rect[1] <= event.y <= self.dexterity_btn_rect[3]:
+            self.is_left_handed = not self.is_left_handed
+            self.show_club_menu = False
+            self.show_tools_menu = False
+            self.copy_feedback = f"Switched to {'Left-Handed (LH)' if self.is_left_handed else 'Right-Handed (RH)'} Mode"
+            self.root.after(2500, self.clear_copy_feedback)
+            self.save_session_to_file()
+            self.draw_screen()
+            return
+
         if self.tools_btn_rect and self.tools_btn_rect[0] <= event.x <= self.tools_btn_rect[2] and self.tools_btn_rect[1] <= event.y <= self.tools_btn_rect[3]:
             self.show_tools_menu = not self.show_tools_menu
             self.show_club_menu = False
@@ -2315,7 +2370,8 @@ class ShanktuaryApp:
         # 2. Right Utility Pills
         fs_w = 28
         tools_w = 64
-        club_w = 92
+        dex_w = 58
+        club_w = 90
         gap = 6
 
         fs_x2 = w - 10
@@ -2332,7 +2388,17 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
         self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="center")
 
-        club_x2 = tools_x1 - gap
+        dex_x2 = tools_x1 - gap
+        dex_x1 = dex_x2 - dex_w
+        self.dexterity_btn_rect = (dex_x1, 10, dex_x2, 42)
+        dex_bg = "#2A180E" if self.is_left_handed else "#181A22"
+        dex_border = "#FF9900" if self.is_left_handed else "#2E3342"
+        dex_fg = "#FF9900" if self.is_left_handed else "#D0D5DD"
+        dex_label = "🏌️‍♀️ LH" if self.is_left_handed else "🏌️‍♂️ RH"
+        self.canvas.create_rectangle(dex_x1, 10, dex_x2, 42, fill=dex_bg, outline=dex_border)
+        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 8, "bold"), anchor="center")
+
+        club_x2 = dex_x1 - gap
         club_x1 = club_x2 - club_w
         self.club_btn_rect = (club_x1, 10, club_x2, 42)
         c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
@@ -2553,9 +2619,27 @@ class ShanktuaryApp:
             ogc = self.current_shot.get("open_golf_coach", {})
             us_units = ogc.get("us_customary_units", {})
 
-            club_path = ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            face_to_path = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
-            face_to_target = ogc.get("club_face_to_target_degrees", {}).get("right_handed", 0.0)
+            hand_key = "left_handed" if self.is_left_handed else "right_handed"
+            path_data = ogc.get("club_path_degrees", {})
+            if isinstance(path_data, dict):
+                club_path = path_data.get(hand_key, path_data.get("right_handed", 0.0))
+            else:
+                club_path = float(path_data or 0.0)
+                if self.is_left_handed: club_path = -club_path
+
+            f2p_data = ogc.get("club_face_to_path_degrees", {})
+            if isinstance(f2p_data, dict):
+                face_to_path = f2p_data.get(hand_key, f2p_data.get("right_handed", 0.0))
+            else:
+                face_to_path = float(f2p_data or 0.0)
+                if self.is_left_handed: face_to_path = -face_to_path
+
+            f2t_data = ogc.get("club_face_to_target_degrees", {})
+            if isinstance(f2t_data, dict):
+                face_to_target = f2t_data.get(hand_key, f2t_data.get("right_handed", 0.0))
+            else:
+                face_to_target = float(f2t_data or 0.0)
+                if self.is_left_handed: face_to_target = -face_to_target
             vert_launch = self.current_shot.get("vertical_launch_angle_degrees", 0.0)
             horiz_launch = self.current_shot.get("horizontal_launch_angle_degrees", 0.0)
             sidespin = ogc.get("sidespin_rpm", 0.0)
@@ -3394,8 +3478,14 @@ class ShanktuaryApp:
     def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0):
         top_bar_h = 108
         avail_h = h - top_bar_h - 10
-        mid_x = offset_x + (avail_w // 2)
-        mid_y = top_bar_h + (avail_h // 2)
+        quad_w = avail_w // 2
+        quad_h = avail_h // 2
+        mid_x = offset_x + quad_w
+        mid_y = top_bar_h + quad_h
+
+        # Dynamic responsive scale based on quadrant dimensions (fills empty space on large displays)
+        scale = max(0.85, min(2.5, min(quad_w / 380.0, quad_h / 230.0)))
+        font_scale = max(0.85, min(1.85, scale))
 
         self.canvas.create_line(mid_x, top_bar_h, mid_x, h - 10, fill="#232630", width=2)
         self.canvas.create_line(offset_x, mid_y, offset_x + avail_w, mid_y, fill="#232630", width=2)
@@ -3403,94 +3493,107 @@ class ShanktuaryApp:
         # Inspection Banner Header
         if 0 <= self.selected_shot_index < len(self.session_shots):
             insp_text = f"INSPECTING SHOT #{self.selected_shot_index + 1} OF {len(self.session_shots)}"
-            self.canvas.create_text(mid_x, top_bar_h + 12, text=insp_text, fill="#FFEA00", font=("Helvetica", 9, "bold"))
+            self.canvas.create_text(mid_x, top_bar_h + int(14 * font_scale), text=insp_text, fill="#FFEA00", font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
 
         # Quadrant 1 (Top-Left): Overhead View
-        q1_cx, q1_cy = offset_x + (avail_w // 4), top_bar_h + (avail_h // 4)
+        q1_cx, q1_cy = offset_x + (quad_w // 2), top_bar_h + (quad_h // 2)
         q1_top = top_bar_h
         q1_bot = mid_y
 
-        path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path > 0 else 'Out To In'}"
+        if self.is_left_handed:
+            path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path < 0 else 'Out To In'}"
+        else:
+            path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path > 0 else 'Out To In'}"
         face_target_str = f"Face To Target: {abs(face_to_target):.1f}° {'Open' if face_to_target > 0 else 'Closed'}"
         face_path_str = f"Face To Path: {abs(face_to_path):.1f}° {'Open' if face_to_path > 0 else 'Closed'}"
 
-        self.canvas.create_text(q1_cx, q1_top + 22, text=path_str, fill="#00E5FF", font=("Consolas", 11, "bold"))
-        self.canvas.create_line(q1_cx - 130, q1_cy, q1_cx + 130, q1_cy, fill="#40C4FF", width=1, dash=(4, 4))
+        self.canvas.create_text(q1_cx, q1_top + int(24 * font_scale), text=path_str, fill="#00E5FF", font=("Consolas", max(10, int(13 * font_scale)), "bold"))
+        self.canvas.create_line(q1_cx - int(150 * scale), q1_cy, q1_cx + int(150 * scale), q1_cy, fill="#40C4FF", width=1, dash=(4, 4))
         
-        if self.overhead_img:
-            rotated = self.overhead_img.rotate(-face_to_target, resample=Image.BICUBIC, expand=True)
-            self.img_cache["q1_overhead"] = ImageTk.PhotoImage(rotated)
-            self.canvas.create_image(q1_cx, q1_cy, image=self.img_cache["q1_overhead"], anchor="c")
+        overhead_h = int(140 * scale)
+        ov_img = self.get_rotated_overhead_asset(overhead_h, face_to_target, mirror=self.is_left_handed)
+        if ov_img:
+            self.canvas.create_image(q1_cx, q1_cy, image=ov_img, anchor="c")
 
         path_rad = math.radians(club_path)
-        px1, py1 = self.rotate_point(q1_cx, q1_cy + 65, q1_cx, q1_cy, path_rad)
-        px2, py2 = self.rotate_point(q1_cx, q1_cy - 65, q1_cx, q1_cy, path_rad)
-        self.canvas.create_line(px1, py1, px2, py2, fill="#00E5FF", width=3, arrow=tk.LAST)
+        arrow_len = int(75 * scale)
+        px1, py1 = self.rotate_point(q1_cx, q1_cy + arrow_len, q1_cx, q1_cy, path_rad)
+        px2, py2 = self.rotate_point(q1_cx, q1_cy - arrow_len, q1_cx, q1_cy, path_rad)
+        self.canvas.create_line(px1, py1, px2, py2, fill="#00E5FF", width=max(3, int(3.5 * scale)), arrow=tk.LAST, arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
 
-        self.canvas.create_oval(q1_cx + 45 - 7, q1_cy - 7, q1_cx + 45 + 7, q1_cy + 7, fill="#FFFFFF", outline="#D0D5DD")
+        ball_offset_x = int(-50 * scale) if self.is_left_handed else int(50 * scale)
+        ball_r = int(9 * scale)
+        self.canvas.create_oval(q1_cx + ball_offset_x - ball_r, q1_cy - ball_r, q1_cx + ball_offset_x + ball_r, q1_cy + ball_r, fill="#FFFFFF", outline="#D0D5DD")
 
-        self.canvas.create_text(q1_cx, q1_bot - 34, text=face_target_str, fill="#FFEA00", font=("Consolas", 10, "bold"))
-        self.canvas.create_text(q1_cx, q1_bot - 16, text=face_path_str, fill="#FF4081", font=("Consolas", 10, "bold"))
+        self.canvas.create_text(q1_cx, q1_bot - int(38 * font_scale), text=face_target_str, fill="#FFEA00", font=("Consolas", max(9, int(12 * font_scale)), "bold"))
+        self.canvas.create_text(q1_cx, q1_bot - int(18 * font_scale), text=face_path_str, fill="#FF4081", font=("Consolas", max(9, int(12 * font_scale)), "bold"))
 
         # Quadrant 2 (Bottom-Left): Trajectory Arc
-        q2_cx, q2_cy = offset_x + (avail_w // 4), mid_y + (avail_h // 4)
+        q2_cx, q2_cy = offset_x + (quad_w // 2), mid_y + (quad_h // 2)
         q2_top = mid_y
         q2_bot = h - 10
-        ground_y = q2_cy + 30
+        ground_y = q2_cy + int(36 * scale)
 
         top_elev_str = f"Launch Angle: {vert_launch:.1f}°   |   Apex: {apex_yds:.1f} yds"
         bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
 
-        self.canvas.create_text(q2_cx, q2_top + 22, text=top_elev_str, fill="#00FF66", font=("Consolas", 10, "bold"))
-        self.canvas.create_line(q2_cx - 140, ground_y, q2_cx + 140, ground_y, fill="#3A3F4D", width=2, dash=(4, 4))
+        self.canvas.create_text(q2_cx, q2_top + int(24 * font_scale), text=top_elev_str, fill="#00FF66", font=("Consolas", max(10, int(12 * font_scale)), "bold"))
+        self.canvas.create_line(q2_cx - int(160 * scale), ground_y, q2_cx + int(160 * scale), ground_y, fill="#3A3F4D", width=2, dash=(4, 4))
         
-        if self.side_img:
-            self.img_cache["q2_side"] = ImageTk.PhotoImage(self.side_img)
-            self.canvas.create_image(q2_cx - 85, ground_y - 20, image=self.img_cache["q2_side"], anchor="c")
+        side_h = int(115 * scale)
+        side_offset_x = int(95 * scale)
+        side_img = self.get_scaled_club_asset(SIDE_PATH, side_h, mirror=self.is_left_handed)
+        if side_img:
+            self.canvas.create_image(q2_cx - side_offset_x, ground_y - int(24 * scale), image=side_img, anchor="c")
 
+        arc_span = int(240 * scale)
         arc_pts = []
-        for t in range(0, 101, 5):
+        for t in range(0, 101, 4):
             frac = t / 100.0
-            x_p = (q2_cx - 85) + int(220 * frac)
-            h_p = math.sin(frac * math.pi) * min(55, int(apex_yds * 16))
+            x_p = (q2_cx - side_offset_x) + int(arc_span * frac)
+            h_p = math.sin(frac * math.pi) * min(int(70 * scale), int(apex_yds * 16 * scale))
             y_p = ground_y - int(h_p)
             arc_pts.extend([x_p, y_p])
         
-        self.canvas.create_line(arc_pts, fill="#00FF66", width=3, smooth=True)
-        self.canvas.create_oval(q2_cx - 85 - 6, ground_y - 6, q2_cx - 85 + 6, ground_y + 6, fill="#FFFFFF")
+        self.canvas.create_line(arc_pts, fill="#00FF66", width=max(3, int(3.5 * scale)), smooth=True)
+        ball_r2 = int(7 * scale)
+        self.canvas.create_oval(q2_cx - side_offset_x - ball_r2, ground_y - ball_r2, q2_cx - side_offset_x + ball_r2, ground_y + ball_r2, fill="#FFFFFF")
 
-        self.canvas.create_text(q2_cx, q2_bot - 16, text=bot_elev_str, fill="#E0E0E0", font=("Consolas", 10, "bold"))
+        self.canvas.create_text(q2_cx, q2_bot - int(18 * font_scale), text=bot_elev_str, fill="#E0E0E0", font=("Consolas", max(9, int(12 * font_scale)), "bold"))
 
         # Quadrant 3 (Top-Right): 3D Spin Axis
-        q3_cx, q3_cy = offset_x + (3 * avail_w // 4), top_bar_h + (avail_h // 4)
+        q3_cx, q3_cy = offset_x + (3 * quad_w // 2), top_bar_h + (quad_h // 2)
         q3_top = top_bar_h
         q3_bot = mid_y
         
         rank_colors = {"A": "#00FF66", "B": "#00E5FF", "C": "#FFC107", "D": "#FF4081"}
         badge_color = rank_colors.get(shot_rank, "#00FF66")
         
-        badge_y1 = q3_top + 10
-        badge_y2 = q3_top + 32
-        self.canvas.create_rectangle(q3_cx - 95, badge_y1, q3_cx - 65, badge_y2, fill=badge_color, outline="")
-        self.canvas.create_text(q3_cx - 80, (badge_y1 + badge_y2) // 2, text=shot_rank, fill="#101114", font=("Helvetica", 11, "bold"))
-        self.canvas.create_text(q3_cx - 50, (badge_y1 + badge_y2) // 2, text=shot_name.upper(), fill=badge_color, font=("Helvetica", 13, "bold"), anchor="w")
+        badge_h = int(24 * font_scale)
+        badge_y1 = q3_top + int(12 * font_scale)
+        badge_y2 = badge_y1 + badge_h
+        badge_w = int(32 * font_scale)
+        self.canvas.create_rectangle(q3_cx - badge_w - int(60 * font_scale), badge_y1, q3_cx - int(60 * font_scale), badge_y2, fill=badge_color, outline="")
+        self.canvas.create_text(q3_cx - (badge_w // 2) - int(60 * font_scale), (badge_y1 + badge_y2) // 2, text=shot_rank, fill="#101114", font=("Helvetica", max(10, int(12 * font_scale)), "bold"))
+        self.canvas.create_text(q3_cx - int(50 * font_scale), (badge_y1 + badge_y2) // 2, text=shot_name.upper(), fill=badge_color, font=("Helvetica", max(12, int(14 * font_scale)), "bold"), anchor="w")
 
-        ball_r = 22
-        self.canvas.create_oval(q3_cx - ball_r, q3_cy - ball_r, q3_cx + ball_r, q3_cy + ball_r, fill="#FFFFFF", outline="#D0D5DD", width=2)
+        ball_r3 = int(30 * scale)
+        self.canvas.create_oval(q3_cx - ball_r3, q3_cy - ball_r3, q3_cx + ball_r3, q3_cy + ball_r3, fill="#FFFFFF", outline="#D0D5DD", width=2)
         
         axis_rad = math.radians(spin_axis)
-        ax1, ay1 = self.rotate_point(q3_cx, q3_cy + 32, q3_cx, q3_cy, axis_rad)
-        ax2, ay2 = self.rotate_point(q3_cx, q3_cy - 32, q3_cx, q3_cy, axis_rad)
-        self.canvas.create_line(ax1, ay1, ax2, ay2, fill="#FF4081", width=4, arrow=tk.LAST, arrowshape=(12, 16, 5))
+        spin_len = int(46 * scale)
+        ax1, ay1 = self.rotate_point(q3_cx, q3_cy + spin_len, q3_cx, q3_cy, axis_rad)
+        ax2, ay2 = self.rotate_point(q3_cx, q3_cy - spin_len, q3_cx, q3_cy, axis_rad)
+        self.canvas.create_line(ax1, ay1, ax2, ay2, fill="#FF4081", width=max(4, int(4.5 * scale)), arrow=tk.LAST, arrowshape=(int(14 * scale), int(18 * scale), int(6 * scale)))
 
         spin_line1 = f"Spin Axis: {abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}   |   Sidespin: {int(sidespin)} rpm"
         spin_line2 = f"Total Spin: {int(total_spin)} rpm   |   Opt. Potential: {opt_max:.1f} YDS"
 
-        self.canvas.create_text(q3_cx, q3_bot - 34, text=spin_line1, fill="#00E5FF", font=("Consolas", 10, "bold"))
-        self.canvas.create_text(q3_cx, q3_bot - 16, text=spin_line2, fill="#8E94A5", font=("Consolas", 9))
+        self.canvas.create_text(q3_cx, q3_bot - int(38 * font_scale), text=spin_line1, fill="#00E5FF", font=("Consolas", max(9, int(12 * font_scale)), "bold"))
+        self.canvas.create_text(q3_cx, q3_bot - int(18 * font_scale), text=spin_line2, fill="#8E94A5", font=("Consolas", max(8, int(10 * font_scale))))
 
         # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
-        q4_cx, q4_cy = offset_x + (3 * avail_w // 4), mid_y + (avail_h // 4)
+        q4_cx, q4_cy = offset_x + (3 * quad_w // 2), mid_y + (quad_h // 2)
         q4_top = mid_y
         q4_bot = h - 10
 
@@ -3574,30 +3677,35 @@ class ShanktuaryApp:
             strike_color = "#FF1744"
 
         # Top Pill Badges (Exact Strike Coordinates)
-        badge_y = q4_top + 20
-        badge_w = 135
+        badge_y = q4_top + int(24 * font_scale)
+        badge_w = int(145 * font_scale)
+        badge_h = int(22 * font_scale)
         # Lateral Pill
-        self.canvas.create_rectangle(q4_cx - badge_w - 6, badge_y - 11, q4_cx - 6, badge_y + 11, fill="#121622", outline=h_badge_col, width=1)
-        self.canvas.create_text(q4_cx - (badge_w // 2) - 6, badge_y, text=h_text, fill=h_badge_col, font=("Consolas", 8, "bold"))
+        self.canvas.create_rectangle(q4_cx - badge_w - 6, badge_y - badge_h // 2, q4_cx - 6, badge_y + badge_h // 2, fill="#121622", outline=h_badge_col, width=1)
+        self.canvas.create_text(q4_cx - (badge_w // 2) - 6, badge_y, text=h_text, fill=h_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
         # Vertical Pill
-        self.canvas.create_rectangle(q4_cx + 6, badge_y - 11, q4_cx + badge_w + 6, badge_y + 11, fill="#121622", outline=v_badge_col, width=1)
-        self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", 8, "bold"))
+        self.canvas.create_rectangle(q4_cx + 6, badge_y - badge_h // 2, q4_cx + badge_w + 6, badge_y + badge_h // 2, fill="#121622", outline=v_badge_col, width=1)
+        self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
 
         # Clubface Graphic
-        if self.face_img:
-            self.img_cache["q4_face"] = ImageTk.PhotoImage(self.face_img)
-            self.canvas.create_image(q4_cx, q4_cy, image=self.img_cache["q4_face"], anchor="c")
+        face_h = int(130 * scale)
+        face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=self.is_left_handed)
+        if face_img:
+            self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
 
         # Sweet Spot Origin (0,0) on Scorelines
-        center_x = q4_cx - 20
-        center_y = q4_cy - 5
-        self.canvas.create_line(center_x - 14, center_y, center_x + 14, center_y, fill="#3A445C", width=1, dash=(2, 2))
-        self.canvas.create_line(center_x, center_y - 14, center_x, center_y + 14, fill="#3A445C", width=1, dash=(2, 2))
-        self.canvas.create_oval(center_x - 2, center_y - 2, center_x + 2, center_y + 2, fill="#00E5FF", outline="")
+        center_offset_x = int(22 * scale) if self.is_left_handed else int(-22 * scale)
+        center_x = q4_cx + center_offset_x
+        center_y = q4_cy - int(6 * scale)
+        cross_len = int(18 * scale)
+        self.canvas.create_line(center_x - cross_len, center_y, center_x + cross_len, center_y, fill="#3A445C", width=1, dash=(2, 2))
+        self.canvas.create_line(center_x, center_y - cross_len, center_x, center_y + cross_len, fill="#3A445C", width=1, dash=(2, 2))
+        self.canvas.create_oval(center_x - int(3 * scale), center_y - int(3 * scale), center_x + int(3 * scale), center_y + int(3 * scale), fill="#00E5FF", outline="")
 
         # Impact Contact Location
-        scale_px = 1.75
-        impact_x = center_x + int(h_impact_mm * scale_px)
+        scale_px = 2.1 * scale
+        dx_px = -int(h_impact_mm * scale_px) if self.is_left_handed else int(h_impact_mm * scale_px)
+        impact_x = center_x + dx_px
         impact_y = center_y - int(v_impact_mm * scale_px)
 
         # Vector Line from Sweet Spot to Impact
@@ -3605,13 +3713,16 @@ class ShanktuaryApp:
             self.canvas.create_line(center_x, center_y, impact_x, impact_y, fill=strike_color, width=1, dash=(3, 2))
 
         # Precision Strike Reticle
-        self.canvas.create_oval(impact_x - 12, impact_y - 12, impact_x + 12, impact_y + 12, fill="", outline=strike_color, width=2)
-        self.canvas.create_oval(impact_x - 6, impact_y - 6, impact_x + 6, impact_y + 6, fill="", outline=strike_color, width=1)
-        self.canvas.create_oval(impact_x - 3, impact_y - 3, impact_x + 3, impact_y + 3, fill=strike_color, outline="")
+        r_outer = int(14 * scale)
+        r_mid = int(7 * scale)
+        r_dot = int(3.5 * scale)
+        self.canvas.create_oval(impact_x - r_outer, impact_y - r_outer, impact_x + r_outer, impact_y + r_outer, fill="", outline=strike_color, width=2)
+        self.canvas.create_oval(impact_x - r_mid, impact_y - r_mid, impact_x + r_mid, impact_y + r_mid, fill="", outline=strike_color, width=1)
+        self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
 
         # Footer Metrics
-        self.canvas.create_text(q4_cx, q4_bot - 24, text=f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)", fill=strike_color, font=("Helvetica", 9, "bold"))
-        self.canvas.create_text(q4_cx, q4_bot - 8, text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", 8, "bold"))
+        self.canvas.create_text(q4_cx, q4_bot - int(28 * font_scale), text=f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)", fill=strike_color, font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
+        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", max(8, int(10 * font_scale)), "bold"))
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
@@ -4542,8 +4653,11 @@ class ShanktuaryApp:
     def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
         x2, y2 = x1 + w, y1 + h
         self.canvas.create_rectangle(x1, y1, x2, y2, fill="#151926", outline="#242B3E", width=1)
-        foot_label = "LEAD FOOT (LEFT)" if is_left else "TRAIL FOOT (RIGHT)"
-        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill="#8E94A5", font=("Helvetica", 7, "bold"))
+        if self.is_left_handed:
+            foot_label = "TRAIL FOOT (LEFT)" if is_left else "LEAD FOOT (RIGHT)"
+        else:
+            foot_label = "LEAD FOOT (LEFT)" if is_left else "TRAIL FOOT (RIGHT)"
+        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill="#00E5FF" if "LEAD" in foot_label else "#8E94A5", font=("Helvetica", 7, "bold"))
 
         # Foot Outline
         cx = (x1 + x2) // 2
