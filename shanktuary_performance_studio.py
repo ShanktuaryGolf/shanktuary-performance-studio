@@ -1630,6 +1630,7 @@ class ShanktuaryApp:
             if self.balance_modal_tare_rect and self.balance_modal_tare_rect[0] <= event.x <= self.balance_modal_tare_rect[2] and self.balance_modal_tare_rect[1] <= event.y <= self.balance_modal_tare_rect[3]:
                 if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
                     obs_server.pressure_manager.tare()
+                    self.swing_lab_history.clear()
                     self.copy_feedback = "✓ Baseline Zeroed (Tared)"
                     self.root.after(2000, self.clear_copy_feedback)
                     self.draw_screen()
@@ -1957,6 +1958,7 @@ class ShanktuaryApp:
             if self.swing_lab_tare_rect and self.swing_lab_tare_rect[0] <= event.x <= self.swing_lab_tare_rect[2] and self.swing_lab_tare_rect[1] <= event.y <= self.swing_lab_tare_rect[3]:
                 if hasattr(obs_server, "pressure_manager"):
                     obs_server.pressure_manager.tare()
+                    self.swing_lab_history.clear()
                     self.copy_feedback = "✓ Baseline Zeroed (Tared)"
                     self.root.after(2000, self.clear_copy_feedback)
                     self.draw_screen()
