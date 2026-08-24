@@ -185,6 +185,8 @@ class OBSState:
 
 obs_state = OBSState()
 
+CALIBRATION_FILE = os.path.expanduser("~/.shanktuary/wbb_calibration.json")
+
 # --- Biomechanical Pressure Subsystem Manager ---
 class PressureManager:
     """Manages Wii Balance Board hardware, simulator, and 60Hz telemetry broadcasting."""
@@ -201,11 +203,18 @@ class PressureManager:
         self.assigned_left = None
         self.assigned_right = None
         self.assignment_wizard = None
+        self.balance_multiplier = [1.0, 1.0]
+        self._alignment_active = False
+        self._alignment_start_time = 0.0
+        self._alignment_end_time = 0.0
+        self._alignment_samples = []
+        self._alignment_status_msg = "Idle"
         self.running = False
         self.thread = None
         self.latest_frame = None
         self.last_shot_trace = None
         self.lock = threading.Lock()
+        self._load_calibration()
         self._init_subsystem()
 
     def _init_subsystem(self):
@@ -286,6 +295,27 @@ class PressureManager:
                     if reading:
                         self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
+
+                        # Sampling for 4-second stance alignment
+                        if self._alignment_active:
+                            if tared.total >= 10.0:
+                                left_w = tared.top_left + tared.bottom_left
+                                right_w = tared.top_right + tared.bottom_right
+                                self._alignment_samples.append((left_w, right_w))
+                            if time.time() >= self._alignment_end_time:
+                                self._finish_stance_alignment()
+
+                        # Apply 50/50 stance balance calibration multipliers
+                        if self.balance_multiplier != [1.0, 1.0]:
+                            mult_l, mult_r = self.balance_multiplier
+                            from src.hardware.pressure.base import SensorReading
+                            tared = SensorReading(
+                                top_left=tared.top_left * mult_l,
+                                bottom_left=tared.bottom_left * mult_l,
+                                top_right=tared.top_right * mult_r,
+                                bottom_right=tared.bottom_right * mult_r,
+                                timestamp=tared.timestamp
+                            )
                         
                         # When load is under threshold (< 1.0 kg), emit zero resting frame at center (0,0)
                         if tared.total < 1.0:
@@ -323,6 +353,77 @@ class PressureManager:
             except Exception:
                 pass
             time.sleep(0.012)
+
+    def _save_calibration(self, filepath=None):
+        fp = filepath or CALIBRATION_FILE
+        try:
+            os.makedirs(os.path.dirname(fp), exist_ok=True)
+            data = {
+                "board_mode": self.board_mode,
+                "assigned_left": str(self.assigned_left) if self.assigned_left else None,
+                "assigned_right": str(self.assigned_right) if self.assigned_right else None,
+                "balance_multiplier": self.balance_multiplier,
+            }
+            with open(fp, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"[+] Saved balance calibration to {fp}")
+        except Exception as e:
+            print(f"[!] Could not save calibration: {e}")
+
+    def _load_calibration(self, filepath=None):
+        fp = filepath or CALIBRATION_FILE
+        try:
+            if os.path.exists(fp):
+                with open(fp, "r") as f:
+                    data = json.load(f)
+                if "balance_multiplier" in data and isinstance(data["balance_multiplier"], list) and len(data["balance_multiplier"]) == 2:
+                    self.balance_multiplier = [float(data["balance_multiplier"][0]), float(data["balance_multiplier"][1])]
+                if "board_mode" in data:
+                    self.board_mode = data["board_mode"]
+                print(f"[+] Loaded balance calibration from {fp}: multipliers={self.balance_multiplier}")
+        except Exception as e:
+            print(f"[!] Could not load calibration: {e}")
+
+    def start_stance_alignment(self, duration_sec=4.0):
+        with self.lock:
+            self._alignment_samples = []
+            self._alignment_start_time = time.time()
+            self._alignment_end_time = time.time() + duration_sec
+            self._alignment_active = True
+            self._alignment_status_msg = f"Sampling stance balance ({duration_sec:.0f}s)..."
+            return {"status": "started", "duration_sec": duration_sec}
+
+    def get_alignment_status(self):
+        with self.lock:
+            now = time.time()
+            rem = max(0.0, self._alignment_end_time - now) if self._alignment_active else 0.0
+            tot_dur = max(0.01, self._alignment_end_time - self._alignment_start_time) if self._alignment_start_time > 0 else 4.0
+            prog = min(1.0, max(0.0, (tot_dur - rem) / tot_dur)) if self._alignment_active else (1.0 if self._alignment_status_msg.startswith("✓") else 0.0)
+            return {
+                "active": self._alignment_active,
+                "remaining_sec": round(rem, 1),
+                "progress": round(prog, 2),
+                "message": self._alignment_status_msg,
+                "multipliers": self.balance_multiplier,
+            }
+
+    def _finish_stance_alignment(self):
+        with self.lock:
+            self._alignment_active = False
+            if len(self._alignment_samples) >= 15:
+                avg_l = sum(s[0] for s in self._alignment_samples) / len(self._alignment_samples)
+                avg_r = sum(s[1] for s in self._alignment_samples) / len(self._alignment_samples)
+                if avg_l > 5.0 and avg_r > 5.0:
+                    target = (avg_l + avg_r) * 0.5
+                    scale_l = target / avg_l
+                    scale_r = target / avg_r
+                    self.balance_multiplier = [round(scale_l, 4), round(scale_r, 4)]
+                    self._save_calibration()
+                    self._alignment_status_msg = f"✓ 50/50 Stance Calibrated (L:{self.balance_multiplier[0]:.2f}, R:{self.balance_multiplier[1]:.2f})"
+                else:
+                    self._alignment_status_msg = "Alignment failed: Under 5kg detected on boards."
+            else:
+                self._alignment_status_msg = "Alignment failed: Stand still during countdown."
 
     def tare(self):
         with self.lock:
@@ -623,6 +724,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/pressure/assign":
             wizard_status = pressure_manager.assignment_wizard.get_status() if pressure_manager.assignment_wizard else {"phase": "idle", "message": ""}
             self.send_json(wizard_status)
+        elif parsed_path == "/api/pressure/align_stance":
+            self.send_json(pressure_manager.get_alignment_status())
         elif parsed_path.startswith("/assets/"):
             asset_filename = parsed_path.replace("/assets/", "")
             file_path = assets_dir / asset_filename
@@ -657,6 +760,17 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/pressure/tare":
             ok = pressure_manager.tare()
             self.send_json({"status": "ok" if ok else "error"})
+        elif parsed_path == "/api/pressure/align_stance":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            dur = 4.0
+            try:
+                data = json.loads(body)
+                dur = float(data.get("duration_sec", 4.0))
+            except Exception:
+                pass
+            res = pressure_manager.start_stance_alignment(duration_sec=dur)
+            self.send_json(res)
         elif parsed_path == "/api/pressure/simulator":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
