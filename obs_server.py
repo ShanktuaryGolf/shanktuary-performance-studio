@@ -684,6 +684,8 @@ class PressureManager:
 pressure_manager = PressureManager()
 
 class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         return
 
@@ -878,6 +880,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", accept_key)
         self.end_headers()
+        self.wfile.flush()
 
         raw_sock = self.connection
         with obs_state.lock:
