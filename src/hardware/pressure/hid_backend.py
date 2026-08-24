@@ -156,101 +156,52 @@ class HidBackend(BoardBackend):
             self._device = None
             raise RuntimeError("Wii Balance Board not found via HID. Please verify Bluetooth connection.")
 
-        # Use blocking reads during extension initialization
+        # Match exact working sequence from diagnose_wbb.py
         self._device.set_nonblocking(0)
 
-        # 1. Wake extension controller
-        self._write_register(EXT_INIT_ADDR1, b"\x55")
+        # 1. Initialize extension controller
+        self._device.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xF0, 0x01, 0x55] + [0x00] * 15))
         time.sleep(0.05)
-        self._write_register(EXT_INIT_ADDR2, b"\x00")
+        self._device.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xFB, 0x01, 0x00] + [0x00] * 15))
         time.sleep(0.05)
 
         # 2. Read factory calibration data from 0xA40024 (24 bytes)
-        cal_data = self._read_register(EXT_CALIB_ADDR, 24)
-        if cal_data and len(cal_data) >= 24:
-            self._calibration = self._parse_calibration(cal_data)
-        else:
+        try:
+            self._device.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
+            time.sleep(0.05)
+            cal_bytes = bytearray()
+            for _ in range(5):
+                d = self._device.read(64, 250)
+                if d and d[0] == 0x21 and len(d) >= 22:
+                    sz = ((d[3] >> 4) & 0x0F) + 1
+                    cal_bytes.extend(d[6:6+sz])
+                    if len(cal_bytes) >= 24:
+                        break
+            if len(cal_bytes) >= 24:
+                self._calibration = self._parse_calibration(bytes(cal_bytes[:24]))
+            else:
+                self._calibration = None
+        except Exception:
             self._calibration = None
 
-        # 3. Turn on LED 1 as visual feedback
-        self._send_report(bytes([RPT_LED, 0x10]))
+        # 3. Turn on LED 1 (solid blue)
+        self._device.write(bytes([0x11, 0x10]))
         time.sleep(0.05)
 
         # 4. Set reporting mode: continuous, buttons + extension
-        self._send_report(bytes([RPT_DATA_REPORTING, 0x04, RPT_IN_BTN_EXT8]))
+        self._device.write(bytes([0x12, 0x04, 0x32]))
         time.sleep(0.05)
 
         # Switch to non-blocking for normal streaming operation
         self._device.set_nonblocking(1)
         print(f"[+] Wii Balance Board connected and streaming via HID (calibrated={'yes' if self._calibration else 'adaptive'})!")
 
-    def _send_report(self, data: bytes) -> None:
-        """Send an output report to the Wiimote."""
-        if self._device is None:
-            return
-        try:
-            self._device.write(data)
-        except Exception:
-            pass
-
-    def _write_register(self, address: int, data: bytes) -> None:
-        """Write data to a Wiimote register address."""
-        addr_bytes = address.to_bytes(3, "big")
-        size = len(data)
-        payload = bytes([RPT_WRITE_REG, 0x04]) + addr_bytes + bytes([size])
-        payload += data + b"\x00" * (16 - len(data))
-        self._send_report(payload)
-
-    def _read_register(self, address: int, size: int) -> bytes | None:
-        """Read data from a Wiimote register address."""
-        addr_bytes = address.to_bytes(3, "big")
-        size_bytes = size.to_bytes(2, "big")
-        payload = bytes([RPT_READ_REG, 0x04]) + addr_bytes + size_bytes
-        self._send_report(payload)
-        time.sleep(0.05)
-
-        result = bytearray()
-        for _ in range(6):
-            report = self._wait_for_report(RPT_IN_READ_DATA, timeout=0.25)
-            if report and len(report) >= 22:
-                size_error = report[3]
-                chunk_size = ((size_error >> 4) & 0x0F) + 1
-                chunk = report[6:6 + chunk_size]
-                result.extend(chunk)
-                if len(result) >= size:
-                    break
-        return bytes(result[:size]) if len(result) >= size else None
-
-    def _wait_for_report(self, report_id: int, timeout: float = 0.25) -> bytes | None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                data = self._device.read(64, timeout_ms=int(timeout * 1000))
-            except Exception:
-                return None
-            if not data:
-                time.sleep(0.005)
-                continue
-            if data[0] == report_id:
-                return bytes(data)
-        return None
-
-    @staticmethod
-    def _parse_calibration(data: bytes) -> _BoardCalibration:
-        vals = struct.unpack(">12H", data[:24])
-        return _BoardCalibration(
-            top_right=_CalibrationData(vals[0], vals[4], vals[8]),
-            bottom_right=_CalibrationData(vals[1], vals[5], vals[9]),
-            top_left=_CalibrationData(vals[2], vals[6], vals[10]),
-            bottom_left=_CalibrationData(vals[3], vals[7], vals[11]),
-        )
-
     def shutdown(self) -> None:
         if self._device is None:
             return
         try:
-            self._send_report(bytes([RPT_LED, 0x00]))
-            self._send_report(bytes([RPT_DATA_REPORTING, 0x00, 0x30]))
+            self._device.write(bytes([0x11, 0x00]))
+            self._device.write(bytes([0x12, 0x00, 0x30]))
         except Exception:
             pass
         self.close()
@@ -284,7 +235,10 @@ class HidBackend(BoardBackend):
 
         # Re-enable continuous reporting if status report received
         if report_id == RPT_IN_STATUS:
-            self._send_report(bytes([RPT_DATA_REPORTING, 0x04, RPT_IN_BTN_EXT8]))
+            try:
+                self._device.write(bytes([0x12, 0x04, 0x32]))
+            except Exception:
+                pass
             return None
 
         if report_id not in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19):
@@ -317,4 +271,14 @@ class HidBackend(BoardBackend):
             bottom_left=kg_bl,
             bottom_right=kg_br,
             timestamp=time.monotonic(),
+        )
+
+    @staticmethod
+    def _parse_calibration(data: bytes) -> _BoardCalibration:
+        vals = struct.unpack(">12H", data[:24])
+        return _BoardCalibration(
+            top_right=_CalibrationData(vals[0], vals[4], vals[8]),
+            bottom_right=_CalibrationData(vals[1], vals[5], vals[9]),
+            top_left=_CalibrationData(vals[2], vals[6], vals[10]),
+            bottom_left=_CalibrationData(vals[3], vals[7], vals[11]),
         )
