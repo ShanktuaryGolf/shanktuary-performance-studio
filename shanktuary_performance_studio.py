@@ -2662,12 +2662,23 @@ class ShanktuaryApp:
             offline_yds = us_units.get("offline_distance_yards", 0.0)
             peak_height_yds = us_units.get("peak_height_yards", 0.0)
 
-            shot_name = ogc.get("shot_name", "Straight")
-            shot_rank = ogc.get("shot_rank", "A")
-            optimal_max_yds = ogc.get("distance_potential_yards", 0.0)
-            closure_rate = ogc.get("closure_rate_dps", 0.0)
-            attack_angle = ogc.get("attack_angle_degrees", 0.0)
-            dynamic_loft = ogc.get("dynamic_loft_degrees", 0.0)
+            shot_name_val = ogc.get("shot_name", "Straight")
+            shot_name = shot_name_val.get(hand_key, shot_name_val.get("right_handed", "Straight")) if isinstance(shot_name_val, dict) else str(shot_name_val or "Straight")
+
+            shot_rank_val = ogc.get("shot_rank", "A")
+            shot_rank = shot_rank_val.get(hand_key, shot_rank_val.get("right_handed", "A")) if isinstance(shot_rank_val, dict) else str(shot_rank_val or "A")
+
+            opt_val = us_units.get("optimal_maximum_distance_yards") or ogc.get("distance_potential_yards", 0.0)
+            optimal_max_yds = opt_val.get(hand_key, opt_val.get("right_handed", 0.0)) if isinstance(opt_val, dict) else float(opt_val or 0.0)
+
+            cr_val = ogc.get("face_closure_rate_dps") or self.current_shot.get("face_closure_rate_dps") or ogc.get("closure_rate_dps") or 0.0
+            closure_rate = cr_val.get(hand_key, cr_val.get("right_handed", 0.0)) if isinstance(cr_val, dict) else float(cr_val or 0.0)
+
+            aoa_val = ogc.get("angle_of_attack_degrees") or self.current_shot.get("angle_of_attack_degrees") or 0.0
+            attack_angle = aoa_val.get(hand_key, aoa_val.get("right_handed", 0.0)) if isinstance(aoa_val, dict) else float(aoa_val or 0.0)
+
+            dl_val = ogc.get("dynamic_loft_degrees") or self.current_shot.get("dynamic_loft_degrees") or 0.0
+            dynamic_loft = dl_val.get(hand_key, dl_val.get("right_handed", 0.0)) if isinstance(dl_val, dict) else float(dl_val or 0.0)
         else:
             club_path = 0.0
             face_to_path = 0.0
@@ -2697,6 +2708,7 @@ class ShanktuaryApp:
 
         offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
         avail_w = w - offset_x
+        top_bar_h = 52 + int(56 * max(0.9, min(2.0, avail_w / 1200.0))) + 8
 
         # 1. Left Shot Library Sidebar
         self.draw_left_sidebar(w, h)
@@ -2709,9 +2721,9 @@ class ShanktuaryApp:
             # Mode 1: Delivery (4-Quadrant Studio)
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x, top_bar_h=top_bar_h)
             else:
-                self.canvas.create_text(offset_x + avail_w // 2, (h + 108) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
+                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
         elif self.view_mode == 2:
             # Mode 2: 3D Range Viewport
             self.draw_3d_range_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, peak_height_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=offset_x)
@@ -2739,7 +2751,7 @@ class ShanktuaryApp:
         else:
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x, top_bar_h=top_bar_h)
 
         # 4. Floating Overlay Menus (Top Layer)
         if self.show_session_dropdown:
@@ -3511,14 +3523,29 @@ class ShanktuaryApp:
                 self.canvas.create_rectangle(x2 - tag_w - 10, y1 + int(8 * ui_scale), x2 - 10, y1 + int(24 * ui_scale), fill="#0D261A" if ("OPTIMAL" in c_tag or "TOUR" in c_tag or "TARGET" in c_tag or "HIGH" in c_tag or "SQUARE" in c_tag) else "#26151A", outline=c_color)
                 self.canvas.create_text(x2 - 10 - tag_w // 2, y1 + int(16 * ui_scale), text=c_tag, fill=c_color, font=tag_font, anchor="center")
 
-            # Giant Primary Value (Centered in card)
-            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=val_font, anchor="center")
+            # Giant Primary Value (Dynamically scaled font to prevent wide strings from overflowing card width)
+            val_len = len(c_val)
+            if val_len > 9:
+                f_size = max(13, int(18 * ui_scale))
+            elif val_len > 6:
+                f_size = max(15, int(22 * ui_scale))
+            else:
+                f_size = max(18, int(28 * ui_scale))
+            dynamic_val_font = ("Consolas", f_size, "bold")
+            self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=dynamic_val_font, anchor="center")
 
             # Bottom Unit Tag
             self.canvas.create_text((x1 + x2) // 2, y2 - int(12 * ui_scale), text=c_unit, fill="#50566A", font=unit_font, anchor="center")
 
-    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0):
-        top_bar_h = 108
+    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0, top_bar_h=108):
+        if isinstance(shot_rank, dict):
+            shot_rank = shot_rank.get("left_handed" if self.is_left_handed else "right_handed", shot_rank.get("right_handed", "A"))
+        shot_rank = str(shot_rank or "A")
+
+        if isinstance(shot_name, dict):
+            shot_name = shot_name.get("left_handed" if self.is_left_handed else "right_handed", shot_name.get("right_handed", "Straight"))
+        shot_name = str(shot_name or "Straight")
+
         avail_h = h - top_bar_h - 10
         quad_w = avail_w // 2
         quad_h = avail_h // 2
