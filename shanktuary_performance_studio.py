@@ -73,22 +73,59 @@ BAG_CATEGORIES = [
     "Putter"
 ]
 
+# --- OpenGolfCoach clubhead-speed model constants -------------------------
+# Mirrors open-golf-coach/core/src/clubhead_data.rs (OpenLaunchLabs).
+# The Nova measures BALL data only; it has no club-tracking hardware. OGC
+# infers clubhead speed (and therefore smash factor) from ball speed, launch
+# angle and spin via a collision model whose effective COR is clamped to
+# [OGC_MIN_EFFECTIVE_COR, OGC_DRIVER_COR_LIMIT]. When that clamp engages the
+# reported smash/club speed collapse to a constant boundary value and stop
+# describing the strike at all -- see compute_smash_confidence().
+#
+# NOTE: these must stay in sync with the upstream Rust source. If OGC changes
+# its constants, clamp detection silently goes stale; verify_ogc_model_sync()
+# re-derives club speed from the live payload to catch that drift.
+OGC_BALL_MASS_KG = 0.04593
+OGC_CLUBHEAD_MASS_KG = 0.200
+OGC_DRIVER_COR_LIMIT = 0.83
+OGC_MIN_EFFECTIVE_COR = 0.52
+
+# Bands are selected by BALL speed (m/s), so club category is inferred from
+# speed alone -- a slow player's driver is scored against wedge-optimal
+# parameters. This is why sub-90mph ball speeds routinely pin the COR floor.
+OGC_IMPACT_BANDS = [
+    {"max_ball_speed_mps": 40.0, "base_cor": 0.55, "optimal_launch_deg": 28.0,
+     "launch_tolerance_deg": 15.0, "optimal_spin_rpm": 9000.0, "spin_tolerance_rpm": 4000.0},
+    {"max_ball_speed_mps": 50.0, "base_cor": 0.66, "optimal_launch_deg": 20.0,
+     "launch_tolerance_deg": 12.0, "optimal_spin_rpm": 7000.0, "spin_tolerance_rpm": 2500.0},
+    {"max_ball_speed_mps": 60.0, "base_cor": 0.72, "optimal_launch_deg": 16.0,
+     "launch_tolerance_deg": 10.0, "optimal_spin_rpm": 5000.0, "spin_tolerance_rpm": 2000.0},
+    {"max_ball_speed_mps": float("inf"), "base_cor": OGC_DRIVER_COR_LIMIT, "optimal_launch_deg": 12.0,
+     "launch_tolerance_deg": 8.0, "optimal_spin_rpm": 2500.0, "spin_tolerance_rpm": 1500.0},
+]
+
+_OGC_MASS_RATIO = OGC_BALL_MASS_KG / OGC_CLUBHEAD_MASS_KG
+# Smash values produced when the COR clamp saturates. Any shot reporting one of
+# these is a boundary artifact, not a measurement.
+OGC_SMASH_AT_COR_FLOOR = (1.0 + OGC_MIN_EFFECTIVE_COR) / (1.0 + _OGC_MASS_RATIO)
+OGC_SMASH_AT_COR_CEILING = (1.0 + OGC_DRIVER_COR_LIMIT) / (1.0 + _OGC_MASS_RATIO)
+
 DEFAULT_BAG = [
-    {"name": "Driver", "category": "Woods & Drivers", "brand": "Generic", "model": "Driver", "loft_deg": 10.5, "shaft": "Stiff"},
-    {"name": "3 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 15.0, "shaft": "Stiff"},
-    {"name": "5 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 18.0, "shaft": "Stiff"},
-    {"name": "3 Hybrid", "category": "Hybrids & Utilities", "brand": "Generic", "model": "Hybrid", "loft_deg": 19.0, "shaft": "Stiff"},
-    {"name": "4 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 21.0, "shaft": "Steel S"},
-    {"name": "5 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 24.0, "shaft": "Steel S"},
-    {"name": "6 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 27.0, "shaft": "Steel S"},
-    {"name": "7 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 31.0, "shaft": "Steel S"},
-    {"name": "8 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 35.0, "shaft": "Steel S"},
-    {"name": "9 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 40.0, "shaft": "Steel S"},
-    {"name": "PW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 45.0, "shaft": "Wedge Flex"},
-    {"name": "GW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 50.0, "shaft": "Wedge Flex"},
-    {"name": "SW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 54.0, "shaft": "Wedge Flex"},
-    {"name": "LW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 58.0, "shaft": "Wedge Flex"},
-    {"name": "Putter", "category": "Putter", "brand": "Generic", "model": "Blade", "loft_deg": 3.0, "shaft": "Standard"}
+    {"name": "Driver", "category": "Woods & Drivers", "brand": "Generic", "model": "Driver", "loft_deg": 10.5, "lie_deg": 56.0, "shaft": "Stiff"},
+    {"name": "3 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 15.0, "lie_deg": 56.5, "shaft": "Stiff"},
+    {"name": "5 Wood", "category": "Woods & Drivers", "brand": "Generic", "model": "Fairway", "loft_deg": 18.0, "lie_deg": 57.0, "shaft": "Stiff"},
+    {"name": "3 Hybrid", "category": "Hybrids & Utilities", "brand": "Generic", "model": "Hybrid", "loft_deg": 19.0, "lie_deg": 58.5, "shaft": "Stiff"},
+    {"name": "4 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 21.0, "lie_deg": 61.0, "shaft": "Steel S"},
+    {"name": "5 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 24.0, "lie_deg": 61.5, "shaft": "Steel S"},
+    {"name": "6 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 27.0, "lie_deg": 62.0, "shaft": "Steel S"},
+    {"name": "7 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 31.0, "lie_deg": 62.5, "shaft": "Steel S"},
+    {"name": "8 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 35.0, "lie_deg": 63.0, "shaft": "Steel S"},
+    {"name": "9 Iron", "category": "Irons", "brand": "Generic", "model": "Iron", "loft_deg": 40.0, "lie_deg": 63.5, "shaft": "Steel S"},
+    {"name": "PW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 45.0, "lie_deg": 64.0, "shaft": "Wedge Flex"},
+    {"name": "GW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 50.0, "lie_deg": 64.0, "shaft": "Wedge Flex"},
+    {"name": "SW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 54.0, "lie_deg": 64.0, "shaft": "Wedge Flex"},
+    {"name": "LW", "category": "Wedges", "brand": "Generic", "model": "Wedge", "loft_deg": 58.0, "lie_deg": 64.0, "shaft": "Wedge Flex"},
+    {"name": "Putter", "category": "Putter", "brand": "Generic", "model": "Blade", "loft_deg": 3.0, "lie_deg": 70.0, "shaft": "Standard"}
 ]
 
 def infer_club_category(club_name):
@@ -431,8 +468,9 @@ class ShanktuaryApp:
         self.spec_editor_brand = ""
         self.spec_editor_model = ""
         self.spec_editor_loft = ""
+        self.spec_editor_lie = ""
         self.spec_editor_shaft = ""
-        self.spec_editor_active_field = "brand" # "name", "category", "brand", "model", "loft", "shaft"
+        self.spec_editor_active_field = "brand" # "name", "category", "brand", "model", "loft", "lie", "shaft"
         self.spec_editor_box_rect = None
         self.spec_editor_save_rect = None
         self.spec_editor_delete_rect = None
@@ -690,6 +728,13 @@ class ShanktuaryApp:
                 self.is_left_handed = bool(data.get("is_left_handed", False))
             if not self.bag:
                 self.init_default_bag()
+            # Backfill lie_deg for bags saved before the field existed. Uses the
+            # matching DEFAULT_BAG entry so upgrading users get a sane standard
+            # rather than 0.0, without touching any spec they set themselves.
+            _default_lies = {c["name"]: c.get("lie_deg", 0.0) for c in DEFAULT_BAG}
+            for club_item in self.bag:
+                if isinstance(club_item, dict) and "lie_deg" not in club_item:
+                    club_item["lie_deg"] = _default_lies.get(club_item.get("name"), 0.0)
             for club_item in self.bag:
                 c_name = club_item.get("name")
                 if c_name and c_name not in self.clubs:
@@ -776,7 +821,7 @@ class ShanktuaryApp:
                 return c
         return None
 
-    def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None):
+    def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None, lie_deg=None):
         c = self.get_bag_club(club_name)
         if c:
             if brand is not None: c["brand"] = str(brand)
@@ -786,6 +831,11 @@ class ShanktuaryApp:
                     c["loft_deg"] = float(loft_deg)
                 except (ValueError, TypeError):
                     c["loft_deg"] = 0.0
+            if lie_deg is not None:
+                try:
+                    c["lie_deg"] = float(lie_deg)
+                except (ValueError, TypeError):
+                    c["lie_deg"] = 0.0
             if shaft is not None: c["shaft"] = str(shaft)
             if category is not None: c["category"] = str(category)
             if new_name is not None and new_name.strip():
@@ -801,7 +851,7 @@ class ShanktuaryApp:
             self.save_session_to_file()
             self.draw_screen()
 
-    def add_club_to_bag(self, name, category=None, brand="", model="", loft_deg=0.0, shaft=""):
+    def add_club_to_bag(self, name, category=None, brand="", model="", loft_deg=0.0, shaft="", lie_deg=0.0):
         clean_name = name.strip() if name else ""
         if not clean_name:
             return
@@ -811,10 +861,14 @@ class ShanktuaryApp:
             loft_val = float(loft_deg) if loft_deg else 0.0
         except (ValueError, TypeError):
             loft_val = 0.0
+        try:
+            lie_val = float(lie_deg) if lie_deg else 0.0
+        except (ValueError, TypeError):
+            lie_val = 0.0
 
         existing = self.get_bag_club(clean_name)
         if existing:
-            self.update_club_specs(clean_name, brand=brand, model=model, loft_deg=loft_val, shaft=shaft, category=category)
+            self.update_club_specs(clean_name, brand=brand, model=model, loft_deg=loft_val, shaft=shaft, category=category, lie_deg=lie_val)
             return
         club_dict = {
             "name": clean_name,
@@ -822,6 +876,7 @@ class ShanktuaryApp:
             "brand": brand,
             "model": model,
             "loft_deg": loft_val,
+            "lie_deg": lie_val,
             "shaft": shaft
         }
         self.bag.append(club_dict)
@@ -1162,7 +1217,7 @@ class ShanktuaryApp:
                 self.save_spec_editor_values()
                 return "break"
             elif event.keysym == "Tab":
-                fields = ["name", "brand", "model", "loft", "shaft"]
+                fields = ["name", "brand", "model", "loft", "lie", "shaft"]
                 if self.spec_editor_active_field in fields:
                     curr_i = fields.index(self.spec_editor_active_field)
                     self.spec_editor_active_field = fields[(curr_i + 1) % len(fields)]
@@ -1176,6 +1231,7 @@ class ShanktuaryApp:
                 elif f == "brand": self.spec_editor_brand = self.spec_editor_brand[:-1]
                 elif f == "model": self.spec_editor_model = self.spec_editor_model[:-1]
                 elif f == "loft": self.spec_editor_loft = self.spec_editor_loft[:-1]
+                elif f == "lie": self.spec_editor_lie = self.spec_editor_lie[:-1]
                 elif f == "shaft": self.spec_editor_shaft = self.spec_editor_shaft[:-1]
                 self.draw_screen()
                 return "break"
@@ -1185,6 +1241,7 @@ class ShanktuaryApp:
                 elif f == "brand" and len(self.spec_editor_brand) < 25: self.spec_editor_brand += event.char
                 elif f == "model" and len(self.spec_editor_model) < 25: self.spec_editor_model += event.char
                 elif f == "loft" and len(self.spec_editor_loft) < 8: self.spec_editor_loft += event.char
+                elif f == "lie" and len(self.spec_editor_lie) < 8: self.spec_editor_lie += event.char
                 elif f == "shaft" and len(self.spec_editor_shaft) < 25: self.spec_editor_shaft += event.char
                 self.draw_screen()
                 return "break"
@@ -1285,6 +1342,8 @@ class ShanktuaryApp:
             self.spec_editor_model = c.get("model", "")
             loft = c.get("loft_deg", 0.0)
             self.spec_editor_loft = f"{loft:.1f}" if loft else ""
+            lie = c.get("lie_deg", 0.0)
+            self.spec_editor_lie = f"{lie:.1f}" if lie else ""
             self.spec_editor_shaft = c.get("shaft", "")
             self.spec_editor_active_field = "brand"
         else:
@@ -1294,6 +1353,7 @@ class ShanktuaryApp:
             self.spec_editor_brand = ""
             self.spec_editor_model = ""
             self.spec_editor_loft = ""
+            self.spec_editor_lie = ""
             self.spec_editor_shaft = ""
             self.spec_editor_active_field = "name"
 
@@ -1311,6 +1371,10 @@ class ShanktuaryApp:
             loft_val = float(self.spec_editor_loft) if self.spec_editor_loft else 0.0
         except (ValueError, TypeError):
             loft_val = 0.0
+        try:
+            lie_val = float(self.spec_editor_lie) if self.spec_editor_lie else 0.0
+        except (ValueError, TypeError):
+            lie_val = 0.0
 
         if self.spec_editor_orig_name:
             self.update_club_specs(
@@ -1318,6 +1382,7 @@ class ShanktuaryApp:
                 brand=self.spec_editor_brand.strip(),
                 model=self.spec_editor_model.strip(),
                 loft_deg=loft_val,
+                lie_deg=lie_val,
                 shaft=self.spec_editor_shaft.strip(),
                 category=self.spec_editor_category,
                 new_name=name
@@ -1329,6 +1394,7 @@ class ShanktuaryApp:
                 brand=self.spec_editor_brand.strip(),
                 model=self.spec_editor_model.strip(),
                 loft_deg=loft_val,
+                lie_deg=lie_val,
                 shaft=self.spec_editor_shaft.strip()
             )
         self.show_spec_editor_modal = False
@@ -1342,7 +1408,9 @@ class ShanktuaryApp:
 
         # 2. Responsive Modal Box
         modal_w = min(640, max(520, int(w * 0.54)))
-        modal_h = min(560, max(500, int(h * 0.76)))
+        # 6 spec fields at 58px each need ~434px of form; keep the action
+        # buttons (y2 - 52) clear of the last input box.
+        modal_h = min(580, max(540, int(h * 0.76)))
         cx = w // 2
         cy = h // 2
         x1 = cx - modal_w // 2
@@ -1387,7 +1455,8 @@ class ShanktuaryApp:
             ("name", "Club Name (e.g. 7 Iron, 60° Wedge):", self.spec_editor_club_name),
             ("brand", "Manufacturer / Brand (e.g. TaylorMade, Titleist):", self.spec_editor_brand),
             ("model", "Clubhead Model (e.g. Qi10, T150, SM10):", self.spec_editor_model),
-            ("loft", "Loft Angle (°):", self.spec_editor_loft),
+            ("loft", "Loft Angle (°) — check actual spec, not the number on the sole:", self.spec_editor_loft),
+            ("lie", "Lie Angle (°, optional):", self.spec_editor_lie),
             ("shaft", "Shaft Specs (e.g. Ventus Black 6X, KBS Tour):", self.spec_editor_shaft),
         ]
 
@@ -1473,6 +1542,44 @@ class ShanktuaryApp:
             pass
         self.root.after(33, self.poll_pressure_stream)
 
+    def validate_shot_payload(self, msg):
+        """Flag physically impossible values in an incoming Nova shot.
+
+        Deliberately ADDITIVE: per AGENTS.md the native payload is preserved
+        verbatim, so we annotate `_data_quality` rather than rewriting the
+        device's fields. Downstream display code decides how to present a
+        suspect shot; nothing here mutates spin, speed or angles.
+
+        Observed in the wild: negative total_spin_rpm (e.g. -471, -859), which
+        OGC clamps to 0 and then penalises as a knuckleball, burying effective
+        COR and silently pinning smash factor to its floor.
+        """
+        issues = []
+        try:
+            if not isinstance(msg, dict):
+                return msg
+            ogc = msg.get("open_golf_coach", {})
+            ogc = ogc if isinstance(ogc, dict) else {}
+
+            total_spin = msg.get("total_spin_rpm", ogc.get("total_spin_rpm"))
+            if total_spin is not None and float(total_spin) < 0.0:
+                issues.append(f"negative total_spin_rpm ({float(total_spin):.0f})")
+
+            backspin = ogc.get("backspin_rpm")
+            if backspin is not None and float(backspin) < 0.0:
+                issues.append(f"negative backspin_rpm ({float(backspin):.0f})")
+
+            ball_mps = msg.get("ball_speed_meters_per_second")
+            if ball_mps is not None and float(ball_mps) <= 0.0:
+                issues.append("non-positive ball_speed")
+
+            if issues:
+                msg["_data_quality"] = {"suspect": True, "issues": issues}
+                print(f"[!] Shot data quality: {'; '.join(issues)}")
+        except (TypeError, ValueError):
+            return msg
+        return msg
+
     def poll_queue(self):
         try:
             while True:
@@ -1481,6 +1588,8 @@ class ShanktuaryApp:
                 msg["club_color"] = self.get_club_color(self.current_club)
                 msg["timestamp"] = datetime.now().strftime("%I:%M %p")
                 self.nova_connected = True
+                self.validate_shot_payload(msg)
+                self.verify_ogc_model_sync(msg)
                 
                 sess = self.get_active_session()
                 sess["shots"].append(msg)
@@ -2562,7 +2671,126 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col)
             self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=label, fill=txt_col, font=txt_font, anchor="center")
 
-    def draw_top_metric_toolbar(self, avail_w, ball_speed, club_speed, smash, carry, total, offline, hang_time, eff_pct, offset_x=0):
+    def verify_ogc_model_sync(self, shot):
+        """Detect drift between our mirrored OGC constants and the live payload.
+
+        OGC derives club speed as `ball_speed / smash_factor`, so that identity
+        must hold exactly in any payload it produced. If it stops holding, or a
+        clamped shot no longer reports one of our boundary smash values, then
+        upstream changed its model and clamp detection has gone stale.
+
+        Logs once per session rather than per shot. Returns True when in sync.
+        """
+        if getattr(self, "_ogc_sync_warned", False):
+            return False
+        try:
+            ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
+            if not isinstance(ogc, dict):
+                return True
+            ball_mps = float(shot.get("ball_speed_meters_per_second") or 0.0)
+            club_mps = float(ogc.get("club_speed_meters_per_second") or 0.0)
+            smash = float(ogc.get("smash_factor") or 0.0)
+            if ball_mps <= 0.0 or club_mps <= 0.0 or smash <= 0.0:
+                return True
+
+            # 1) The club_speed = ball_speed / smash identity.
+            if abs(ball_mps / smash - club_mps) > 1e-6:
+                self._ogc_sync_warned = True
+                print(
+                    "[OGC SYNC] club_speed != ball_speed/smash "
+                    f"(ball={ball_mps:.4f} smash={smash:.6f} club={club_mps:.4f}). "
+                    "Upstream clubhead model changed; smash clamp detection may be stale."
+                )
+                return False
+
+            # 2) A shot we believe is clamped must report a boundary smash.
+            conf = self.compute_smash_confidence(
+                ball_mps,
+                shot.get("vertical_launch_angle_degrees"),
+                shot.get("total_spin_rpm"),
+            )
+            if conf["clamped"]:
+                at_floor = abs(smash - OGC_SMASH_AT_COR_FLOOR) < 1e-9
+                at_ceiling = abs(smash - OGC_SMASH_AT_COR_CEILING) < 1e-9
+                if not (at_floor or at_ceiling):
+                    self._ogc_sync_warned = True
+                    print(
+                        f"[OGC SYNC] predicted clamp but smash={smash:.9f} is not a "
+                        f"boundary value ({OGC_SMASH_AT_COR_FLOOR:.9f} / "
+                        f"{OGC_SMASH_AT_COR_CEILING:.9f}). Re-check OGC constants."
+                    )
+                    return False
+        except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+            return True
+        return True
+
+    def compute_smash_confidence(self, ball_speed_mps, vertical_launch_deg, total_spin_rpm):
+        """Detect when OpenGolfCoach's clubhead-speed model has saturated.
+
+        OGC does not measure clubhead speed -- the Nova has no club-tracking
+        hardware. It infers an "effective COR" from ball speed, launch angle and
+        spin, then clamps it to [MIN_EFFECTIVE_COR, DRIVER_COR_LIMIT] before
+        converting to a smash factor (core/src/clubhead_data.rs).
+
+        When that clamp engages, every shot in a wide range of inputs collapses
+        onto the SAME boundary value, so the reported smash factor and club
+        speed carry no information about the strike:
+
+            floor   -> (1 + 0.52) / (1 + 0.04593/0.200) = 1.2361241...
+            ceiling -> (1 + 0.83) / (1 + 0.04593/0.200) = 1.4882283...
+
+        Slow swingers pin the floor; very fast swingers pin the ceiling. We
+        re-run OGC's penalty math here to recover the UNCLAMPED value so the UI
+        can grey out numbers that are boundary artifacts rather than estimates.
+
+        Returns dict with:
+            clamped  -- bool, the reported smash/club speed is a constant
+            raw_cor  -- float, effective COR before clamping
+            margin   -- float, distance from the nearest clamp boundary
+        """
+        result = {"clamped": False, "raw_cor": None, "margin": None}
+        try:
+            bs = float(ball_speed_mps or 0.0)
+            if bs <= 0.0:
+                return result
+            launch = max(-5.0, min(70.0, float(vertical_launch_deg or 0.0)))
+            spin = max(0.0, float(total_spin_rpm or 0.0))
+
+            band = None
+            for b in OGC_IMPACT_BANDS:
+                if max(bs, 5.0) <= b["max_ball_speed_mps"]:
+                    band = b
+                    break
+            if band is None:
+                band = OGC_IMPACT_BANDS[-1]
+
+            launch_dev = abs(launch - band["optimal_launch_deg"])
+            norm_launch = min(launch_dev / band["launch_tolerance_deg"], 3.0)
+            launch_penalty = (norm_launch ** 1.25) * 0.06
+
+            spin_tol = max(band["spin_tolerance_rpm"], 1.0)
+            if spin >= band["optimal_spin_rpm"]:
+                norm_spin = min((spin - band["optimal_spin_rpm"]) / spin_tol, 3.0)
+            else:
+                norm_spin = min((band["optimal_spin_rpm"] - spin) / (spin_tol * 1.5), 3.0)
+            spin_penalty = (norm_spin ** 1.15) * 0.08
+
+            knuckle_penalty = 0.0
+            if spin < 1200.0:
+                knuckle_penalty = (((1200.0 - spin) / 1200.0) ** 1.3) * 0.05
+
+            raw_cor = band["base_cor"] - launch_penalty - spin_penalty - knuckle_penalty
+            result["raw_cor"] = raw_cor
+            result["clamped"] = raw_cor < OGC_MIN_EFFECTIVE_COR or raw_cor > OGC_DRIVER_COR_LIMIT
+            result["margin"] = min(
+                raw_cor - OGC_MIN_EFFECTIVE_COR,
+                OGC_DRIVER_COR_LIMIT - raw_cor,
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            return {"clamped": False, "raw_cor": None, "margin": None}
+        return result
+
+    def draw_top_metric_toolbar(self, avail_w, ball_speed, club_speed, smash, carry, total, offline, hang_time, eff_pct, offset_x=0, smash_clamped=False):
         t_scale = max(0.9, min(2.0, avail_w / 1200.0))
         top_y = 52
         bar_h = int(56 * t_scale)
@@ -2573,10 +2801,18 @@ class ShanktuaryApp:
         off_dir = "L" if offline < 0 else "R"
         off_str = f"{off_abs:.1f} {off_dir} YDS" if off_abs > 0.1 else "0.0 STRAIGHT"
 
+        # Club speed and smash factor are DERIVED from ball data by OGC, never
+        # measured. When the COR clamp saturates they collapse to a constant, so
+        # grey them out rather than presenting a boundary artifact as a reading.
+        derived_col = "#7E8496" if smash_clamped else "#FFFFFF"
+        smash_col = "#7E8496" if smash_clamped else "#00E5FF"
+        club_speed_val = "-- MPH" if smash_clamped else f"{club_speed:.1f} MPH"
+        smash_val = "--" if smash_clamped else f"{smash:.2f}"
+
         metrics = [
             ("BALL SPEED", f"{ball_speed:.1f} MPH", "#FFFFFF"),
-            ("CLUB SPEED", f"{club_speed:.1f} MPH", "#FFFFFF"),
-            ("SMASH FACTOR", f"{smash:.2f}", "#00E5FF"),
+            ("CLUB SPEED", club_speed_val, derived_col),
+            ("SMASH FACTOR", smash_val, smash_col),
             ("CARRY", f"{carry:.1f} YDS", "#00FF66"),
             ("TOTAL", f"{total:.1f} YDS", "#FFFFFF"),
             ("OFFLINE", off_str, "#00E5FF" if off_abs <= 4.0 else ("#FFEA00" if off_abs <= 12.0 else "#FF4081")),
@@ -2801,6 +3037,17 @@ class ShanktuaryApp:
         avail_w = w - offset_x
         top_bar_h = 52 + int(56 * max(0.9, min(2.0, avail_w / 1200.0))) + 8
 
+        # Is OGC's clubhead-speed model saturated for this shot? If so its
+        # smash factor / club speed are constants, not estimates.
+        smash_clamped = False
+        if self.current_shot:
+            _s = self.current_shot
+            smash_clamped = self.compute_smash_confidence(
+                _s.get("ball_speed_meters_per_second"),
+                _s.get("vertical_launch_angle_degrees"),
+                _s.get("total_spin_rpm"),
+            )["clamped"]
+
         # 1. Left Shot Library Sidebar
         self.draw_left_sidebar(w, h)
 
@@ -2810,7 +3057,7 @@ class ShanktuaryApp:
         # 3. Workspace View Routing
         if self.view_mode == 1:
             # Mode 1: Delivery (4-Quadrant Studio)
-            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
             if self.current_shot:
                 self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
             else:
@@ -2840,7 +3087,7 @@ class ShanktuaryApp:
             # Mode 0: Floor Divot Focus Projector
             self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
         else:
-            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
             if self.current_shot:
                 self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
 
@@ -3800,7 +4047,14 @@ class ShanktuaryApp:
                     break
 
         if not measured:
-            # 1) Magnitude from smash deficit (reliable signal)
+            # 1) Magnitude from smash deficit.
+            #
+            # CAUTION: this is only meaningful when OGC's clubhead-speed model
+            # is NOT saturated. When the effective-COR clamp engages (common
+            # below ~90 mph ball speed) smash_factor is a constant, so this
+            # yields the SAME offset for every shot with a given club -- a
+            # fabricated number, not an estimate. compute_smash_confidence()
+            # detects that case and we suppress the magnitude entirely.
             club_max_smash = {
                 "Driver": 1.50, "3 Wood": 1.48, "5 Wood": 1.47, "3 Hybrid": 1.46,
                 "4 Iron": 1.43, "5 Iron": 1.41, "6 Iron": 1.39, "7 Iron": 1.37,
@@ -3811,9 +4065,19 @@ class ShanktuaryApp:
             smash_val = float(smash or 0.0)
             if smash_val <= 0.0:
                 smash_val = max_smash
-            smash_deficit = max(0.0, min(0.35, max_smash - smash_val))
-            # ~0.01 smash lost per mm off-center near the sweet spot
-            est_offset_mm = min(20.0, smash_deficit * 100.0)
+            smash_conf = self.compute_smash_confidence(
+                shot_obj.get("ball_speed_meters_per_second"),
+                shot_obj.get("vertical_launch_angle_degrees"),
+                shot_obj.get("total_spin_rpm"),
+            )
+            magnitude_known = not smash_conf["clamped"]
+            if magnitude_known:
+                smash_deficit = max(0.0, min(0.35, max_smash - smash_val))
+                # ~0.01 smash lost per mm off-center near the sweet spot
+                est_offset_mm = min(20.0, smash_deficit * 100.0)
+            else:
+                smash_deficit = 0.0
+                est_offset_mm = 0.0
 
             # 2) Direction hints from gear-effect residuals (low confidence)
             club_baselines = {
@@ -3888,15 +4152,26 @@ class ShanktuaryApp:
             v_hint = max(-1.0, min(1.0, v_hint))
 
             hint_mag = math.sqrt(h_hint**2 + v_hint**2)
-            dir_known = hint_mag >= 0.15 and est_offset_mm >= 2.0
-            if dir_known:
+            # Direction is independent of magnitude: launch-angle deviation is a
+            # genuinely measured signal even when smash (and therefore the mm
+            # offset) is unavailable. Only require a usable magnitude when we
+            # actually have one to scale by.
+            dir_known = hint_mag >= 0.15 and (est_offset_mm >= 2.0 or not magnitude_known)
+            if dir_known and magnitude_known:
                 h_impact_mm = (h_hint / hint_mag) * est_offset_mm
                 v_impact_mm = (v_hint / hint_mag) * est_offset_mm
+            elif dir_known:
+                # Direction only. Plot at a fixed nominal radius so the face
+                # graphic still shows WHERE, while the text omits any mm value.
+                nominal = 6.0
+                h_impact_mm = (h_hint / hint_mag) * nominal
+                v_impact_mm = (v_hint / hint_mag) * nominal
             else:
                 h_impact_mm = 0.0
                 v_impact_mm = 0.0
         else:
             dir_known = True
+            magnitude_known = True
 
         # Clamp offsets to physical face dimensions
         h_impact_mm = max(-24.0, min(24.0, h_impact_mm))
@@ -3914,9 +4189,13 @@ class ShanktuaryApp:
         if measured:
             def fmt_mm(val):
                 return f"{abs(val):.1f} mm"
-        else:
+        elif magnitude_known:
             def fmt_mm(val):
                 return f"~{abs(val):.0f} mm"
+        else:
+            # No usable magnitude -- report direction only, never a mm figure.
+            def fmt_mm(val):
+                return ""
 
         if not dir_known and not measured:
             h_text = "↔ DIR UNKNOWN"
@@ -3926,8 +4205,13 @@ class ShanktuaryApp:
             h_badge_col = "#00FF66"
         else:
             h_side = "HEEL" if h_impact_mm > 0 else "TOE"
-            h_text = f"↔ {fmt_mm(h_impact_mm)} {h_side}{est_tag}"
-            h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
+            if magnitude_known:
+                h_text = f"↔ {fmt_mm(h_impact_mm)} {h_side}{est_tag}"
+                h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
+            else:
+                # Direction-only: readable amber, uncertainty lives in the label.
+                h_text = f"↔ {h_side}{est_tag}"
+                h_badge_col = "#FF9100"
 
         if not dir_known and not measured:
             v_text = "↕ DIR UNKNOWN"
@@ -3937,10 +4221,27 @@ class ShanktuaryApp:
             v_badge_col = "#00FF66"
         else:
             v_side = "HIGH" if v_impact_mm > 0 else "LOW"
-            v_text = f"↕ {fmt_mm(v_impact_mm)} {v_side}{est_tag}"
-            v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
+            if magnitude_known:
+                v_text = f"↕ {fmt_mm(v_impact_mm)} {v_side}{est_tag}"
+                v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
+            else:
+                v_text = f"↕ {v_side}{est_tag}"
+                v_badge_col = "#FF9100"
 
-        if total_offset_mm < 3.0:
+        if not measured and not magnitude_known:
+            # Direction-only: never imply a severity tier we cannot compute.
+            if dir_known:
+                h_part = "HEEL" if h_impact_mm > 1.5 else ("TOE" if h_impact_mm < -1.5 else "")
+                v_part = "HIGH" if v_impact_mm > 1.5 else ("THIN" if v_impact_mm < -1.5 else "")
+                strike_rank = f"{h_part} {v_part}".strip() or "OFF-CENTER"
+                # Direction IS a real signal (launch-angle derived) -- keep it
+                # clearly readable. The "DIR EST" tag carries the uncertainty,
+                # so the marker itself doesn't need to be dimmed.
+                strike_color = "#FF9100"
+            else:
+                strike_rank = "STRIKE UNKNOWN"
+                strike_color = "#8E94A5"
+        elif total_offset_mm < 3.0:
             strike_rank = "CENTER FLUSH"
             strike_color = "#00FF66"
         elif not dir_known and not measured:
@@ -3956,7 +4257,10 @@ class ShanktuaryApp:
             v_part = "HIGH" if v_impact_mm > 2.5 else ("THIN" if v_impact_mm < -2.5 else "")
             strike_rank = f"{h_part} {v_part}".strip()
             strike_color = "#FF1744"
-        if not measured and strike_rank != "CENTER FLUSH" and "(DIR ?)" not in strike_rank:
+        # The "~" prefix denotes an approximate MAGNITUDE; skip it when we only
+        # have a direction (and for the explicit unknown states).
+        if (not measured and magnitude_known and strike_rank != "CENTER FLUSH"
+                and "(DIR ?)" not in strike_rank and strike_rank != "STRIKE UNKNOWN"):
             strike_rank = f"~{strike_rank}"
 
         # Top Pill Badges (Exact Strike Coordinates)
@@ -4019,12 +4323,19 @@ class ShanktuaryApp:
             self.canvas.create_oval(impact_x - r_mid, impact_y - r_mid, impact_x + r_mid, impact_y + r_mid, fill="", outline=strike_color, width=1)
             self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
         elif dir_known:
-            # Fuzzy estimate zone: dashed halo sized by uncertainty, soft dot
-            r_zone = max(int(10 * scale), int((4.0 + total_offset_mm * 0.6) * scale_px))
+            # Fuzzy estimate zone: dashed halo sized by uncertainty, soft dot.
+            # With no usable magnitude the halo is deliberately wide -- the dot
+            # marks a DIRECTION on the face, not a located point.
+            if magnitude_known:
+                r_zone = max(int(10 * scale), int((4.0 + total_offset_mm * 0.6) * scale_px))
+                zone_tag = "EST"
+            else:
+                r_zone = max(int(18 * scale), int(11.0 * scale_px))
+                zone_tag = "DIR EST"
             r_dot = int(3.5 * scale)
             self.canvas.create_oval(impact_x - r_zone, impact_y - r_zone, impact_x + r_zone, impact_y + r_zone, fill="", outline=strike_color, width=1, dash=(4, 3))
             self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
-            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text="EST", fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
+            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text=zone_tag, fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
         else:
             # Off-center but direction unknown: dashed ring around sweet spot
             r_ring = max(int(12 * scale), int(total_offset_mm * scale_px))
@@ -4034,10 +4345,20 @@ class ShanktuaryApp:
         # Footer Metrics
         if measured:
             footer_main = f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)"
-        else:
+        elif magnitude_known:
             footer_main = f"🎯 STRIKE: {strike_rank}  (~{total_offset_mm:.0f} mm, from smash)"
+        else:
+            footer_main = f"🎯 STRIKE: {strike_rank}  (direction only — no club data)"
         self.canvas.create_text(q4_cx, q4_bot - int(28 * font_scale), text=footer_main, fill=strike_color, font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
-        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=f"Strike Purity: {purity_pct:.0f}%  |  Smash: {float(smash or 0.0):.2f}  |  Dist. Eff: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", max(8, int(10 * font_scale)), "bold"))
+        # Strike purity and smash both derive from the (possibly clamped) smash
+        # factor -- suppress rather than print a constant dressed as a metric.
+        if measured or magnitude_known:
+            sub_text = f"Strike Purity: {purity_pct:.0f}%  |  Smash: {float(smash or 0.0):.2f}  |  Dist. Eff: {eff_pct:.0f}%"
+            sub_col = "#00E5FF"
+        else:
+            sub_text = f"Strike Purity: --  |  Smash: --  |  Dist. Eff: {eff_pct:.0f}%"
+            sub_col = "#7E8496"
+        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=sub_text, fill=sub_col, font=("Consolas", max(8, int(10 * font_scale)), "bold"))
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
