@@ -3666,7 +3666,16 @@ class ShanktuaryApp:
         q4_top = mid_y
         q4_bot = h - 10
 
-        # Direct telemetry extraction or physics gear-effect computation
+        # --- Strike estimation ---
+        # The Nova / OpenGolfCoach payload carries NO measured face-impact
+        # location. If a future firmware adds one we use it verbatim
+        # ("measured"); otherwise we build an honest ESTIMATE:
+        #   * MAGNITUDE from smash-factor deficit vs. the club's max
+        #     achievable smash (energy loss on off-center strikes is real,
+        #     well-documented physics).
+        #   * DIRECTION as a low-confidence hint from gear-effect residuals
+        #     (sidespin not explained by face-to-path; launch/spin deviation
+        #     from club-typical for high/low face).
         shot_obj = self.current_shot or {}
         ogc = shot_obj.get("open_golf_coach", {}) if isinstance(shot_obj, dict) else {}
         impact_data = (
@@ -3677,63 +3686,127 @@ class ShanktuaryApp:
             ogc.get("face_contact") or {}
         )
 
-        if "lateral_offset_mm" in impact_data:
-            h_impact_mm = float(impact_data["lateral_offset_mm"])
-        elif "heel_toe_mm" in impact_data:
-            h_impact_mm = float(impact_data["heel_toe_mm"])
-        elif "horizontal_offset_mm" in impact_data:
-            h_impact_mm = float(impact_data["horizontal_offset_mm"])
-        elif "x_mm" in impact_data:
-            h_impact_mm = float(impact_data["x_mm"])
-        else:
-            # Positive = Heel strike, Negative = Toe strike
-            h_impact_mm = (face_to_path * 0.75) + (sidespin / 400.0)
+        measured = False
+        h_impact_mm = 0.0
+        v_impact_mm = 0.0
+        smash_deficit = 0.0
+        est_offset_mm = 0.0
+        if isinstance(impact_data, dict) and impact_data:
+            for key in ("lateral_offset_mm", "heel_toe_mm", "horizontal_offset_mm", "x_mm"):
+                if key in impact_data:
+                    h_impact_mm = float(impact_data[key])
+                    measured = True
+                    break
+            for key in ("vertical_offset_mm", "high_low_mm", "y_mm"):
+                if key in impact_data:
+                    v_impact_mm = float(impact_data[key])
+                    measured = True
+                    break
 
-        if "vertical_offset_mm" in impact_data:
-            v_impact_mm = float(impact_data["vertical_offset_mm"])
-        elif "high_low_mm" in impact_data:
-            v_impact_mm = float(impact_data["high_low_mm"])
-        elif "y_mm" in impact_data:
-            v_impact_mm = float(impact_data["y_mm"])
-        else:
+        if not measured:
+            # 1) Magnitude from smash deficit (reliable signal)
+            club_max_smash = {
+                "Driver": 1.50, "3 Wood": 1.48, "5 Wood": 1.47, "3 Hybrid": 1.46,
+                "4 Iron": 1.43, "5 Iron": 1.41, "6 Iron": 1.39, "7 Iron": 1.37,
+                "8 Iron": 1.34, "9 Iron": 1.31, "PW": 1.27, "GW": 1.24,
+                "SW": 1.21, "LW": 1.18
+            }
+            max_smash = club_max_smash.get(self.current_club, 1.37)
+            smash_val = float(smash or 0.0)
+            if smash_val <= 0.0:
+                smash_val = max_smash
+            smash_deficit = max(0.0, min(0.35, max_smash - smash_val))
+            # ~0.01 smash lost per mm off-center near the sweet spot
+            est_offset_mm = min(20.0, smash_deficit * 100.0)
+
+            # 2) Direction hints from gear-effect residuals (low confidence)
             club_baselines = {
                 "Driver": 11.5, "3 Wood": 13.0, "5 Wood": 14.5, "3 Hybrid": 16.0,
                 "4 Iron": 16.5, "5 Iron": 17.5, "6 Iron": 19.0, "7 Iron": 21.0,
                 "8 Iron": 23.5, "9 Iron": 26.5, "PW": 29.0, "GW": 32.0,
                 "SW": 35.0, "LW": 38.0
             }
+            club_spin_baselines = {
+                "Driver": 2700, "3 Wood": 3600, "5 Wood": 4300, "3 Hybrid": 4800,
+                "4 Iron": 4800, "5 Iron": 5300, "6 Iron": 6200, "7 Iron": 7000,
+                "8 Iron": 7800, "9 Iron": 8500, "PW": 9300, "GW": 10000,
+                "SW": 10500, "LW": 11000
+            }
             base_launch = club_baselines.get(self.current_club, 21.0)
-            v_impact_mm = (vert_launch - base_launch) * 0.85
+            base_spin = club_spin_baselines.get(self.current_club, 7000)
+
+            # Horizontal: sidespin beyond what face-to-path predicts.
+            # For RH: open face (+f2p) → fade (+sidespin); heel gear-effect
+            # adds fade spin, toe adds draw spin. Mirrored for LH.
+            hand_sign = -1.0 if self.is_left_handed else 1.0
+            expected_side = hand_sign * face_to_path * 200.0  # ~200 rpm/deg for irons
+            side_residual = (sidespin - expected_side) * hand_sign
+            h_hint = max(-1.0, min(1.0, side_residual / 800.0))  # + = heel, - = toe
+
+            # Vertical: high-face → higher launch + less spin; low-face → opposite.
+            launch_dev = (vert_launch - base_launch) / 6.0
+            spin_dev = (backspin - base_spin) / 2500.0
+            v_hint = max(-1.0, min(1.0, launch_dev - spin_dev))  # + = high, - = low
+
+            hint_mag = math.sqrt(h_hint**2 + v_hint**2)
+            dir_known = hint_mag >= 0.15 and est_offset_mm >= 2.0
+            if dir_known:
+                h_impact_mm = (h_hint / hint_mag) * est_offset_mm
+                v_impact_mm = (v_hint / hint_mag) * est_offset_mm
+            else:
+                h_impact_mm = 0.0
+                v_impact_mm = 0.0
+        else:
+            dir_known = True
 
         # Clamp offsets to physical face dimensions
         h_impact_mm = max(-24.0, min(24.0, h_impact_mm))
         v_impact_mm = max(-16.0, min(16.0, v_impact_mm))
         total_offset_mm = math.sqrt(h_impact_mm**2 + v_impact_mm**2)
+        if measured:
+            purity_pct = max(0.0, min(100.0, 100.0 - total_offset_mm * 5.0))
+        else:
+            purity_pct = max(0.0, min(100.0, 100.0 * (1.0 - smash_deficit / 0.25)))
+            if not dir_known:
+                total_offset_mm = est_offset_mm
 
         # Coordinate Tags & Strike Tier Styling
-        if abs(h_impact_mm) < 1.0:
-            h_text = "↔ 0.0 mm CENTER"
-            h_badge_col = "#00FF66"
-        elif h_impact_mm > 0:
-            h_text = f"↔ {abs(h_impact_mm):.1f} mm HEEL"
-            h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
+        est_tag = "" if measured else " (EST)"
+        if measured:
+            def fmt_mm(val):
+                return f"{abs(val):.1f} mm"
         else:
-            h_text = f"↔ {abs(h_impact_mm):.1f} mm TOE"
+            def fmt_mm(val):
+                return f"~{abs(val):.0f} mm"
+
+        if not dir_known and not measured:
+            h_text = "↔ DIR UNKNOWN"
+            h_badge_col = "#8E94A5"
+        elif abs(h_impact_mm) < 1.0:
+            h_text = f"↔ CENTER{est_tag}"
+            h_badge_col = "#00FF66"
+        else:
+            h_side = "HEEL" if h_impact_mm > 0 else "TOE"
+            h_text = f"↔ {fmt_mm(h_impact_mm)} {h_side}{est_tag}"
             h_badge_col = "#FF1744" if abs(h_impact_mm) > 8.0 else ("#FFEA00" if abs(h_impact_mm) > 3.0 else "#00E5FF")
 
-        if abs(v_impact_mm) < 1.0:
-            v_text = "↕ 0.0 mm FLUSH"
+        if not dir_known and not measured:
+            v_text = "↕ DIR UNKNOWN"
+            v_badge_col = "#8E94A5"
+        elif abs(v_impact_mm) < 1.0:
+            v_text = f"↕ FLUSH{est_tag}"
             v_badge_col = "#00FF66"
-        elif v_impact_mm > 0:
-            v_text = f"↕ {abs(v_impact_mm):.1f} mm HIGH"
-            v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
         else:
-            v_text = f"↕ {abs(v_impact_mm):.1f} mm LOW"
+            v_side = "HIGH" if v_impact_mm > 0 else "LOW"
+            v_text = f"↕ {fmt_mm(v_impact_mm)} {v_side}{est_tag}"
             v_badge_col = "#FF1744" if abs(v_impact_mm) > 6.0 else ("#FFEA00" if abs(v_impact_mm) > 2.5 else "#00E5FF")
 
         if total_offset_mm < 3.0:
             strike_rank = "CENTER FLUSH"
             strike_color = "#00FF66"
+        elif not dir_known and not measured:
+            strike_rank = "OFF-CENTER (DIR ?)"
+            strike_color = "#FFEA00" if total_offset_mm < 8.0 else "#FF1744"
         elif total_offset_mm < 8.0:
             h_part = "HEEL" if h_impact_mm > 1.5 else ("TOE" if h_impact_mm < -1.5 else "")
             v_part = "HIGH" if v_impact_mm > 1.5 else ("THIN" if v_impact_mm < -1.5 else "")
@@ -3744,6 +3817,8 @@ class ShanktuaryApp:
             v_part = "HIGH" if v_impact_mm > 2.5 else ("THIN" if v_impact_mm < -2.5 else "")
             strike_rank = f"{h_part} {v_part}".strip()
             strike_color = "#FF1744"
+        if not measured and strike_rank != "CENTER FLUSH" and "(DIR ?)" not in strike_rank:
+            strike_rank = f"~{strike_rank}"
 
         # Top Pill Badges (Exact Strike Coordinates)
         badge_y = q4_top + int(24 * font_scale)
@@ -3794,20 +3869,37 @@ class ShanktuaryApp:
         impact_y = center_y - int(v_impact_mm * scale_px)
 
         # Vector Line from Sweet Spot to Impact
-        if total_offset_mm >= 2.0:
+        if total_offset_mm >= 2.0 and (measured or dir_known):
             self.canvas.create_line(center_x, center_y, impact_x, impact_y, fill=strike_color, width=1, dash=(3, 2))
 
-        # Precision Strike Reticle
-        r_outer = int(14 * scale)
-        r_mid = int(7 * scale)
-        r_dot = int(3.5 * scale)
-        self.canvas.create_oval(impact_x - r_outer, impact_y - r_outer, impact_x + r_outer, impact_y + r_outer, fill="", outline=strike_color, width=2)
-        self.canvas.create_oval(impact_x - r_mid, impact_y - r_mid, impact_x + r_mid, impact_y + r_mid, fill="", outline=strike_color, width=1)
-        self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
+        if measured:
+            # Precision Strike Reticle (real measurement)
+            r_outer = int(14 * scale)
+            r_mid = int(7 * scale)
+            r_dot = int(3.5 * scale)
+            self.canvas.create_oval(impact_x - r_outer, impact_y - r_outer, impact_x + r_outer, impact_y + r_outer, fill="", outline=strike_color, width=2)
+            self.canvas.create_oval(impact_x - r_mid, impact_y - r_mid, impact_x + r_mid, impact_y + r_mid, fill="", outline=strike_color, width=1)
+            self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
+        elif dir_known:
+            # Fuzzy estimate zone: dashed halo sized by uncertainty, soft dot
+            r_zone = max(int(10 * scale), int((4.0 + total_offset_mm * 0.6) * scale_px))
+            r_dot = int(3.5 * scale)
+            self.canvas.create_oval(impact_x - r_zone, impact_y - r_zone, impact_x + r_zone, impact_y + r_zone, fill="", outline=strike_color, width=1, dash=(4, 3))
+            self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
+            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text="EST", fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
+        else:
+            # Off-center but direction unknown: dashed ring around sweet spot
+            r_ring = max(int(12 * scale), int(total_offset_mm * scale_px))
+            self.canvas.create_oval(center_x - r_ring, center_y - r_ring, center_x + r_ring, center_y + r_ring, fill="", outline=strike_color, width=1, dash=(4, 3))
+            self.canvas.create_text(center_x, center_y - r_ring - int(8 * scale), text="EST RADIUS", fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
 
         # Footer Metrics
-        self.canvas.create_text(q4_cx, q4_bot - int(28 * font_scale), text=f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)", fill=strike_color, font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
-        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=f"Distance Efficiency: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", max(8, int(10 * font_scale)), "bold"))
+        if measured:
+            footer_main = f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)"
+        else:
+            footer_main = f"🎯 STRIKE: {strike_rank}  (~{total_offset_mm:.0f} mm, from smash)"
+        self.canvas.create_text(q4_cx, q4_bot - int(28 * font_scale), text=footer_main, fill=strike_color, font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
+        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=f"Strike Purity: {purity_pct:.0f}%  |  Smash: {float(smash or 0.0):.2f}  |  Dist. Eff: {eff_pct:.0f}%", fill="#00E5FF", font=("Consolas", max(8, int(10 * font_scale)), "bold"))
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
