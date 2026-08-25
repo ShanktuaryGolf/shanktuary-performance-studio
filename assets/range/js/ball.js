@@ -315,6 +315,13 @@ export class GolfBall {
     if (this.divots.length > 20) {
       const old = this.divots.shift();
       this.scene.remove(old);
+      // Dispose GPU resources — evicted divots otherwise leak geometry,
+      // material, and canvas texture for every shot in a long OBS session.
+      if (old.geometry) old.geometry.dispose();
+      if (old.material) {
+        if (old.material.map) old.material.map.dispose();
+        old.material.dispose();
+      }
     }
     
     // 2. Flying Turf / Dirt Particle Spray
@@ -383,6 +390,9 @@ export class GolfBall {
       p.mesh.scale.multiplyScalar(1.02);
       if (p.life <= 0) {
         this.scene.remove(p.mesh);
+        // Dispose per-particle GPU resources (10 leak per bounce otherwise)
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
         this.particles.splice(i, 1);
       }
     }

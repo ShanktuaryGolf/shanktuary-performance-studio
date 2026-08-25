@@ -78,7 +78,10 @@ export class GolfPhysicsEngine {
           const dragAccelZ = -(dragForce * (vz / v)) / this.ballMass;
 
           const liftAccelY = (liftForce * Math.cos(spinAxisRad)) / this.ballMass;
-          const liftAccelX = (liftForce * Math.sin(-spinAxisRad)) / this.ballMass;
+          // Nova/TrackMan convention: positive spin axis = tilt right = fade.
+          // +X is RIGHT (offline > 0 renders "R"), so lateral lift must use
+          // sin(+axis) — sin(-axis) mirrored every curve (fades flew as draws).
+          const liftAccelX = (liftForce * Math.sin(spinAxisRad)) / this.ballMass;
 
           const ax = dragAccelX + liftAccelX;
           const ay = -this.gravity + dragAccelY + liftAccelY;

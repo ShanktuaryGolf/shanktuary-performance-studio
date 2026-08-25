@@ -501,6 +501,27 @@
       document.body.classList.add('mode-projector');
     }
 
+    // Handedness: Nova sends per-hand dicts {right_handed, left_handed}.
+    // Enable lefty mode with ?lefty=1 (persisted) or localStorage sps_lefty=1.
+    const SPS_IS_LEFTY = (() => {
+      try {
+        const qp = new URLSearchParams(window.location.search).get('lefty');
+        if (qp !== null) {
+          const v = qp === '1' || qp === 'true';
+          localStorage.setItem('sps_lefty', v ? '1' : '0');
+          return v;
+        }
+        return localStorage.getItem('sps_lefty') === '1';
+      } catch (e) { return false; }
+    })();
+    function spsHanded(val, fallback = 0) {
+      if (val && typeof val === 'object') {
+        const v = SPS_IS_LEFTY ? (val.left_handed ?? val.right_handed) : val.right_handed;
+        return v ?? fallback;
+      }
+      return val ?? fallback;
+    }
+
     if (window.location.search.includes('edit=true')) {
       toggleEditMode(true);
     }
@@ -722,7 +743,16 @@
 
     function initWebSocket() {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+      // file:// yields an empty host → invalid ws:///ws URL that throws
+      // synchronously; fall back to localhost and retry on failure.
+      const wsHost = window.location.host || 'localhost:9321';
+      let ws;
+      try {
+        ws = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
+      } catch (e) {
+        setTimeout(initWebSocket, 2000);
+        return;
+      }
 
       ws.onmessage = (event) => {
         try {
@@ -747,6 +777,7 @@
         }
       };
 
+      ws.onerror = (e) => console.warn('[!] Overlay WebSocket error', e);
       ws.onclose = () => setTimeout(initWebSocket, 2000);
     }
 
@@ -797,7 +828,7 @@
           smash_factor: 1.24,
           total_spin_rpm: 2990,
           sidespin_rpm: -299,
-          spin_axis_degrees: 5.8,
+          spin_axis_degrees: -5.8,
           club_path_degrees: { right_handed: -4.5 },
           club_face_to_target_degrees: { right_handed: -7.9 },
           club_face_to_path_degrees: { right_handed: -3.4 },
@@ -826,17 +857,17 @@
       document.getElementById('v_sidespin').innerHTML = `${Math.round(ogc.sidespin_rpm || 0)}<span class="metric-unit">RPM</span>`;
       document.getElementById('v_spin_axis').innerText = `${(ogc.spin_axis_degrees || 0).toFixed(1)}°`;
 
-      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+      const pathDeg = spsHanded(ogc.club_path_degrees, 0);
       document.getElementById('v_club_path').innerText = `${Math.abs(pathDeg).toFixed(1)}° ${pathDeg > 0 ? 'R' : 'L'}`;
 
-      const faceDeg = ogc.club_face_to_target_degrees?.right_handed || 0;
+      const faceDeg = spsHanded(ogc.club_face_to_target_degrees, 0);
       document.getElementById('v_face_angle').innerText = `${Math.abs(faceDeg).toFixed(1)}° ${faceDeg > 0 ? 'Open' : 'Closed'}`;
 
       const offYds = us.offline_distance_yards || 0;
       document.getElementById('v_offline').innerHTML = `${Math.abs(offYds).toFixed(1)} <span class="metric-unit">${offYds < 0 ? 'L' : 'R'}</span>`;
 
       // Advanced Club & Trajectory Metrics
-      const faceToPath = ogc.club_face_to_path_degrees?.right_handed || (faceDeg - pathDeg);
+      const faceToPath = spsHanded(ogc.club_face_to_path_degrees, null) ?? (faceDeg - pathDeg);
       const clubSpeedMph = us.club_speed_mph || (us.ball_speed_mph ? us.ball_speed_mph / 1.35 : 75.0);
       let closureRateVal = 0;
       if (ogc.face_closure_rate_dps !== undefined) closureRateVal = Math.round(ogc.face_closure_rate_dps);
@@ -848,10 +879,10 @@
 
       document.getElementById('v_face_to_path').innerText = `${Math.abs(faceToPath).toFixed(1)}° ${faceToPath > 0 ? 'Open' : 'Closed'}`;
 
-      const attackDeg = ogc.angle_of_attack_degrees?.right_handed !== undefined ? ogc.angle_of_attack_degrees.right_handed : ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.3 - 4.5);
+      const attackDeg = spsHanded(ogc.angle_of_attack_degrees, null) ?? ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.3 - 4.5);
       document.getElementById('v_attack_angle').innerText = `${attackDeg >= 0 ? '+' : ''}${attackDeg.toFixed(1)}°`;
 
-      const dynLoft = ogc.dynamic_loft_degrees?.right_handed !== undefined ? ogc.dynamic_loft_degrees.right_handed : ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.85);
+      const dynLoft = spsHanded(ogc.dynamic_loft_degrees, null) ?? ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.85);
       document.getElementById('v_dynamic_loft').innerText = `${dynLoft.toFixed(1)}°`;
 
       const hangTimeSec = ogc.hang_time_seconds || (2.0 * Math.sin((shotToRender.vertical_launch_angle_degrees || 18.0) * Math.PI / 180) * ((us.ball_speed_mph || 60) * 0.44704) / 9.81);
@@ -883,7 +914,7 @@
 
       const currentShotData = shot || latestShot || {};
       const ogc = currentShotData.open_golf_coach || {};
-      const pathDeg = (ogc.club_path_degrees?.right_handed || 0) + calibTiltDeg;
+      const pathDeg = spsHanded(ogc.club_path_degrees, 0) + calibTiltDeg;
       const rad = pathDeg * Math.PI / 180;
 
       ctx.setLineDash([4, 4]);
@@ -975,7 +1006,7 @@
       const currentShotData = shot || latestShot;
       if (currentShotData) {
         const ogc = currentShotData.open_golf_coach || {};
-        const faceToPath = ogc.club_face_to_path_degrees?.right_handed || 0;
+        const faceToPath = spsHanded(ogc.club_face_to_path_degrees, 0);
         const sidespin = ogc.sidespin_rpm || 0;
         const vertLaunch = currentShotData.vertical_launch_angle_degrees || 21.0;
         const smash = ogc.smash_factor || 1.35;
@@ -1072,8 +1103,8 @@
 
       const currentShotData = shot || latestShot || {};
       const ogc = currentShotData.open_golf_coach || {};
-      const faceTarget = ogc.club_face_to_target_degrees?.right_handed || 0;
-      const pathDeg = ogc.club_path_degrees?.right_handed || 0;
+      const faceTarget = spsHanded(ogc.club_face_to_target_degrees, 0);
+      const pathDeg = spsHanded(ogc.club_path_degrees, 0);
 
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = '#40C4FF';
@@ -1186,14 +1217,14 @@
 
       let rank = 'A';
       if (ogc.shot_rank) {
-        rank = typeof ogc.shot_rank === 'object' ? (ogc.shot_rank.right_handed || 'A') : ogc.shot_rank;
+        rank = typeof ogc.shot_rank === 'object' ? spsHanded(ogc.shot_rank, 'A') : ogc.shot_rank;
       } else if (currentShotData.shot_rank) {
         rank = currentShotData.shot_rank;
       }
 
       let shotName = 'PURE DRAW';
       if (ogc.shot_name) {
-        shotName = typeof ogc.shot_name === 'object' ? (ogc.shot_name.right_handed || 'PURE DRAW') : ogc.shot_name;
+        shotName = typeof ogc.shot_name === 'object' ? spsHanded(ogc.shot_name, 'PURE DRAW') : ogc.shot_name;
       } else if (currentShotData.shot_name) {
         shotName = currentShotData.shot_name;
       }

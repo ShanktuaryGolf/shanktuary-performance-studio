@@ -363,6 +363,27 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     });
 
     // 5. Telemetry Extraction
+    // Handedness: Nova sends per-hand dicts {right_handed, left_handed}.
+    // Enable lefty mode with ?lefty=1 (persisted) or localStorage sps_lefty=1.
+    const IS_LEFTY = (() => {
+        try {
+            const qp = new URLSearchParams(window.location.search).get('lefty');
+            if (qp !== null) {
+                const v = qp === '1' || qp === 'true';
+                localStorage.setItem('sps_lefty', v ? '1' : '0');
+                return v;
+            }
+            return localStorage.getItem('sps_lefty') === '1';
+        } catch (e) { return false; }
+    })();
+    function handed(val, fallback = 0.0) {
+        if (val && typeof val === 'object') {
+            const v = IS_LEFTY ? (val.left_handed ?? val.right_handed) : val.right_handed;
+            return v ?? fallback;
+        }
+        return val ?? fallback;
+    }
+
     function extractShotTelemetry(msg) {
         if (!msg) return null;
         const raw = msg.data || msg.shot || msg;
@@ -423,10 +444,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             clubSpeed = ballSpeed / Math.max(1.0, smash);
         }
 
-        const clubPath = parseFloat(ogc.club_path_degrees?.right_handed || raw.club_path || raw.club_path_degrees || 0.0);
-        const faceAngle = parseFloat(ogc.club_face_to_path_degrees?.right_handed || raw.face_to_path || raw.face_angle || 0.0);
-        const attackAngle = parseFloat(ogc.angle_of_attack_degrees?.right_handed || raw.angle_of_attack_degrees || raw.attack_angle || (vla * 0.3 - 4.5));
-        const dynamicLoft = parseFloat(ogc.dynamic_loft_degrees?.right_handed || raw.dynamic_loft_degrees || raw.dynamic_loft || (vla * 0.85));
+        const clubPath = parseFloat(handed(ogc.club_path_degrees, null) ?? raw.club_path ?? raw.club_path_degrees ?? 0.0);
+        const faceAngle = parseFloat(handed(ogc.club_face_to_path_degrees, null) ?? raw.face_to_path ?? raw.face_angle ?? 0.0);
+        const attackAngle = parseFloat(handed(ogc.angle_of_attack_degrees, null) ?? raw.angle_of_attack_degrees ?? raw.attack_angle ?? (vla * 0.3 - 4.5));
+        const dynamicLoft = parseFloat(handed(ogc.dynamic_loft_degrees, null) ?? raw.dynamic_loft_degrees ?? raw.dynamic_loft ?? (vla * 0.85));
         const hangTime = parseFloat(ogc.hang_time_seconds || raw.hang_time_seconds || raw.hang_time || (2.0 * Math.sin(vla * Math.PI / 180) * (ballSpeed * 0.44704) / 9.81));
         
         let closureRate = 0.0;
@@ -561,7 +582,16 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         const trajectory = physicsEngine.calculateTrajectory(shotData);
         const finalPt = trajectory[trajectory.length - 1];
-        const carryYds = shotData.ogcCarry || Math.abs(finalPt.z);
+        // Carry = first ground contact, NOT the post-roll final point —
+        // falling back to finalPt.z inflated carry by the bounce/roll-out.
+        let carryPt = finalPt;
+        for (let i = 0; i < trajectory.length; i++) {
+            if (trajectory[i].bounces > 0) {
+                carryPt = trajectory[i];
+                break;
+            }
+        }
+        const carryYds = shotData.ogcCarry || Math.abs(carryPt.z);
         const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : finalPt.x;
 
         updateHUDTelemetry(shotData, carryYds, offlineYds);
@@ -793,6 +823,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             }
         };
 
+        ws.onerror = (e) => console.warn('[!] Range WebSocket error', e);
+
         ws.onclose = () => {
             if (lmStatusText) lmStatusText.innerText = 'Reconnecting...';
             setTimeout(connectWS, 2000);
@@ -800,6 +832,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
 
     // 10. HTTP Fallback Poller
+    // First successful poll only ESTABLISHES the baseline shotId — it must
+    // never fire. Otherwise a page load (or OBS scene switch) replays the
+    // previous session's stored shot as if it were just hit.
+    let pollBaselined = false;
     async function pollShotAPI() {
         try {
             const res = await fetch('/api/shot');
@@ -807,9 +843,22 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 const data = await res.json();
                 if (data && Object.keys(data).length > 0) {
                     const parsed = extractShotTelemetry(data);
-                    if (parsed && parsed.shotId && parsed.shotId !== lastShotId) {
-                        fireShot(parsed);
+                    if (parsed && parsed.shotId) {
+                        if (!pollBaselined) {
+                            pollBaselined = true;
+                            if (lastShotId === null || lastShotId === undefined) {
+                                lastShotId = parsed.shotId;
+                            }
+                            return;
+                        }
+                        if (parsed.shotId !== lastShotId) {
+                            fireShot(parsed);
+                        }
                     }
+                } else {
+                    // Empty response still proves the server is reachable —
+                    // safe to treat subsequent changes as fresh shots.
+                    pollBaselined = true;
                 }
             }
         } catch (e) {
