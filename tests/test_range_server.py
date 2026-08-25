@@ -1,4 +1,5 @@
 import urllib.request
+import urllib.error
 import threading
 import time
 import pytest
@@ -26,7 +27,8 @@ def test_range_route(server):
         
         body = response.read().decode("utf-8")
         assert "3D Driving Range" in body
-        assert "id=\"hud\"" in body
+        # HUD elements are namespaced hud-* ids (e.g. hud-pressure-phase)
+        assert 'id="hud-' in body
 
 def test_range_static_js(server):
     url = f"http://localhost:{OBS_PORT}/range/js/main.js"
@@ -56,3 +58,25 @@ def test_push_native_nova_shot(server):
     }
     obs_state.push_shot(native_nova_shot)
     assert obs_state.latest_shot == native_nova_shot
+
+
+def _get_status(path):
+    url = f"http://localhost:{OBS_PORT}{path}"
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_static_traversal_blocked(server):
+    # Path traversal must never escape the assets directory
+    # (server binds 0.0.0.0 — this is LAN-reachable).
+    assert _get_status("/assets/%2e%2e/obs_server.py") in (400, 403, 404)
+    assert _get_status("/range/%2e%2e/%2e%2e/obs_server.py") in (400, 403, 404)
+    assert _get_status("/assets/%2e%2e%2f%2e%2e%2fetc%2fpasswd") in (400, 403, 404)
+
+
+def test_static_legit_asset_still_served(server):
+    assert _get_status("/assets/overlay.html") == 200
+    assert _get_status("/range/js/main.js") == 200

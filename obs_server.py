@@ -115,6 +115,11 @@ class OBSState:
         self.latest_shot = None
         self.ws_clients = set()
         self.lock = threading.Lock()
+        # Serializes writes to each WS client socket so concurrent broadcasts
+        # can't interleave partial frames; held only around socket I/O and
+        # NEVER while holding self.lock (a stalled client must not wedge the
+        # 30 Hz pressure pipeline or the HTTP handlers).
+        self.send_lock = threading.Lock()
         self.ensure_layout_file()
 
     def ensure_layout_file(self):
@@ -146,29 +151,47 @@ class OBSState:
     def push_shot(self, shot_data):
         with self.lock:
             self.latest_shot = shot_data
-        
+
         # Trigger shot impact capture in pressure buffer
-        if 'pressure_manager' in globals():
+        pm = globals().get('pressure_manager')
+        if pm is not None and pm.buffer is not None:
             def on_pressure_captured(trace_frames):
-                shot_data["pressure_trace"] = trace_frames
-                pressure_manager.last_shot_trace = trace_frames
+                # Build an immutable snapshot instead of mutating the shared
+                # dict that /api/shot and broadcast may be serializing.
+                snapshot = {**shot_data, "pressure_trace": trace_frames}
+                with self.lock:
+                    if self.latest_shot is shot_data:
+                        self.latest_shot = snapshot
+                pm.last_shot_trace = trace_frames
                 self.broadcast({"type": "shot_pressure", "shot_id": shot_data.get("shotId"), "trace": trace_frames})
 
-            pressure_manager.buffer.trigger_shot_impact(callback=on_pressure_captured)
+            pm.buffer.trigger_shot_impact(callback=on_pressure_captured)
 
         self.broadcast({"type": "shot", "data": shot_data})
 
     def broadcast(self, message):
         payload = json.dumps(message)
         frame = self.make_ws_frame(payload)
+        # Snapshot the client set under the state lock, but do all socket I/O
+        # OUTSIDE it: one stalled client (full TCP buffer in a backgrounded
+        # OBS source) must not block push_shot/save_layout/the pressure loop.
         with self.lock:
-            dead = set()
-            for client in self.ws_clients:
+            clients = list(self.ws_clients)
+        dead = set()
+        with self.send_lock:
+            for client in clients:
                 try:
                     client.sendall(frame)
                 except Exception:
                     dead.add(client)
-            self.ws_clients -= dead
+        if dead:
+            with self.lock:
+                self.ws_clients -= dead
+            for client in dead:
+                try:
+                    client.close()
+                except OSError:
+                    pass
 
     @staticmethod
     def make_ws_frame(data, opcode=1):
@@ -251,11 +274,21 @@ class PressureManager:
 
     def _loop(self):
         last_broadcast = 0.0
+        last_error_log = 0.0
         while self.running:
             try:
+                # Snapshot swappable references under the lock so HTTP threads
+                # (set_simulator/set_board_mode/wizard) can't close/replace a
+                # backend out from under us mid-read.
+                with self.lock:
+                    backend = self.backend
+                    wiz = self.assignment_wizard
+                    wiz_a = self._wiz_backend_a
+                    wiz_b = self._wiz_backend_b
+
                 # 0. Hardware auto-reconnect if not in simulator mode, no backend open, and wizard not active
-                is_wiz_active = bool(self.assignment_wizard and self.assignment_wizard.phase in ("waiting_left", "waiting_right"))
-                if not self.is_simulator and not is_wiz_active and (not self.backend or not self.backend.is_open):
+                is_wiz_active = bool(wiz and wiz.phase in ("waiting_left", "waiting_right"))
+                if not self.is_simulator and not is_wiz_active and (not backend or not backend.is_open):
                     now = time.time()
                     if now - self._last_reconnect_attempt >= 2.0:
                         self._last_reconnect_attempt = now
@@ -264,26 +297,26 @@ class PressureManager:
                                 self.backend = self._create_hardware_backend()
                             except Exception:
                                 pass
+                            backend = self.backend
 
                 # 1. Wizard multi-board polling
-                wiz = self.assignment_wizard
                 if wiz and wiz.phase in ("waiting_left", "waiting_right"):
                     w_a = wiz.board_a_weight
                     w_b = wiz.board_b_weight
-                    if self._wiz_backend_a and self._wiz_backend_b:
-                        rd_a = self._wiz_backend_a.read()
-                        rd_b = self._wiz_backend_b.read()
+                    if wiz_a and wiz_b:
+                        rd_a = wiz_a.read()
+                        rd_b = wiz_b.read()
                         if rd_a:
                             w_a = rd_a.total_weight
                         if rd_b:
                             w_b = rd_b.total_weight
-                    elif self._wiz_backend_a and not self._wiz_backend_b:
-                        rd_a = self._wiz_backend_a.read()
+                    elif wiz_a and not wiz_b:
+                        rd_a = wiz_a.read()
                         if rd_a:
                             w_a = rd_a.top_left + rd_a.bottom_left
                             w_b = rd_a.top_right + rd_a.bottom_right
-                    elif self.backend and self.backend.is_open:
-                        rd = self.backend.read()
+                    elif backend and backend.is_open:
+                        rd = backend.read()
                         if rd:
                             w_a = rd.top_left + rd.bottom_left
                             w_b = rd.top_right + rd.bottom_right
@@ -292,8 +325,8 @@ class PressureManager:
                         self.update_assignment_wizard(w_a, w_b)
 
                 # 2. Standard stream loop
-                if self.backend and self.backend.is_open:
-                    reading = self.backend.read()
+                if backend and backend.is_open:
+                    reading = backend.read()
                     if reading:
                         self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
@@ -354,8 +387,13 @@ class PressureManager:
                             if self.latest_frame:
                                 obs_state.broadcast({"type": "pressure", "data": self.latest_frame})
                             last_broadcast = now
-            except Exception:
-                pass
+            except Exception as e:
+                # Rate-limited logging: real bugs must not vanish silently,
+                # but a persistent hardware fault can't be allowed to spam.
+                now = time.time()
+                if now - last_error_log >= 5.0:
+                    last_error_log = now
+                    print(f"[!] Pressure worker error: {type(e).__name__}: {e}")
             time.sleep(0.012)
 
     def _save_calibration(self, filepath=None):
@@ -447,6 +485,8 @@ class PressureManager:
         with self.lock:
             from src.hardware.pressure import TareOffsets, SensorReading
             from src.processing.pressure.cop import CoPSample
+            if self.buffer is None:
+                return False
             if self._latest_raw_reading:
                 self.tare_offsets = TareOffsets(
                     top_left=self._latest_raw_reading.top_left,
@@ -462,7 +502,7 @@ class PressureManager:
             else:
                 self.tare_offsets = TareOffsets(0.0, 0.0, 0.0, 0.0)
 
-            # Immediately produce and broadcast zeroed resting frame at (0,0)
+            # Immediately produce a zeroed resting frame at (0,0)
             zero_reading = SensorReading(0.0, 0.0, 0.0, 0.0, timestamp=time.time())
             zero_cop = CoPSample(
                 cop_x=0.0,
@@ -479,8 +519,10 @@ class PressureManager:
             )
             frame = self.buffer.push(zero_cop, torque=0.0, phase="Address")
             self.latest_frame = frame
-            obs_state.broadcast({"type": "pressure", "data": frame})
-            return True
+        # Broadcast OUTSIDE self.lock: socket I/O to a stalled client must
+        # not hold up the pressure worker or other /api/pressure/* handlers.
+        obs_state.broadcast({"type": "pressure", "data": frame})
+        return True
 
     def _create_hardware_backend(self, device_path=None):
         """Create hardware backend appropriate for host OS (Evdev on Linux, Hid on Windows/macOS)."""
@@ -747,32 +789,60 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/pressure/align_stance":
             self.send_json(pressure_manager.get_alignment_status())
         elif parsed_path.startswith("/assets/"):
-            asset_filename = parsed_path.replace("/assets/", "")
-            file_path = assets_dir / asset_filename
-            import mimetypes
-            mime, _ = mimetypes.guess_type(file_path)
-            if not mime: mime = "application/octet-stream"
-            self.serve_file(file_path, mime)
+            self.serve_static(assets_dir, parsed_path[len("/assets/"):])
         elif parsed_path.startswith("/range/"):
-            asset_filename = parsed_path.replace("/range/", "")
-            file_path = assets_dir / "range" / asset_filename
-            import mimetypes
-            mime, _ = mimetypes.guess_type(file_path)
-            if not mime: mime = "application/octet-stream"
-            self.serve_file(file_path, mime)
+            self.serve_static(assets_dir / "range", parsed_path[len("/range/"):])
         elif parsed_path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
         else:
-            self.send_error(404, f"File Not Found: {parsed_path}")
+            self.send_error(404, "Not Found")
+
+    def serve_static(self, root, rel_path):
+        """Serve a file strictly inside root — rejects path traversal
+        (../, encoded variants, absolute paths). The server listens on
+        0.0.0.0, so this must never escape the assets directory."""
+        from urllib.parse import unquote
+        rel_path = unquote(rel_path)
+        try:
+            root = root.resolve()
+            file_path = (root / rel_path).resolve()
+            if not file_path.is_relative_to(root):
+                self.send_error(403, "Forbidden")
+                return
+        except (OSError, ValueError):
+            self.send_error(400, "Bad Request")
+            return
+        import mimetypes
+        mime, _ = mimetypes.guess_type(file_path)
+        if not mime: mime = "application/octet-stream"
+        self.serve_file(file_path, mime)
+
+    MAX_POST_BODY = 1024 * 1024  # 1 MB — nothing this API accepts is larger
+
+    def read_post_body(self):
+        """Read the POST body with validation. Returns str, or None after an
+        error response has already been sent (malformed/oversized length)."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self.send_json({"status": "error", "message": "bad Content-Length"}, code=400)
+            return None
+        if length < 0 or length > self.MAX_POST_BODY:
+            self.send_json({"status": "error", "message": "body too large"}, code=413)
+            return None
+        return self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
 
     def do_POST(self):
         parsed_path = self.path.split("?")[0].rstrip("/")
         if parsed_path == "/api/layout":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length).decode("utf-8")
+            body = self.read_post_body()
+            if body is None:
+                return
             try:
                 layout_data = json.loads(body)
+                if not isinstance(layout_data, dict):
+                    raise ValueError("layout must be a JSON object")
                 success = obs_state.save_layout(layout_data)
                 self.send_json({"status": "ok" if success else "error"})
             except Exception as e:
@@ -781,8 +851,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             ok = pressure_manager.tare()
             self.send_json({"status": "ok" if ok else "error"})
         elif parsed_path == "/api/pressure/align_stance":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            body = self.read_post_body()
+            if body is None:
+                return
             dur = 4.0
             try:
                 data = json.loads(body)
@@ -792,8 +863,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             res = pressure_manager.start_stance_alignment(duration_sec=dur)
             self.send_json(res)
         elif parsed_path == "/api/pressure/simulator":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            body = self.read_post_body()
+            if body is None:
+                return
             try:
                 data = json.loads(body)
                 enabled = data.get("enabled", True)
@@ -809,8 +881,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=500)
         elif parsed_path == "/api/pressure/mode":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            body = self.read_post_body()
+            if body is None:
+                return
             try:
                 data = json.loads(body)
                 mode = data.get("mode", "single")
@@ -819,8 +892,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/pressure/assign":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            body = self.read_post_body()
+            if body is None:
+                return
             try:
                 data = json.loads(body)
                 action = data.get("action", "start")
@@ -853,7 +927,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_error(500, str(e))
         else:
-            self.send_error(404, f"File Not Found: {filepath}")
+            self.send_error(404, "Not Found")
 
     def send_json(self, obj, code=200):
         try:
@@ -885,25 +959,37 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.flush()
 
         raw_sock = self.connection
-        with obs_state.lock:
-            obs_state.ws_clients.add(raw_sock)
+        # Bound sendall so one stalled client can't block broadcasts forever;
+        # dead clients get pruned by the broadcast error path.
+        try:
+            raw_sock.settimeout(2.0)
+        except OSError:
+            pass
 
         with obs_state.lock:
             current_shot = obs_state.latest_shot
-        
+
         init_msg = json.dumps({
             "type": "init",
             "layout": obs_state.load_layout(),
             "data": current_shot
         })
-        try:
-            raw_sock.sendall(obs_state.make_ws_frame(init_msg))
-        except Exception:
-            pass
+        # Send init BEFORE registering, under send_lock, so no broadcast can
+        # arrive ahead of (or interleave with) the init frame.
+        with obs_state.send_lock:
+            try:
+                raw_sock.sendall(obs_state.make_ws_frame(init_msg))
+            except Exception:
+                return
+        with obs_state.lock:
+            obs_state.ws_clients.add(raw_sock)
 
         try:
             while True:
-                data = raw_sock.recv(1024)
+                try:
+                    data = raw_sock.recv(1024)
+                except socket.timeout:
+                    continue  # settimeout(2.0) applies to recv too — idle is fine
                 if not data:
                     break
         except Exception:
