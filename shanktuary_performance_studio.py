@@ -3855,10 +3855,18 @@ class ShanktuaryApp:
             side_residual = (sidespin - expected_side) * hand_sign
             h_hint = max(-1.0, min(1.0, side_residual / (400.0 * speed_ratio)))  # + = heel, - = toe
 
-            # Vertical: high-face → higher launch + less spin; low-face → opposite.
-            launch_dev = (vert_launch - base_launch) / 8.0
-            spin_dev = (backspin - expected_spin) / (1200.0 * speed_ratio)
-            v_hint = max(-1.0, min(1.0, launch_dev - (spin_dev * 1.5)))  # + = high, - = low
+            # Vertical: Launch deviation is the primary physical indicator of strike height.
+            # On flat-faced irons, low-face/thin/bladed shots launch low (e.g. worm burners); high hits launch higher.
+            # On drivers/woods with roll curvature, vertical gear effect also reduces backspin on high strikes.
+            launch_dev = (vert_launch - base_launch) / 5.0
+            is_wood = self.current_club in ("Driver", "3 Wood", "5 Wood", "3 Hybrid")
+            if is_wood:
+                spin_dev = (backspin - expected_spin) / (1000.0 * speed_ratio)
+                v_hint = (launch_dev * 0.7) - (spin_dev * 0.3)
+            else:
+                # Irons/wedges: flat face means launch angle directly determines vertical contact point
+                v_hint = launch_dev
+            v_hint = max(-1.0, min(1.0, v_hint))
 
             hint_mag = math.sqrt(h_hint**2 + v_hint**2)
             dir_known = hint_mag >= 0.15 and est_offset_mm >= 2.0
