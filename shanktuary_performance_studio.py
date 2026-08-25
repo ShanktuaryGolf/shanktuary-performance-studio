@@ -3834,7 +3834,26 @@ class ShanktuaryApp:
                 "8 Iron": 95.0, "9 Iron": 90.0, "PW": 85.0, "GW": 80.0,
                 "SW": 75.0, "LW": 70.0
             }
-            base_launch = club_baselines.get(self.current_club, 21.0)
+            # Dynamic baseline launch angle from club's configured loft in My Bag (Mitchell standards fallback)
+            configured_loft = None
+            for c in getattr(self, "bag", []):
+                if isinstance(c, dict) and c.get("name") == self.current_club:
+                    configured_loft = c.get("loft_deg")
+                    break
+            if configured_loft and float(configured_loft) > 0:
+                c_loft = float(configured_loft)
+                if self.current_club in ("Driver", "3 Wood", "5 Wood", "7 Wood"):
+                    base_launch = c_loft * 1.10
+                elif "Hybrid" in self.current_club:
+                    base_launch = c_loft * 0.82
+                elif "Putter" in self.current_club:
+                    base_launch = 2.0
+                else:
+                    # Irons & Wedges: forward shaft lean delofting delivers ~68% of static loft launch angle
+                    base_launch = c_loft * 0.68
+            else:
+                base_launch = club_baselines.get(self.current_club, 21.0)
+
             base_spin = club_spin_baselines.get(self.current_club, 7000)
             full_speed = club_speed_baselines.get(self.current_club, 105.0)
 
