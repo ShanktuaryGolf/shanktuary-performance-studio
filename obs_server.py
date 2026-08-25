@@ -525,22 +525,33 @@ class PressureManager:
         return True
 
     def _create_hardware_backend(self, device_path=None):
-        """Create hardware backend appropriate for host OS (Evdev on Linux, Hid on Windows/macOS)."""
+        """Create hardware backend appropriate for host OS (Evdev on Linux, Hid on Windows/macOS).
+
+        Returns None when no board is present. The pressure worker retries every
+        2s, so failures here are the NORMAL state for anyone running without a
+        balance board -- log the first one and stay quiet after that rather than
+        spamming the console twice a second.
+        """
         if sys.platform == "win32":
             try:
                 from src.hardware.pressure.hid_backend import HidBackend
                 path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
                 b = HidBackend(device_path=path)
                 b.open()
+                self._backend_error_logged = False
                 return b
             except Exception as e:
-                print(f"[!] Error creating Windows HID backend for path={device_path}: {e}")
+                if not getattr(self, "_backend_error_logged", False):
+                    self._backend_error_logged = True
+                    print(f"[!] Balance board not connected ({e}). "
+                          f"Retrying quietly in the background; further errors suppressed.")
                 return None
         else:
             try:
                 from src.hardware.pressure.evdev_backend import EvdevBackend
                 b = EvdevBackend(device_path=device_path)
                 b.open()
+                self._backend_error_logged = False
                 return b
             except Exception:
                 try:
@@ -548,8 +559,13 @@ class PressureManager:
                     path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
                     b = HidBackend(device_path=path)
                     b.open()
+                    self._backend_error_logged = False
                     return b
-                except Exception:
+                except Exception as e:
+                    if not getattr(self, "_backend_error_logged", False):
+                        self._backend_error_logged = True
+                        print(f"[!] Balance board not connected ({e}). "
+                              f"Retrying quietly in the background; further errors suppressed.")
                     return None
 
     def _set_simulator_unlocked(self, enabled: bool):

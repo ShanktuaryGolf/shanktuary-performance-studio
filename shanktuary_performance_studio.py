@@ -4046,6 +4046,12 @@ class ShanktuaryApp:
                     measured = True
                     break
 
+        # Club specs must come from the SHOT being displayed, not from whatever
+        # is selected in the dropdown right now. Reviewing shot history, or
+        # changing club after a shot, would otherwise re-score old shots against
+        # the wrong loft and silently flip their strike verdict.
+        strike_club = (shot_obj.get("club") if isinstance(shot_obj, dict) else None) or self.current_club
+
         if not measured:
             # 1) Magnitude from smash deficit.
             #
@@ -4061,7 +4067,7 @@ class ShanktuaryApp:
                 "8 Iron": 1.34, "9 Iron": 1.31, "PW": 1.27, "GW": 1.24,
                 "SW": 1.21, "LW": 1.18
             }
-            max_smash = club_max_smash.get(self.current_club, 1.37)
+            max_smash = club_max_smash.get(strike_club, 1.37)
             smash_val = float(smash or 0.0)
             if smash_val <= 0.0:
                 smash_val = max_smash
@@ -4101,25 +4107,25 @@ class ShanktuaryApp:
             # Dynamic baseline launch angle from club's configured loft in My Bag (Mitchell standards fallback)
             configured_loft = None
             for c in getattr(self, "bag", []):
-                if isinstance(c, dict) and c.get("name") == self.current_club:
+                if isinstance(c, dict) and c.get("name") == strike_club:
                     configured_loft = c.get("loft_deg")
                     break
             if configured_loft and float(configured_loft) > 0:
                 c_loft = float(configured_loft)
-                if self.current_club in ("Driver", "3 Wood", "5 Wood", "7 Wood"):
+                if strike_club in ("Driver", "3 Wood", "5 Wood", "7 Wood"):
                     base_launch = c_loft * 1.10
-                elif "Hybrid" in self.current_club:
+                elif "Hybrid" in strike_club:
                     base_launch = c_loft * 0.82
-                elif "Putter" in self.current_club:
+                elif "Putter" in strike_club:
                     base_launch = 2.0
                 else:
                     # Irons & Wedges: forward shaft lean delofting delivers ~68% of static loft launch angle
                     base_launch = c_loft * 0.68
             else:
-                base_launch = club_baselines.get(self.current_club, 21.0)
+                base_launch = club_baselines.get(strike_club, 21.0)
 
-            base_spin = club_spin_baselines.get(self.current_club, 7000)
-            full_speed = club_speed_baselines.get(self.current_club, 105.0)
+            base_spin = club_spin_baselines.get(strike_club, 7000)
+            full_speed = club_speed_baselines.get(strike_club, 105.0)
 
             # Scale expected baseline spin and sidespin by swing speed ratio so partial swings don't falsely skew
             ball_spd = float(ball_speed or 0.0)
@@ -4142,7 +4148,7 @@ class ShanktuaryApp:
             # On flat-faced irons, low-face/thin/bladed shots launch low (e.g. worm burners); high hits launch higher.
             # On drivers/woods with roll curvature, vertical gear effect also reduces backspin on high strikes.
             launch_dev = (vert_launch - base_launch) / 5.0
-            is_wood = self.current_club in ("Driver", "3 Wood", "5 Wood", "3 Hybrid")
+            is_wood = strike_club in ("Driver", "3 Wood", "5 Wood", "3 Hybrid")
             if is_wood:
                 spin_dev = (backspin - expected_spin) / (1000.0 * speed_ratio)
                 v_hint = (launch_dev * 0.7) - (spin_dev * 0.3)

@@ -23,6 +23,10 @@ from .base import BoardBackend, SensorReading
 WBB_VID = 0x057E
 WBB_PID = 0x0306
 
+# Set once if HID enumeration itself fails, so the 2s reconnect loop doesn't
+# reprint the same error forever.
+_ENUM_ERROR_LOGGED = False
+
 # --- Wiimote output report IDs ---
 RPT_LED = 0x11
 RPT_DATA_REPORTING = 0x12
@@ -106,7 +110,13 @@ def enumerate_boards() -> list[dict]:
                 matched.append(d)
         return matched
     except Exception as e:
-        print(f"[!] Error enumerating HID boards: {e}")
+        # Enumeration failing is usually a missing/broken hidapi rather than a
+        # per-call problem, so it would repeat on every 2s reconnect attempt.
+        # Log once per process.
+        global _ENUM_ERROR_LOGGED
+        if not _ENUM_ERROR_LOGGED:
+            _ENUM_ERROR_LOGGED = True
+            print(f"[!] Error enumerating HID boards: {e} (further errors suppressed)")
         return []
 
 
