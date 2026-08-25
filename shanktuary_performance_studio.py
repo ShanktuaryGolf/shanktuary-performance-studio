@@ -22,6 +22,7 @@ Controls:
 
 import socket
 import base64
+from typing import Any
 import os
 import sys
 import struct
@@ -131,8 +132,10 @@ def discover_nova_device():
             def add_service(self, zc, type_, name):
                 info = zc.get_service_info(type_, name)
                 if info and info.addresses:
-                    self.found_ip = socket.inet_ntoa(info.addresses[0])
+                    # Set port BEFORE ip: the polling loop keys on found_ip,
+                    # so ip-first could be observed with port still None.
                     self.found_port = info.port
+                    self.found_ip = socket.inet_ntoa(info.addresses[0])
 
             def update_service(self, zc, type_, name):
                 pass
@@ -185,31 +188,64 @@ def make_ws_frame(data, opcode=1):
     masked = bytearray(b ^ mask_key[i % 4] for i, b in enumerate(payload))
     return bytes(header + masked)
 
-def read_ws_frame(s):
-    head = s.recv(2)
-    if not head or len(head) < 2:
-        return None, None
-    b1, b2 = head[0], head[1]
+class _SockBuf:
+    """Buffered reader so bytes received with the handshake aren't lost."""
+    def __init__(self, sock, initial=b""):
+        self.sock = sock
+        self.buf = bytearray(initial)
+
+    def ensure(self, n):
+        """Fill the buffer to at least n bytes WITHOUT consuming.
+        Raises ConnectionError if the peer closes; socket.timeout propagates
+        (buffer content is preserved, so a retry resumes cleanly)."""
+        while len(self.buf) < n:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("Nova closed the connection")
+            self.buf.extend(chunk)
+
+    def consume(self, n):
+        out = bytes(self.buf[:n])
+        del self.buf[:n]
+        return out
+
+def read_ws_frame(r):
+    """Read one complete WebSocket frame from a _SockBuf.
+    Peek-based: nothing is consumed until the entire frame is buffered, so a
+    socket.timeout mid-frame leaves the stream position intact and the caller
+    can simply retry. Raises ConnectionError on peer close."""
+    r.ensure(2)
+    b1, b2 = r.buf[0], r.buf[1]
     opcode = b1 & 0x0F
     has_mask = (b2 & 0x80) != 0
     payload_len = b2 & 0x7F
+    off = 2
     if payload_len == 126:
-        payload_len = struct.unpack("!H", s.recv(2))[0]
+        r.ensure(off + 2)
+        payload_len = struct.unpack("!H", bytes(r.buf[off:off + 2]))[0]
+        off += 2
     elif payload_len == 127:
-        payload_len = struct.unpack("!Q", s.recv(8))[0]
-    mask_key = s.recv(4) if has_mask else None
-    raw = b""
-    while len(raw) < payload_len:
-        chunk = s.recv(payload_len - len(raw))
-        if not chunk:
-            break
-        raw += chunk
+        r.ensure(off + 8)
+        payload_len = struct.unpack("!Q", bytes(r.buf[off:off + 8]))[0]
+        off += 8
+    mask_key = None
     if has_mask:
+        r.ensure(off + 4)
+        mask_key = bytes(r.buf[off:off + 4])
+        off += 4
+    r.ensure(off + payload_len)
+    r.consume(off)
+    raw = r.consume(payload_len)
+    if has_mask and raw:
         raw = bytes(b ^ mask_key[i % 4] for i, b in enumerate(raw))
     return opcode, raw
 
+# Live Nova connection status, written by websocket_worker, read by the UI.
+nova_status = {"connected": False, "host": ""}
+
 def websocket_worker():
     while True:
+        s = None
         try:
             nova_ip, nova_port = discover_nova_device()
             print(f"[*] Connecting to OpenLaunch Nova at ws://{nova_ip}:{nova_port}...")
@@ -226,28 +262,50 @@ def websocket_worker():
             s.sendall(req.encode())
             buf = b""
             while b"\r\n\r\n" not in buf:
-                chunk = s.recv(1024)
+                chunk = s.recv(4096)
                 if not chunk:
-                    break
+                    raise ConnectionError("Nova closed during handshake")
                 buf += chunk
+            headers, _, residual = buf.partition(b"\r\n\r\n")
+            status_line = headers.split(b"\r\n", 1)[0]
+            if b" 101" not in status_line:
+                raise ConnectionError(f"WebSocket handshake rejected: {status_line.decode(errors='replace')}")
 
             print(f"[+] Connected to Nova WebSocket on {nova_ip}:{nova_port}!")
+            nova_status["connected"] = True
+            nova_status["host"] = f"{nova_ip}:{nova_port}"
             s.settimeout(1.0)
+            # Carry any frame bytes that arrived with the handshake tail
+            reader = _SockBuf(s, residual)
             while True:
                 try:
-                    opcode, data = read_ws_frame(s)
-                    if data:
-                        text = data.decode("utf-8", errors="replace")
-                        try:
-                            msg = json.loads(text)
-                            if msg.get("type") == "shot":
-                                shot_queue.put(msg)
-                        except json.JSONDecodeError:
-                            pass
+                    opcode, data = read_ws_frame(reader)
                 except socket.timeout:
-                    pass
+                    continue  # idle between frames — keep waiting
+                if opcode == 0x8:  # close
+                    raise ConnectionError("Nova sent close frame")
+                if opcode == 0x9:  # ping → masked pong
+                    try:
+                        s.sendall(make_ws_frame(data, opcode=0xA))
+                    except OSError:
+                        raise ConnectionError("failed to send pong")
+                    continue
+                if data:
+                    text = data.decode("utf-8", errors="replace")
+                    try:
+                        msg = json.loads(text)
+                        if msg.get("type") == "shot":
+                            shot_queue.put(msg)
+                    except json.JSONDecodeError:
+                        pass
         except Exception as e:
+            nova_status["connected"] = False
             print(f"[!] WebSocket error: {e}. Reconnecting in 3s...")
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
             time.sleep(3)
 
 def load_image_asset(path, target_h=210, mirror=False):
@@ -595,6 +653,19 @@ class ShanktuaryApp:
     def launch_3d_range(self, event=None):
         webbrowser.open("http://localhost:9321/range")
 
+    def resolve_handed(self, val, default: Any = 0.0) -> Any:
+        """Resolve a Nova/OGC field that may be a plain scalar or a dict keyed
+        by right_handed/left_handed. Honors self.is_left_handed; scalar values
+        are assumed right-handed and numeric ones are sign-flipped for LH."""
+        if isinstance(val, dict):
+            key = "left_handed" if self.is_left_handed else "right_handed"
+            return val.get(key, val.get("right_handed", default))
+        if val is None:
+            return default
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return -val if self.is_left_handed else val
+        return val
+
     def load_session_history(self):
         if not os.path.exists(SESSION_LOG_PATH):
             if not self.bag:
@@ -625,6 +696,15 @@ class ShanktuaryApp:
                     self.clubs.append(c_name)
         except Exception as e:
             print(f"[!] Error loading session history: {e}")
+            # Preserve the unreadable file for recovery — the next save would
+            # otherwise silently overwrite possibly-recoverable data.
+            try:
+                backup = f"{SESSION_LOG_PATH}.corrupt-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                os.replace(SESSION_LOG_PATH, backup)
+                print(f"[!] Unreadable history preserved at: {backup}")
+                self.copy_feedback = "⚠ History file unreadable — backup saved"
+            except OSError:
+                pass
             if not self.bag:
                 self.init_default_bag()
 
@@ -637,8 +717,12 @@ class ShanktuaryApp:
                 "bag": self.bag,
                 "is_left_handed": self.is_left_handed
             }
-            with open(SESSION_LOG_PATH, "w") as f:
+            # Atomic write: serialize to a temp file, then swap into place so
+            # a crash mid-write can never truncate the whole history.
+            tmp_path = SESSION_LOG_PATH + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(payload, f, indent=2)
+            os.replace(tmp_path, SESSION_LOG_PATH)
         except Exception as e:
             print(f"[!] Error saving session: {e}")
 
@@ -1404,9 +1488,12 @@ class ShanktuaryApp:
                 self.current_shot = msg
                 self.save_session_to_file()
                 
-                # Push shot to OBS Stream Overlay Server
+                # Push a COPY to the OBS server: its pressure-capture callback
+                # mutates the pushed dict from another thread (adds
+                # pressure_trace), which would race with json.dump of the
+                # session file and pollute stored history.
                 try:
-                    obs_server.obs_state.push_shot(msg)
+                    obs_server.obs_state.push_shot(dict(msg))
                 except Exception as e:
                     print(f"[!] OBS push note: {e}")
 
@@ -2121,8 +2208,8 @@ class ShanktuaryApp:
             sum_hl += shot.get("horizontal_launch_angle_degrees", 0.0)
             sum_ss += ogc.get("sidespin_rpm", 0.0)
             sum_sa += ogc.get("spin_axis_degrees", 0.0)
-            sum_cp += ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            sum_fp += ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+            sum_cp += self.resolve_handed(ogc.get("club_path_degrees"), 0.0)
+            sum_fp += self.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
             sum_da += ogc.get("descent_angle_degrees", 0.0)
             sum_apex += us_units.get("peak_height_yards", 0.0)
             sum_off += us_units.get("offline_distance_yards", 0.0)
@@ -2243,7 +2330,7 @@ class ShanktuaryApp:
                 carry = us.get("carry_distance_yards", 0.0)
                 bspeed = us.get("ball_speed_mph", 0.0)
                 smash = ogc.get("smash_factor", 1.0)
-                s_name = ogc.get("shot_name", {}).get("right_handed", "Shot")
+                s_name = self.resolve_handed(ogc.get("shot_name"), "Shot")
                 c_tag = shot.get("club", "Club")
                 t_stamp = shot.get("timestamp", "--:--")
 
@@ -2354,18 +2441,21 @@ class ShanktuaryApp:
         else:
             brand_right = brand_x + (50 if brand_text == "STUDIO" else 150)
         
-        # Status Box
+        # Status Box — live Nova link state from the WebSocket worker
+        nova_up = nova_status["connected"]
         if avail_w < 1050 and not self.sidebar_collapsed:
-            status_text = "● Nova" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
+            status_text = "● Nova" if nova_up else "● Ready"
             status_w = 60
         else:
-            status_text = "● Nova Ready" if (self.nova_connected or len(self.session_shots) > 0) else "● Ready"
+            status_text = "● Nova Ready" if nova_up else "● Ready"
             status_w = 86
+        status_col = "#00FF66" if nova_up else "#8E94A5"
+        status_bg = "#0D2618" if nova_up else "#15171E"
 
         status_x1 = brand_right + 8
         status_x2 = status_x1 + status_w
-        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill="#0D2618", outline="#00FF66")
-        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill="#00FF66", font=("Helvetica", 7, "bold"), anchor="center")
+        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill=status_bg, outline=status_col)
+        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill=status_col, font=("Helvetica", 7, "bold"), anchor="center")
 
         # 2. Right Utility Pills
         fs_w = 32
@@ -2606,7 +2696,8 @@ class ShanktuaryApp:
         # Section 3: Hardware
         self.canvas.create_text(x1 + 14, curr_y, text="📡 NOVA & HARDWARE", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
         curr_y += 16
-        self.canvas.create_text(x1 + 18, curr_y, text="Host: 192.168.40.249:2920 (mDNS Ready)", fill="#8E94A5", font=("Consolas", 8), anchor="w")
+        nova_host_line = f"Host: {nova_status['host']} (connected)" if nova_status["connected"] else "Host: — (searching...)"
+        self.canvas.create_text(x1 + 18, curr_y, text=nova_host_line, fill="#8E94A5", font=("Consolas", 8), anchor="w")
 
     def draw_screen(self):
         self.canvas.delete("all")
@@ -3375,8 +3466,8 @@ class ShanktuaryApp:
             elif self.table_sort_col == "spin": return ogc.get("total_spin_rpm", 0.0)
             elif self.table_sort_col == "sidespin": return ogc.get("sidespin_rpm", 0.0)
             elif self.table_sort_col == "axis": return ogc.get("spin_axis_degrees", 0.0)
-            elif self.table_sort_col == "path": return ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            elif self.table_sort_col == "face": return ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+            elif self.table_sort_col == "path": return self.resolve_handed(ogc.get("club_path_degrees"), 0.0)
+            elif self.table_sort_col == "face": return self.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
             elif self.table_sort_col == "apex": return us.get("peak_height_yards", 0.0)
             elif self.table_sort_col == "descent": return ogc.get("descent_angle_degrees", 0.0)
             elif self.table_sort_col == "offline": return us.get("offline_distance_yards", 0.0)
@@ -3411,8 +3502,8 @@ class ShanktuaryApp:
             sp_val = ogc.get("total_spin_rpm", 0.0)
             ss_val = ogc.get("sidespin_rpm", 0.0)
             sa_val = ogc.get("spin_axis_degrees", 0.0)
-            cp_val = ogc.get("club_path_degrees", {}).get("right_handed", 0.0)
-            fp_val = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+            cp_val = self.resolve_handed(ogc.get("club_path_degrees"), 0.0)
+            fp_val = self.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
             ap_val = us.get("peak_height_yards", 0.0)
             da_val = ogc.get("descent_angle_degrees", 0.0)
             off_val = us.get("offline_distance_yards", 0.0)
@@ -3466,7 +3557,12 @@ class ShanktuaryApp:
         grid_h = bot_y - top_y
 
         off_dir = "L" if offline < 0 else "R"
-        path_dir = "In-Out" if club_path > 0 else "Out-In"
+        # Match draw_4_quadrant_studio's handed convention: the club_path value
+        # is already hand-resolved, and for LH the sign semantics mirror.
+        if self.is_left_handed:
+            path_dir = "In-Out" if club_path < 0 else "Out-In"
+        else:
+            path_dir = "In-Out" if club_path > 0 else "Out-In"
         face_dir = "Open" if face_to_path > 0 else "Closed"
         axis_dir = "R" if spin_axis > 0 else "L"
         apex_ft = apex * 3.0
@@ -4242,7 +4338,7 @@ class ShanktuaryApp:
 
             cr = ogc.get("face_closure_rate_dps") or s.get("face_closure_rate_dps") or s.get("closure_rate")
             if cr is None and cs and len(smashes):
-                fp = ogc.get("club_face_to_path_degrees", {}).get("right_handed", 0.0)
+                fp = self.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
                 cr = 1800 + abs(fp) * 320 + (cs * 12.5)
             if cr: closure_rates.append(cr)
 

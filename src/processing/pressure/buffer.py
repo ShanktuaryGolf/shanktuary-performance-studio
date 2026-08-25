@@ -84,15 +84,29 @@ class ShotSynchronizedPressureBuffer:
         return frame
 
     def trigger_shot_impact(self, impact_time: Optional[float] = None, callback=None) -> None:
-        """Called when Launch Monitor detects ball impact."""
-        self._impact_time = impact_time or time.time()
+        """Called when Launch Monitor detects ball impact.
+
+        impact_time must be on the SAME clock as the frame timestamps
+        (time.monotonic(), per SensorReading.timestamp convention). When not
+        provided, default to the newest frame's timestamp — NOT time.time():
+        mixing wall clock with the monotonic sensor clock makes every dt fall
+        outside the capture window and shots come back empty.
+        """
+        if impact_time is None:
+            if self._ring:
+                impact_time = self._ring[-1]["timestamp"]
+            else:
+                impact_time = time.monotonic()
+        self._impact_time = impact_time
         self._recording = True
         self._post_impact_frames = 0
         self._captured_shot_callback = callback
 
     def _finalize_shot(self) -> None:
         self._recording = False
-        impact_t = self._impact_time or time.time()
+        impact_t = self._impact_time
+        if impact_t is None:
+            impact_t = self._ring[-1]["timestamp"] if self._ring else time.monotonic()
         # Extract [-5.0s, +3.0s] relative to impact
         window = []
         for f in self._ring:
@@ -109,4 +123,6 @@ class ShotSynchronizedPressureBuffer:
                 print(f"[!] Error in pressure shot callback: {e}")
 
     def get_latest_frame(self) -> Optional[Dict[str, Any]]:
-        return self._ring[-1] if self._ring else None
+        # Shallow copy: callers (obs_server) serialize/broadcast from other
+        # threads; handing out the live ring entry invites mutation races.
+        return dict(self._ring[-1]) if self._ring else None

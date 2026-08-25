@@ -1,5 +1,9 @@
 """Real Wii Balance Board backend using evdev."""
 
+import time
+
+from .base import BoardBackend, SensorReading
+
 try:
     import evdev
     from evdev import ecodes
@@ -20,6 +24,8 @@ DEVICE_NAME = "Nintendo Wii Remote Balance Board"
 
 def find_board_device() -> str | None:
     """Scan /dev/input/ for the Wii Balance Board. Returns device path or None."""
+    if evdev is None:
+        return None
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
@@ -34,6 +40,8 @@ def find_board_device() -> str | None:
 
 def enumerate_board_devices() -> list[str]:
     """Return device paths for ALL connected Wii Balance Boards."""
+    if evdev is None:
+        return []
     paths = []
     for path in evdev.list_devices():
         try:
@@ -56,6 +64,8 @@ class EvdevBackend(BoardBackend):
                          "bottom_left": 0.0, "bottom_right": 0.0}
 
     def open(self) -> None:
+        if evdev is None:
+            raise RuntimeError("python-evdev is not installed (pip install evdev)")
         path = self._device_path or find_board_device()
         if path is None:
             raise RuntimeError(
@@ -116,6 +126,11 @@ class EvdevBackend(BoardBackend):
             event = self._device.read_one()
         except BlockingIOError:
             return None
+        except OSError:
+            # Device disappeared (board powered off / BT drop) — mark closed
+            # so PressureManager's reconnect logic can recreate the backend.
+            self.close()
+            return None
 
         while event is not None:
             if event.type == ecodes.EV_ABS and event.code in SENSOR_MAP:
@@ -132,6 +147,9 @@ class EvdevBackend(BoardBackend):
             try:
                 event = self._device.read_one()
             except BlockingIOError:
+                break
+            except OSError:
+                self.close()
                 break
 
         return None

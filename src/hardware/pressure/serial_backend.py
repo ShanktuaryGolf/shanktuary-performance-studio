@@ -102,6 +102,10 @@ class SerialBackend(BoardBackend):
         self._is_open = False
         self._last_dual: DualPlateReading | None = None
         self._orientation = BoardOrientation.LANDSCAPE
+        # Guards _read_dual()'s shared parser state (self._buf) and self._cal
+        # against concurrent read() (PressureManager loop thread) vs
+        # tare()/calibrate_with_known_weight() (HTTP handler threads).
+        self._lock = threading.Lock()
         # Physical plate dimensions (per foot)
         self.plate_width_mm = plate_width_mm
         self.plate_length_mm = plate_length_mm
@@ -153,7 +157,8 @@ class SerialBackend(BoardBackend):
         This preserves left-right and front-back axes for the existing
         CoPCalculator, SwingDetector, and all downstream processing.
         """
-        dual = self._read_dual()
+        with self._lock:
+            dual = self._read_dual()
         if dual is None:
             return None
 
@@ -278,90 +283,117 @@ class SerialBackend(BoardBackend):
 
     # ---- Calibration helpers ----
 
-    def tare(self, num_samples: int = 50) -> None:
+    def tare(self, num_samples: int = 50, timeout_s: float = 10.0) -> None:
         """Zero out all channels by averaging readings with no load.
 
         Call this with the platforms empty and stationary.
-        Blocks until enough samples are collected.
+        Blocks until enough samples are collected, the device disconnects,
+        or timeout_s elapses. On failure the previous offsets are restored
+        (never left zeroed) and RuntimeError is raised.
         """
         sums_bar = [0] * 8
         sums_beam = [0] * 2
         count = 0
 
-        # Temporarily read raw frames
-        old_offsets = self._cal.bar_offsets[:]
-        old_beam_offsets = self._cal.beam_offsets[:]
-        self._cal.bar_offsets = [0] * 8
-        self._cal.beam_offsets = [0] * 2
+        with self._lock:
+            # Temporarily read raw frames
+            old_offsets = self._cal.bar_offsets[:]
+            old_beam_offsets = self._cal.beam_offsets[:]
+            self._cal.bar_offsets = [0] * 8
+            self._cal.beam_offsets = [0] * 2
 
-        while count < num_samples:
-            dual = self._read_dual()
-            if dual is None:
-                time.sleep(0.005)
-                continue
-            # Accumulate raw bar values from the SensorReading fields
-            left = dual.left
-            right = dual.right
-            raw_bars = [
-                left.top_left, left.top_right,
-                left.bottom_left, left.bottom_right,
-                right.top_left, right.top_right,
-                right.bottom_left, right.bottom_right,
-            ]
-            for i in range(8):
-                sums_bar[i] += int(raw_bars[i] / self._cal.bar_scales[i])
-            sums_beam[0] += dual.left_beam_raw
-            sums_beam[1] += dual.right_beam_raw
-            count += 1
+            deadline = time.monotonic() + timeout_s
+            try:
+                while count < num_samples:
+                    if not self._is_open or time.monotonic() > deadline:
+                        raise RuntimeError(
+                            "tare aborted: device disconnected or timed out "
+                            f"after {count}/{num_samples} samples"
+                        )
+                    dual = self._read_dual()
+                    if dual is None:
+                        time.sleep(0.005)
+                        continue
+                    # Accumulate raw bar values from the SensorReading fields
+                    left = dual.left
+                    right = dual.right
+                    raw_bars = [
+                        left.top_left, left.top_right,
+                        left.bottom_left, left.bottom_right,
+                        right.top_left, right.top_right,
+                        right.bottom_left, right.bottom_right,
+                    ]
+                    for i in range(8):
+                        scale = self._cal.bar_scales[i]
+                        if scale == 0:
+                            scale = 1.0
+                        sums_bar[i] += int(raw_bars[i] / scale)
+                    sums_beam[0] += dual.left_beam_raw
+                    sums_beam[1] += dual.right_beam_raw
+                    count += 1
 
-        self._cal.bar_offsets = [s // num_samples for s in sums_bar]
-        self._cal.beam_offsets = [s // num_samples for s in sums_beam]
+                self._cal.bar_offsets = [s // num_samples for s in sums_bar]
+                self._cal.beam_offsets = [s // num_samples for s in sums_beam]
+            except BaseException:
+                # Restore prior calibration — never leave offsets zeroed.
+                self._cal.bar_offsets = old_offsets
+                self._cal.beam_offsets = old_beam_offsets
+                raise
 
     def calibrate_with_known_weight(self, weight_kg: float,
-                                     num_samples: int = 50) -> None:
+                                     num_samples: int = 50,
+                                     timeout_s: float = 10.0) -> None:
         """Calibrate scale factors using a known weight placed at center of each plate.
 
         Call tare() first, then place the known weight centered on BOTH plates
-        (half on each), then call this method.
+        (half on each), then call this method. Aborts with RuntimeError on
+        disconnect or timeout (scales untouched).
         """
         sums_bar = [0.0] * 8
         sums_beam = [0.0] * 2
         count = 0
 
-        while count < num_samples:
-            dual = self._read_dual()
-            if dual is None:
-                time.sleep(0.005)
-                continue
-            left = dual.left
-            right = dual.right
-            raw_bars = [
-                left.top_left, left.top_right,
-                left.bottom_left, left.bottom_right,
-                right.top_left, right.top_right,
-                right.bottom_left, right.bottom_right,
-            ]
+        with self._lock:
+            deadline = time.monotonic() + timeout_s
+            while count < num_samples:
+                if not self._is_open or time.monotonic() > deadline:
+                    raise RuntimeError(
+                        "calibration aborted: device disconnected or timed out "
+                        f"after {count}/{num_samples} samples"
+                    )
+                dual = self._read_dual()
+                if dual is None:
+                    time.sleep(0.005)
+                    continue
+                left = dual.left
+                right = dual.right
+                raw_bars = [
+                    left.top_left, left.top_right,
+                    left.bottom_left, left.bottom_right,
+                    right.top_left, right.top_right,
+                    right.bottom_left, right.bottom_right,
+                ]
+                for i in range(8):
+                    sums_bar[i] += raw_bars[i]
+                sums_beam[0] += dual.left_beam_raw - self._cal.beam_offsets[0]
+                sums_beam[1] += dual.right_beam_raw - self._cal.beam_offsets[1]
+                count += 1
+
+            # Each plate should read ~weight_kg/2
+            half_weight = weight_kg / 2.0
+            # Each of the 4 bar cells per plate should read ~weight_kg/8
+            per_cell = weight_kg / 8.0
+
             for i in range(8):
-                sums_bar[i] += raw_bars[i]
-            sums_beam[0] += dual.left_beam_raw - self._cal.beam_offsets[0]
-            sums_beam[1] += dual.right_beam_raw - self._cal.beam_offsets[1]
-            count += 1
+                avg_raw = sums_bar[i] / num_samples
+                if abs(avg_raw) > 1:
+                    self._cal.bar_scales[i] = per_cell / avg_raw
+                else:
+                    self._cal.bar_scales[i] = 1.0
 
-        # Each plate should read ~weight_kg/2
-        half_weight = weight_kg / 2.0
-        # Each of the 4 bar cells per plate should read ~weight_kg/8
-        per_cell = weight_kg / 8.0
-
-        for i in range(8):
-            avg_raw = sums_bar[i] / num_samples
-            if abs(avg_raw) > 1:
-                self._cal.bar_scales[i] = per_cell / avg_raw
-            else:
-                self._cal.bar_scales[i] = 1.0
-
-        for i in range(2):
-            avg_raw = sums_beam[i] / num_samples
-            if abs(avg_raw) > 1:
-                self._cal.beam_scales[i] = half_weight / avg_raw
-            else:
-                self._cal.beam_scales[i] = 1.0
+            for i in range(2):
+                avg_raw = sums_beam[i] / num_samples
+                if abs(avg_raw) > 1:
+                    self._cal.beam_scales[i] = half_weight / avg_raw
+                else:
+                    self._cal.beam_scales[i] = 1.0

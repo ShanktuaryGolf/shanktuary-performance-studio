@@ -223,35 +223,48 @@ class HidBackend(BoardBackend):
         return self._device is not None
 
     def read(self) -> SensorReading | None:
-        """Non-blocking read. Returns a calibrated SensorReading in kg."""
+        """Non-blocking read. Drains the OS HID queue and returns a calibrated
+        SensorReading (kg) from the MOST RECENT extension report, so displayed
+        CoP never lags behind real time when the board streams faster than the
+        manager polls."""
         if self._device is None:
             return None
 
-        try:
-            data = self._device.read(64)
-        except Exception:
-            return None
-
-        if not data:
-            return None
-
-        report_id = data[0]
-
-        # Re-enable continuous reporting if status report received
-        if report_id == RPT_IN_STATUS:
+        latest = None
+        # Drain everything queued; keep only the newest data report.
+        for _ in range(64):  # hard cap to bound one poll cycle
             try:
-                self._device.write(bytes([0x12, 0x04, 0x32]))
+                data = self._device.read(64)
             except Exception:
-                pass
+                # Read failure = device gone (power off / BT drop). Mark the
+                # backend closed so PressureManager's reconnect logic fires.
+                self.close()
+                break
+            if not data:
+                break
+
+            report_id = data[0]
+
+            # Re-enable continuous reporting if status report received
+            if report_id == RPT_IN_STATUS:
+                try:
+                    self._device.write(bytes([0x12, 0x04, 0x32]))
+                except Exception:
+                    pass
+                continue
+
+            if report_id not in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19):
+                continue
+
+            if len(data) < 11:
+                continue
+
+            latest = data
+
+        if latest is None:
             return None
 
-        if report_id not in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19):
-            return None
-
-        if len(data) < 11:
-            return None
-
-        ext = data[3:11]
+        ext = latest[3:11]
         tr, br, tl, bl = struct.unpack(">HHHH", bytes(ext))
 
         if self._baseline_raw is None:

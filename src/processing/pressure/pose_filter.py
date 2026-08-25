@@ -19,7 +19,7 @@ segments are faster, hence the 12 Hz default for extremities.
 
 from __future__ import annotations
 
-from wbb_golf.processing.filters import ButterworthLowPass
+from .filters import ButterworthLowPass
 
 
 # Reference sample rate used to derive default cutoffs
