@@ -2812,7 +2812,7 @@ class ShanktuaryApp:
             # Mode 1: Delivery (4-Quadrant Studio)
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x, top_bar_h=top_bar_h)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
             else:
                 self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
         elif self.view_mode == 2:
@@ -2842,7 +2842,7 @@ class ShanktuaryApp:
         else:
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, offset_x=offset_x, top_bar_h=top_bar_h)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
 
         # 4. Floating Overlay Menus (Top Layer)
         if self.show_session_dropdown:
@@ -3633,7 +3633,7 @@ class ShanktuaryApp:
             # Bottom Unit Tag
             self.canvas.create_text((x1 + x2) // 2, y2 - int(12 * ui_scale), text=c_unit, fill="#50566A", font=unit_font, anchor="center")
 
-    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, offset_x=0, top_bar_h=108):
+    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108):
         if isinstance(shot_rank, dict):
             shot_rank = shot_rank.get("left_handed" if self.is_left_handed else "right_handed", shot_rank.get("right_handed", "A"))
         shot_rank = str(shot_rank or "A")
@@ -3840,6 +3840,10 @@ class ShanktuaryApp:
 
             # Scale expected baseline spin and sidespin by swing speed ratio so partial swings don't falsely skew
             ball_spd = float(ball_speed or 0.0)
+            if ball_spd <= 0.0 and self.current_shot:
+                ogc_s = self.current_shot.get("open_golf_coach", {}) if isinstance(self.current_shot, dict) else {}
+                us_s = ogc_s.get("us_customary_units", {}) if isinstance(ogc_s, dict) else {}
+                ball_spd = float(us_s.get("ball_speed_mph", 0.0) or (self.current_shot.get("ball_speed_meters_per_second", 0.0) * 2.23694 if isinstance(self.current_shot, dict) else 0.0))
             speed_ratio = max(0.2, min(1.3, ball_spd / full_speed)) if ball_spd > 0 else 1.0
             expected_spin = base_spin * speed_ratio
 
