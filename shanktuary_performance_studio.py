@@ -3764,13 +3764,14 @@ class ShanktuaryApp:
         if face_img:
             self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
 
-        # Sweet Spot Origin — center of the scoring grooves
-        # Raw image 290x220: groove center (gray<80) at (162, 70), image center at (145, 110)
-        # Delta from image center: dX = +17.0px (RIGHT toward toe), dY = -40.0px (UP)
-        sweet_dx_ratio = 17.0 / 220.0
-        sweet_dy_ratio = -40.0 / 220.0
-        # RH (raw image): grooves are RIGHT of center (+X)
-        # LH (mirrored): grooves are LEFT of center (-X)
+        # Sweet Spot Origin — center of the face striking area
+        # Raw image 290x220: face center at (144.5, 67.5), image center at (145, 110)
+        # Horizontal delta is effectively 0 (face is centered in image)
+        # Vertical delta is -42.5px (face body is above image center due to hosel extending up)
+        sweet_dx_ratio = 0.0   # face is horizontally centered in the image
+        sweet_dy_ratio = -42.5 / 220.0  # face body is above image center
+        # RH (raw image): no horizontal shift needed
+        # LH (mirrored): no horizontal shift needed (mirror preserves center)
         center_offset_x = -int(sweet_dx_ratio * face_h) if self.is_left_handed else int(sweet_dx_ratio * face_h)
         center_offset_y = int(sweet_dy_ratio * face_h)
         center_x = q4_cx + center_offset_x
@@ -3785,9 +3786,10 @@ class ShanktuaryApp:
         target_w = int(290 * (face_h / 220.0))
         scale_px = ((289 - 35) / 290.0 * target_w) / 55.0
         # OpenGolfCoach sign convention: h_impact_mm < 0 = TOE, h_impact_mm > 0 = HEEL
-        # RH (raw): TOE is RIGHT (+screen X), HEEL is LEFT (-screen X) → negate h_impact_mm
-        # LH (mirrored): TOE is LEFT (-screen X), HEEL is RIGHT (+screen X) → keep sign
-        dx_px = int(h_impact_mm * scale_px) if self.is_left_handed else -int(h_impact_mm * scale_px)
+        # Raw image: TOE is LEFT (-X), HOSEL is RIGHT (+X)
+        # RH (raw): negative h_impact_mm (TOE) → negative dx → LEFT toward toe ✓
+        # LH (mirrored): negative h_impact_mm (TOE) → need positive dx → RIGHT toward toe ✓
+        dx_px = -int(h_impact_mm * scale_px) if self.is_left_handed else int(h_impact_mm * scale_px)
         impact_x = center_x + dx_px
         impact_y = center_y - int(v_impact_mm * scale_px)
 
