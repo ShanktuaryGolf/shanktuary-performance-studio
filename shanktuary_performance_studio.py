@@ -3828,21 +3828,33 @@ class ShanktuaryApp:
                 "8 Iron": 7800, "9 Iron": 8500, "PW": 9300, "GW": 10000,
                 "SW": 10500, "LW": 11000
             }
+            club_speed_baselines = {
+                "Driver": 160.0, "3 Wood": 150.0, "5 Wood": 140.0, "3 Hybrid": 130.0,
+                "4 Iron": 125.0, "5 Iron": 120.0, "6 Iron": 115.0, "7 Iron": 105.0,
+                "8 Iron": 95.0, "9 Iron": 90.0, "PW": 85.0, "GW": 80.0,
+                "SW": 75.0, "LW": 70.0
+            }
             base_launch = club_baselines.get(self.current_club, 21.0)
             base_spin = club_spin_baselines.get(self.current_club, 7000)
+            full_speed = club_speed_baselines.get(self.current_club, 105.0)
+
+            # Scale expected baseline spin and sidespin by swing speed ratio so partial swings don't falsely skew
+            ball_spd = float(ball_speed or 0.0)
+            speed_ratio = max(0.2, min(1.3, ball_spd / full_speed)) if ball_spd > 0 else 1.0
+            expected_spin = base_spin * speed_ratio
 
             # Horizontal: sidespin beyond what face-to-path predicts.
             # For RH: open face (+f2p) → fade (+sidespin); heel gear-effect
             # adds fade spin, toe adds draw spin. Mirrored for LH.
             hand_sign = -1.0 if self.is_left_handed else 1.0
-            expected_side = hand_sign * face_to_path * 200.0  # ~200 rpm/deg for irons
+            expected_side = hand_sign * face_to_path * 150.0 * speed_ratio
             side_residual = (sidespin - expected_side) * hand_sign
-            h_hint = max(-1.0, min(1.0, side_residual / 800.0))  # + = heel, - = toe
+            h_hint = max(-1.0, min(1.0, side_residual / (400.0 * speed_ratio)))  # + = heel, - = toe
 
             # Vertical: high-face → higher launch + less spin; low-face → opposite.
-            launch_dev = (vert_launch - base_launch) / 6.0
-            spin_dev = (backspin - base_spin) / 2500.0
-            v_hint = max(-1.0, min(1.0, launch_dev - spin_dev))  # + = high, - = low
+            launch_dev = (vert_launch - base_launch) / 8.0
+            spin_dev = (backspin - expected_spin) / (1200.0 * speed_ratio)
+            v_hint = max(-1.0, min(1.0, launch_dev - (spin_dev * 1.5)))  # + = high, - = low
 
             hint_mag = math.sqrt(h_hint**2 + v_hint**2)
             dir_known = hint_mag >= 0.15 and est_offset_mm >= 2.0
@@ -3928,21 +3940,20 @@ class ShanktuaryApp:
         self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
 
         # Clubface Graphic
-        # Raw iron_face.png: hosel on LEFT, toe on RIGHT (matches RH golfer looking down at address)
-        # For LH: mirror the image so hosel moves to RIGHT, toe to LEFT
+        # Raw iron_face.png: toe on LEFT (x: 36..167 are grooves), hosel on RIGHT (x: 180..290)
+        # For LH: mirror the image so hosel moves to LEFT, toe to RIGHT
         face_h = int(130 * scale)
         face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=self.is_left_handed)
         if face_img:
             self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
 
-        # Sweet Spot Origin — center of the face striking area
-        # Raw image 290x220: face center at (144.5, 67.5), image center at (145, 110)
-        # Horizontal delta is effectively 0 (face is centered in image)
-        # Vertical delta is -42.5px (face body is above image center due to hosel extending up)
-        sweet_dx_ratio = 0.0   # face is horizontally centered in the image
-        sweet_dy_ratio = -42.5 / 220.0  # face body is above image center
-        # RH (raw image): no horizontal shift needed
-        # LH (mirrored): no horizontal shift needed (mirror preserves center)
+        # Sweet Spot Origin — exact center of the scoring grooves
+        # Raw image 290x220: grooves X in [36, 167] -> Center X = 101.5 (dX = -43.5px from image center 145.0)
+        # Grooves Y in [23, 117] -> Center Y = 70.0 (dY = -40.0px from image center 110.0)
+        sweet_dx_ratio = -43.5 / 220.0  # -0.1977 (grooves are on the LEFT in raw image)
+        sweet_dy_ratio = -40.0 / 220.0  # -0.1818 (grooves are above image center)
+        # RH (raw image): shift LEFT into center of grooves (sweet_dx_ratio is negative)
+        # LH (mirrored image): shift RIGHT into center of mirrored grooves (-sweet_dx_ratio is positive)
         center_offset_x = -int(sweet_dx_ratio * face_h) if self.is_left_handed else int(sweet_dx_ratio * face_h)
         center_offset_y = int(sweet_dy_ratio * face_h)
         center_x = q4_cx + center_offset_x
@@ -3953,13 +3964,13 @@ class ShanktuaryApp:
         self.canvas.create_oval(center_x - int(3 * scale), center_y - int(3 * scale), center_x + int(3 * scale), center_y + int(3 * scale), fill="#00E5FF", outline="")
 
         # Impact Contact Location
-        # Groove span: x=[35, 289] = 254px in 290px image → ~55mm physical → ~4.62 px/mm (unscaled)
+        # Real groove width: 131px across 290px -> ~52mm physical width on a standard iron face
         target_w = int(290 * (face_h / 220.0))
-        scale_px = ((289 - 35) / 290.0 * target_w) / 55.0
-        # OpenGolfCoach sign convention: h_impact_mm < 0 = TOE, h_impact_mm > 0 = HEEL
-        # Raw image: TOE is LEFT (-X), HOSEL is RIGHT (+X)
-        # RH (raw): negative h_impact_mm (TOE) → negative dx → LEFT toward toe ✓
-        # LH (mirrored): negative h_impact_mm (TOE) → need positive dx → RIGHT toward toe ✓
+        scale_px = ((167.0 - 36.0) / 290.0 * target_w) / 52.0
+        # OpenGolfCoach: h_impact_mm < 0 is TOE, h_impact_mm > 0 is HEEL
+        # Raw image: TOE is on LEFT (-X), HOSEL is on RIGHT (+X)
+        # RH (raw): h_impact_mm < 0 (TOE) moves LEFT (-X), h_impact_mm > 0 (HEEL) moves RIGHT (+X)
+        # LH (mirrored): h_impact_mm < 0 (TOE) moves RIGHT (+X), h_impact_mm > 0 (HEEL) moves LEFT (-X)
         dx_px = -int(h_impact_mm * scale_px) if self.is_left_handed else int(h_impact_mm * scale_px)
         impact_x = center_x + dx_px
         impact_y = center_y - int(v_impact_mm * scale_px)
