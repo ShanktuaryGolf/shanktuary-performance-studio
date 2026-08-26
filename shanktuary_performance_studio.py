@@ -2370,18 +2370,18 @@ class ShanktuaryApp:
         sb_w = self.sidebar_width - theme.RAIL_W
 
         # 1. Header (y: 0 to 52)
-        self.canvas.create_rectangle(0, 0, sb_w, 52, fill="#151822", outline="#232734")
-        self.canvas.create_text(16, 26, text="📁 SHOT LIBRARY", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+        self.canvas.create_rectangle(0, 0, sb_w, 52, fill=theme.RAIL, outline="")
+        self.canvas.create_line(0, 52, sb_w, 52, fill=theme.HAIRLINE)
+        self.canvas.create_text(16, 26, text="Shots", fill=theme.TEXT, font=("Helvetica", 12), anchor="w")
         
         # Collapse button [ ◀ ]
         coll_x1, coll_y1, coll_x2, coll_y2 = sb_w - 38, 12, sb_w - 10, 40
         self.sidebar_toggle_rect = (coll_x1, coll_y1, coll_x2, coll_y2)
-        self.canvas.create_rectangle(coll_x1, coll_y1, coll_x2, coll_y2, fill="#1D202C", outline="#2E3547")
-        self.canvas.create_text((coll_x1 + coll_x2) // 2, 26, text="◀", fill="#8E94A5", font=("Helvetica", 9, "bold"))
+        self.canvas.create_rectangle(coll_x1, coll_y1, coll_x2, coll_y2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((coll_x1 + coll_x2) // 2, 26, text="◀", fill=theme.TEXT_3, font=("Helvetica", 9))
 
         # 2. Session Bar (y: 52 to 92)
-        sess_bg = "#181B26"
-        self.canvas.create_rectangle(0, 52, sb_w, 92, fill=sess_bg, outline="#232734")
+        self.canvas.create_rectangle(0, 52, sb_w, 92, fill=theme.RAIL, outline="")
         
         active_sess = self.get_active_session()
         sess_title = active_sess.get("name", "Session")
@@ -2390,34 +2390,34 @@ class ShanktuaryApp:
 
         btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2 = 10, 58, sb_w - 74, 86
         self.sidebar_session_btn_rect = (btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2)
-        self.canvas.create_rectangle(btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2, fill="#1F2332", outline="#00E5FF" if self.show_session_dropdown else "#2E374D")
-        self.canvas.create_text(btn_s_x1 + 8, 72, text=f"📂 {sess_title} ▼", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2, fill=theme.SURFACE_2, outline=theme.ACCENT_LINE if self.show_session_dropdown else "")
+        self.canvas.create_text(btn_s_x1 + 10, 72, text=f"{sess_title}  ▼", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
 
         # Rename Session Button [ ✏️ ]
         btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2 = sb_w - 68, 58, sb_w - 40, 86
         self.sidebar_rename_sess_btn_rect = (btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2)
-        self.canvas.create_rectangle(btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2, fill="#181B26", outline="#2E374D")
-        self.canvas.create_text((btn_ren_x1 + btn_ren_x2) // 2, 72, text="✏️", fill="#A0A5B5", font=("Helvetica", 9))
+        self.canvas.create_rectangle(btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((btn_ren_x1 + btn_ren_x2) // 2, 72, text="✎", fill=theme.TEXT_3, font=("Helvetica", 10))
 
         # New Session Button [ ＋ ]
         btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2 = sb_w - 36, 58, sb_w - 8, 86
         self.sidebar_new_sess_btn_rect = (btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2)
-        self.canvas.create_rectangle(btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2, fill="#0E2A38", outline="#00E5FF")
-        self.canvas.create_text((btn_add_x1 + btn_add_x2) // 2, 72, text="＋", fill="#00E5FF", font=("Helvetica", 11, "bold"))
+        self.canvas.create_rectangle(btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2, fill=theme.ACCENT, outline="")
+        self.canvas.create_text((btn_add_x1 + btn_add_x2) // 2, 72, text="＋", fill="#EAF5EE", font=("Helvetica", 11, "bold"))
 
         # 3. Filter Bar (y: 92 to 128)
-        self.canvas.create_rectangle(0, 92, sb_w, 128, fill="#151720", outline="#232734")
+        self.canvas.create_rectangle(0, 92, sb_w, 128, fill=theme.RAIL, outline="")
+        self.canvas.create_line(0, 128, sb_w, 128, fill=theme.HAIRLINE)
         
         filt_x1, filt_y1, filt_x2, filt_y2 = 10, 97, sb_w - 82, 123
         self.sidebar_filter_btn_rect = (filt_x1, filt_y1, filt_x2, filt_y2)
         filt_label = f"🎯 {self.club_filter} ▼"
-        self.canvas.create_rectangle(filt_x1, filt_y1, filt_x2, filt_y2, fill="#1B1E2B", outline="#00E5FF" if self.show_filter_dropdown else "#2E374D")
-        self.canvas.create_text(filt_x1 + 8, 110, text=filt_label, fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(filt_x1, filt_y1, filt_x2, filt_y2, fill=theme.ACCENT_DEEP if self.club_filter != "ALL" else theme.SURFACE_2, outline=theme.ACCENT_LINE if self.show_filter_dropdown else "")
+        self.canvas.create_text(filt_x1 + 10, 110, text=filt_label, fill=theme.ACCENT_TEXT if self.club_filter != "ALL" else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
 
         filtered_shots = self.get_filtered_shots()
         count_str = f"{len(filtered_shots)} shots"
-        self.canvas.create_rectangle(sb_w - 76, 97, sb_w - 10, 123, fill="#181A24", outline="#262B3B")
-        self.canvas.create_text(sb_w - 43, 110, text=count_str, fill="#8E94A5", font=("Consolas", 8))
+        self.canvas.create_text(sb_w - 12, 110, text=count_str, fill=theme.TEXT_3, font=("Helvetica", 9), anchor="e")
 
         # 4. Shot Card Stream (y: 132 to h - 42)
         card_stream_y1 = 132
@@ -2429,7 +2429,7 @@ class ShanktuaryApp:
 
         if not filtered_shots:
             self.canvas.create_text(sb_w // 2, 220, text="NO SHOTS RECORDED", fill="#353A4B", font=("Helvetica", 10, "bold"))
-            self.canvas.create_text(sb_w // 2, 245, text="Hit a shot with Nova or\nchange active club filter.", fill="#606678", font=("Helvetica", 8), justify="center")
+            self.canvas.create_text(sb_w // 2, 245, text="Hit a shot with Nova or\nchange active club filter.", fill=theme.TEXT_3, font=("Helvetica", 9), justify="center")
         else:
             avail_h = card_stream_y2 - card_stream_y1
             max_cards = max(1, avail_h // (card_h + card_gap))
@@ -2447,11 +2447,12 @@ class ShanktuaryApp:
                 self.sidebar_shot_card_rects.append((10, cy1, sb_w - 10, cy2, real_idx))
                 is_selected = (real_idx == self.selected_shot_index)
 
-                card_bg = "#2C2A0A" if is_selected else ("#191C26" if i % 2 == 0 else "#151720")
-                card_border = "#FFEA00" if is_selected else "#282D3D"
-                border_w = 2 if is_selected else 1
-
-                self.canvas.create_rectangle(10, cy1, sb_w - 10, cy2, fill=card_bg, outline=card_border, width=border_w)
+                # Selection is an accent edge on a lifted surface -- no
+                # yellow box, and no zebra striping fighting it.
+                card_bg = theme.SURFACE_2 if is_selected else theme.SURFACE
+                self.canvas.create_rectangle(10, cy1, sb_w - 10, cy2, fill=card_bg, outline="")
+                if is_selected:
+                    self.canvas.create_rectangle(10, cy1, 13, cy2, fill=theme.ACCENT_LINE, outline="")
 
                 ogc = shot.get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
@@ -2464,21 +2465,22 @@ class ShanktuaryApp:
 
                 # Line 1: #N  [Club]  Carry
                 num_txt = f"#{real_idx + 1}"
-                self.canvas.create_text(18, cy1 + 12, text=num_txt, fill="#FFEA00" if is_selected else "#FFFFFF", font=("Consolas", 9, "bold"), anchor="w")
-                self.canvas.create_text(52, cy1 + 12, text=f"[{c_tag}]", fill="#00E5FF", font=("Consolas", 8, "bold"), anchor="w")
-                self.canvas.create_text(sb_w - 18, cy1 + 12, text=f"{carry:.1f} yds", fill="#00FF66" if is_selected else "#FFFFFF", font=("Consolas", 9, "bold"), anchor="e")
+                self.canvas.create_text(20, cy1 + 12, text=num_txt, fill=theme.TEXT if is_selected else theme.TEXT_2, font=("Helvetica", 10), anchor="w")
+                self.canvas.create_text(56, cy1 + 13, text=c_tag, fill=theme.ACCENT_TEXT if is_selected else theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(sb_w - 20, cy1 + 12, text=f"{carry:.1f} yds", fill=theme.TEXT if is_selected else theme.TEXT_2, font=("Helvetica", 11), anchor="e")
 
                 # Line 2: Speed & Shot Name
-                self.canvas.create_text(18, cy1 + 28, text=f"{bspeed:.1f} mph  •  {s_name}", fill="#00E5FF" if is_selected else "#AAB0C0", font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(20, cy1 + 30, text=f"{bspeed:.1f} mph  ·  {s_name}", fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
 
-                # Line 3: Timestamp & Smash
-                self.canvas.create_text(18, cy1 + 44, text=f"{t_stamp}  •  Smash {smash:.2f}", fill="#6B7285", font=("Consolas", 8), anchor="w")
+                # Line 3: Timestamp only -- smash is a constant when the OGC
+                # model saturates, so repeating it on every card is noise.
+                self.canvas.create_text(20, cy1 + 45, text=t_stamp, fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
 
         # 5. Footer (y: h - 42 to h)
         clear_y1, clear_y2 = h - 38, h - 8
         self.sidebar_clear_btn_rect = (10, clear_y1, sb_w - 10, clear_y2)
-        self.canvas.create_rectangle(10, clear_y1, sb_w - 10, clear_y2, fill="#231318", outline="#4A1E2A")
-        self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="🗑️ Clear Current Session", fill="#FF4081", font=("Helvetica", 8, "bold"))
+        self.canvas.create_rectangle(10, clear_y1, sb_w - 10, clear_y2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="Clear session", fill=theme.TEXT_3, font=("Helvetica", 9))
 
         # Shift the whole sidebar group clear of the nav rail, then correct the
         # hit rects registered above by the same delta.
@@ -2567,21 +2569,22 @@ class ShanktuaryApp:
         header_h = 52
         avail_w = w - offset_x
         # Header Background & Bottom Border
-        self.canvas.create_rectangle(offset_x, 0, w, header_h, fill="#12141A", outline="#242834")
+        self.canvas.create_rectangle(offset_x, 0, w, header_h, fill=theme.BG, outline="")
+        self.canvas.create_line(offset_x, header_h, w, header_h, fill=theme.HAIRLINE)
 
         # 1. Drawer Hamburger Toggle & Branding
         if self.sidebar_collapsed:
             hamb_x1, hamb_y1, hamb_x2, hamb_y2 = 10, 10, 42, 42
             self.sidebar_toggle_rect = (hamb_x1, hamb_y1, hamb_x2, hamb_y2)
-            self.canvas.create_rectangle(hamb_x1, hamb_y1, hamb_x2, hamb_y2, fill="#181A24", outline="#00E5FF")
-            self.canvas.create_text(26, 26, text="☰", fill="#00E5FF", font=("Helvetica", 12, "bold"), anchor="center")
+            self.canvas.create_rectangle(hamb_x1, hamb_y1, hamb_x2, hamb_y2, fill=theme.SURFACE_2, outline="")
+            self.canvas.create_text(26, 26, text="☰", fill=theme.TEXT_2, font=("Helvetica", 12), anchor="center")
             brand_x = 52
             brand_text = "SHANKTUARY STUDIO"
         else:
             brand_x = offset_x + 12
             brand_text = "STUDIO" if avail_w < 1050 else "SHANKTUARY STUDIO"
 
-        brand_id = self.canvas.create_text(brand_x, 26, text=brand_text, fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
+        brand_id = self.canvas.create_text(brand_x, 26, text=brand_text, fill=theme.TEXT_2, font=("Helvetica", 11), anchor="w")
         brand_bbox = self.canvas.bbox(brand_id)
         if brand_bbox and isinstance(brand_bbox, (tuple, list)) and len(brand_bbox) >= 4 and isinstance(brand_bbox[2], (int, float)):
             brand_right = int(brand_bbox[2])
@@ -2596,13 +2599,14 @@ class ShanktuaryApp:
         else:
             status_text = "● Nova Ready" if nova_up else "● Ready"
             status_w = 86
-        status_col = "#00FF66" if nova_up else "#8E94A5"
-        status_bg = "#0D2618" if nova_up else "#15171E"
+        # A live dot plus plain text -- no bordered box.
+        status_col = theme.ACCENT_LINE if nova_up else theme.TEXT_3
+        status_text = status_text.replace("● ", "")
 
-        status_x1 = brand_right + 8
+        status_x1 = brand_right + 16
         status_x2 = status_x1 + status_w
-        self.canvas.create_rectangle(status_x1, 12, status_x2, 40, fill=status_bg, outline=status_col)
-        self.canvas.create_text((status_x1 + status_x2) // 2, 26, text=status_text, fill=status_col, font=("Helvetica", 7, "bold"), anchor="center")
+        self.canvas.create_oval(status_x1, 22, status_x1 + 8, 30, fill=status_col, outline="")
+        self.canvas.create_text(status_x1 + 15, 26, text=status_text, fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
 
         # 2. Right Utility Pills
         fs_w = 32
@@ -2614,34 +2618,32 @@ class ShanktuaryApp:
         fs_x2 = w - 10
         fs_x1 = fs_x2 - fs_w
         self.fullscreen_btn_rect = (fs_x1, 10, fs_x2, 42)
-        self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill="#181A22", outline="#2E3342")
-        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill="#A0A5B5", font=("Helvetica", 11, "bold"), anchor="center")
+        self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill=theme.SURFACE, outline="")
+        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill=theme.TEXT_3, font=("Helvetica", 11), anchor="center")
 
         tools_x2 = fs_x1 - gap
         tools_x1 = tools_x2 - tools_w
         self.tools_btn_rect = (tools_x1, 10, tools_x2, 42)
-        t_bg = "#0E2A38" if self.show_tools_menu else "#181A22"
-        t_border = "#00E5FF" if self.show_tools_menu else "#2E3342"
-        self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline=t_border)
-        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools ▼", fill="#00E5FF", font=("Helvetica", 9, "bold"), anchor="center")
+        t_bg = theme.SURFACE_2 if self.show_tools_menu else theme.SURFACE
+        self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline="")
+        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill=theme.TEXT if self.show_tools_menu else theme.TEXT_2, font=("Helvetica", 10), anchor="center")
 
         dex_x2 = tools_x1 - gap
         dex_x1 = dex_x2 - dex_w
         self.dexterity_btn_rect = (dex_x1, 10, dex_x2, 42)
-        dex_bg = "#2A180E" if self.is_left_handed else "#181A22"
-        dex_border = "#FF9900" if self.is_left_handed else "#2E3342"
-        dex_fg = "#FF9900" if self.is_left_handed else "#D0D5DD"
+        # Handedness is a state, not an alert -- accent it, do not flag it.
+        dex_bg = theme.ACCENT_DEEP if self.is_left_handed else theme.SURFACE
+        dex_fg = theme.ACCENT_TEXT if self.is_left_handed else theme.TEXT_2
         dex_label = "LH" if self.is_left_handed else "RH"
-        self.canvas.create_rectangle(dex_x1, 10, dex_x2, 42, fill=dex_bg, outline=dex_border)
-        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 9, "bold"), anchor="center")
+        self.canvas.create_rectangle(dex_x1, 10, dex_x2, 42, fill=dex_bg, outline="")
+        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 10), anchor="center")
 
         club_x2 = dex_x1 - gap
         club_x1 = club_x2 - club_w
         self.club_btn_rect = (club_x1, 10, club_x2, 42)
-        c_bg = "#0E2A38" if self.show_club_menu else "#181A22"
-        c_border = "#00E5FF" if self.show_club_menu else "#2E3342"
-        self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
-        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club} ▼", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="center")
+        c_bg = theme.SURFACE_2 if self.show_club_menu else theme.SURFACE
+        self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline="")
+        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill=theme.TEXT, font=("Helvetica", 10), anchor="center")
 
         # 3. Mode switching now lives in the persistent left rail
         #    (draw_nav_rail). The old segmented pills were removed: eight
