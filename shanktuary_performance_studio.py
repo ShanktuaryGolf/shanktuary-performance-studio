@@ -4143,9 +4143,12 @@ class ShanktuaryApp:
         # the band the only section that could be clipped, so growing the
         # window fed the cards while dispersion stayed cut off.
         avail_v = max(320, h - y - 56)          # 56 = inter-section gaps
-        card_h = max(150, avail_v * 0.46)
-        recent_h = max(112, avail_v * 0.24)
-        band_h = max(132, avail_v * 0.30)
+        # The card row carries the hero graphic (the clubface), so it gets the
+        # larger share; the recent strip and the bottom band are mostly text
+        # and bars and stay readable at a smaller height.
+        card_h = max(150, avail_v * 0.53)
+        recent_h = max(104, avail_v * 0.21)
+        band_h = max(126, avail_v * 0.26)
 
         def card(cx0, title, rows, tag=None):
             cx1 = cx0 + card_w
@@ -4195,22 +4198,26 @@ class ShanktuaryApp:
         head, detail, hcol = self.summarize_strike(self.current_shot)
 
         # Verdict block sits top-left: chip, then the plain-language answer.
-        # The club is the hero, so it gets the whole width below rather than
-        # being squeezed beside the text.
-        ty = y + 34
+        # Type scales with the card so a bigger window gets a bigger verdict
+        # rather than more blank space around a fixed 17px string.
+        head_size = int(max(17, min(30, card_h * 0.072)))
+        line_h = int(head_size * 1.32)
+
+        ty = y + 28
         if hcol == theme.WARN:
-            self.canvas.create_rectangle(sx0 + 16, ty, sx0 + 100, ty + 20,
+            self.canvas.create_rectangle(sx0 + 16, ty, sx0 + 104, ty + 21,
                                          fill="#2A2118", outline="")
-            self.canvas.create_text(sx0 + 58, ty + 10, text="ESTIMATE",
+            self.canvas.create_text(sx0 + 60, ty + 10, text="ESTIMATE",
                                     fill=theme.WARN,
                                     font=("Helvetica", 8, "bold"),
                                     anchor="center")
-            ty += 28
-        for li, part in enumerate(head.split(" ", 1) if " " in head else [head]):
-            self.canvas.create_text(sx0 + 16, ty + 12 + li * 23, text=part,
-                                    fill=theme.TEXT, font=("Helvetica", 17),
-                                    anchor="w")
-        text_bot = ty + 12 + 23 * (2 if " " in head else 1)
+            ty += 25
+        parts = head.split(" ", 1) if " " in head else [head]
+        for li, part in enumerate(parts):
+            self.canvas.create_text(sx0 + 16, ty + line_h * 0.5 + li * line_h,
+                                    text=part, fill=theme.TEXT,
+                                    font=("Helvetica", head_size), anchor="w")
+        text_bot = ty + line_h * len(parts) + 6
 
         self.canvas.create_line(sx0 + 16, text_bot, sx1 - 16, text_bot,
                                 fill=theme.HAIRLINE)
@@ -4218,15 +4225,29 @@ class ShanktuaryApp:
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
                                 anchor="w")
 
-        # Face centred in the space between the verdict block and the footer,
-        # sized to whichever of width/height is the real constraint.
-        face_top = text_bot + 10
-        face_bot = y + card_h - 34
-        # iron_face.png is 290x220, i.e. 1.32x wider than tall, so a height
-        # that fits vertically can still overflow the card width.
+        # Face centred between the verdict block and the footer.
+        #
+        # load_image_asset() pads the scaled art onto a SQUARE canvas of
+        # max(w, h) + 40, so the on-canvas footprint is that square -- not the
+        # target height passed in. For iron_face.png (290x220) the width wins,
+        # making the real footprint 1.32*target_h + 40 on BOTH axes. Sizing
+        # against the raw height overflowed the card by ~23px.
+        face_top = text_bot + 12
+        face_bot = y + card_h - 30
         FACE_ASPECT = 290.0 / 220.0
-        face_h = max(96, min(face_bot - face_top,
-                             (card_w - 40) / FACE_ASPECT))
+
+        def _footprint(th):
+            return max(th * FACE_ASPECT, th) + 40
+
+        # The +40 the loader adds is TRANSPARENT margin: it occupies layout
+        # space but shows nothing, so budgeting against the padded footprint
+        # leaves a visible gap. Budget against the visible art instead and
+        # let the margin overhang into the card's own padding.
+        fit_v = face_bot - face_top
+        fit_h = card_w - 24
+        face_h = max(84, min(fit_v / FACE_ASPECT, fit_h / FACE_ASPECT))
+        # Centre on the true footprint so the art sits in the middle of the
+        # remaining space rather than hanging off the bottom.
         self._draw_overview_face((sx0 + sx1) / 2,
                                  (face_top + face_bot) / 2, face_h)
         y += card_h + 20
