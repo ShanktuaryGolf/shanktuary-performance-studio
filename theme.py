@@ -51,9 +51,11 @@ RAIL_W = 64          # left icon rail, always visible
 NAV_ITEM_H = 56      # per nav entry
 CORNER = 10          # standard corner radius
 
-# view_mode -> (rail label, tooltip). Mode 0 is the new Overview.
+# view_mode -> (rail label, tooltip).
+# NOTE: mode 0 is the floor divot projector (entered via Tools, not the rail)
+# and mode 5 is Big Numbers. Overview is mode 9 to avoid colliding with either.
 NAV_ITEMS = [
-    (0, "Overview", "Shot summary and session trends"),
+    (9, "Overview", "Shot summary and session trends"),
     (1, "Quad",     "Four-panel club and ball geometry"),
     (2, "Range",    "3D driving range"),
     (3, "Disp",     "Dispersion and covariance"),
