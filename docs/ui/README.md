@@ -1,6 +1,6 @@
 # UI redesign — reference mockups
 
-All nine views at 1600×900. These are the implementation target: the layout,
+All ten views at 1600×900. These are the implementation target: the layout,
 spacing, and colour decisions here are settled, so building a view means
 reproducing its mockup rather than re-litigating the design.
 
@@ -21,6 +21,7 @@ dependency or a framework change.
 | My Bag | `view_bag.png` | mockup |
 | Fitting | `view_fit.png` | mockup |
 | Swing Lab | `view_lab.png` | mockup |
+| Setup / Hardware | `view_setup.png` | mockup |
 
 Shipped so far: `theme.py` (design tokens) and `draw_nav_rail()` (the left
 rail, live on all views).
@@ -101,7 +102,16 @@ trajectory overlay, recommendation. Smash is excluded from comparison because
 it is a constant at these speeds.
 
 **Swing Lab** — CoP trail with address/transition/impact markers, dual-foot
-heatmap, lead/trail balance bar.
+heatmap, lead/trail balance bar, and weight-transfer / force curves plotted
+per foot against a shared phase timeline.
+
+**Setup / Hardware** — board pairing was previously reachable only from Swing
+Lab via a small "⚙ Hardware" button, which is hard to find when the thing you
+are trying to do is connect a board for the first time. This promotes it to
+the rail's Setup slot and keeps every capability of the existing modal:
+single/dual mode toggle, Bluetooth pairing, the step-on left/right assignment
+wizard with live per-board kg, and tare. Nothing is removed — it is laid out
+rather than stacked in a modal.
 
 ## Build order
 
@@ -119,5 +129,6 @@ python3 render_full_ui.py /tmp/overview.png     # Overview
 python3 render_quad.py    /tmp/quad.png         # Quad
 python3 render_views_a.py                       # Range, Disp, Table
 python3 render_views_b.py                       # Nums, Bag, Fit, Lab
+python3 render_setup.py                         # Setup / Hardware
 SPS_PALETTE=hunter python3 render_quad.py out.png   # palette variants
 ```
