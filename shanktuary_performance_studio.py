@@ -34,6 +34,7 @@ import queue
 import webbrowser
 from datetime import datetime
 import tkinter as tk
+import theme
 from PIL import Image, ImageTk, ImageDraw, ImageOps
 import obs_server
 
@@ -639,7 +640,7 @@ class ShanktuaryApp:
             mouse_x = self.canvas.winfo_pointerx() - self.canvas.winfo_rootx() if self.canvas.winfo_exists() else 0
         
         # If hovering over sidebar
-        if not self.sidebar_collapsed and mouse_x <= self.sidebar_width:
+        if not self.sidebar_collapsed and theme.RAIL_W < mouse_x <= self.sidebar_width:
             self.scroll_sidebar(delta)
         elif self.view_mode == 4: # Table view
             max_offset = max(0, len(self.session_shots) - 8)
@@ -2060,7 +2061,7 @@ class ShanktuaryApp:
             self.toggle_sidebar()
             return
 
-        if not self.sidebar_collapsed and event.x <= self.sidebar_width:
+        if not self.sidebar_collapsed and theme.RAIL_W < event.x <= self.sidebar_width:
             if self.sidebar_session_btn_rect and self.sidebar_session_btn_rect[0] <= event.x <= self.sidebar_session_btn_rect[2] and self.sidebar_session_btn_rect[1] <= event.y <= self.sidebar_session_btn_rect[3]:
                 self.show_session_dropdown = not self.show_session_dropdown
                 self.show_filter_dropdown = False
@@ -2271,14 +2272,14 @@ class ShanktuaryApp:
 
     def handle_mouse_drag(self, event):
         if self.view_mode == 3 and self.dispersion_splitter_dragging:
-            offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+            offset_x = theme.RAIL_W if self.sidebar_collapsed else self.sidebar_width
             avail_w = max(100, self.canvas.winfo_width() - offset_x)
             rel_x = event.x - offset_x
             new_ratio = max(0.20, min(0.85, rel_x / float(avail_w)))
             self.dispersion_splitter_ratio = new_ratio
             self.draw_screen()
         elif self.view_mode == 7 and self.fitting_splitter_dragging:
-            offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+            offset_x = theme.RAIL_W if self.sidebar_collapsed else self.sidebar_width
             avail_w = max(100, self.canvas.winfo_width() - offset_x)
             rel_x = event.x - offset_x
             new_ratio = max(0.20, min(0.85, rel_x / float(avail_w)))
@@ -2346,9 +2347,13 @@ class ShanktuaryApp:
         if self.sidebar_collapsed:
             return
 
-        sb_w = self.sidebar_width
-        # Base container
-        self.canvas.create_rectangle(0, 0, sb_w, h, fill="#12141A", outline="#232734")
+        # The sidebar's internals use many hardcoded x offsets measured from 0.
+        # Rather than rewrite every one, draw it as a tagged group and shift the
+        # whole group right by the rail width afterwards. Hit rects registered
+        # during the draw are corrected by the same delta.
+        self._sidebar_items_start = len(self.canvas.find_all())
+
+        sb_w = self.sidebar_width - theme.RAIL_W
 
         # 1. Header (y: 0 to 52)
         self.canvas.create_rectangle(0, 0, sb_w, 52, fill="#151822", outline="#232734")
@@ -2460,6 +2465,25 @@ class ShanktuaryApp:
         self.sidebar_clear_btn_rect = (10, clear_y1, sb_w - 10, clear_y2)
         self.canvas.create_rectangle(10, clear_y1, sb_w - 10, clear_y2, fill="#231318", outline="#4A1E2A")
         self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="🗑️ Clear Current Session", fill="#FF4081", font=("Helvetica", 8, "bold"))
+
+        # Shift the whole sidebar group clear of the nav rail, then correct the
+        # hit rects registered above by the same delta.
+        dx = theme.RAIL_W
+        for item in self.canvas.find_all()[self._sidebar_items_start:]:
+            self.canvas.move(item, dx, 0)
+
+        def _shift(rect):
+            return None if not rect else (rect[0] + dx, rect[1],
+                                          rect[2] + dx, rect[3])
+
+        self.sidebar_clear_btn_rect = _shift(self.sidebar_clear_btn_rect)
+        self.sidebar_toggle_rect = _shift(getattr(self, "sidebar_toggle_rect", None))
+        self.sidebar_session_btn_rect = _shift(getattr(self, "sidebar_session_btn_rect", None))
+        self.sidebar_filter_btn_rect = _shift(getattr(self, "sidebar_filter_btn_rect", None))
+        self.sidebar_shot_card_rects = [
+            (x1 + dx, y1, x2 + dx, y2, idx)
+            for (x1, y1, x2, y2, idx) in self.sidebar_shot_card_rects
+        ]
 
     def draw_session_dropdown(self, w, h):
         box_w = self.sidebar_width - 20
@@ -2605,7 +2629,12 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline=c_border)
         self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club} ▼", fill="#FFFFFF", font=("Helvetica", 9, "bold"), anchor="center")
 
-        # 3. Segmented Mode Pills (Responsive fitting between status_x2 and club_x1)
+        # 3. Mode switching now lives in the persistent left rail
+        #    (draw_nav_rail). The old segmented pills were removed: eight
+        #    46px pills could not hold readable labels, and abbreviations like
+        #    "Nums"/"Fit"/"Lab" were a large part of the amateur feel.
+        return
+
         left_limit = status_x2 + 8
         right_limit = club_x1 - 8
         avail_middle = right_limit - left_limit
@@ -2670,6 +2699,50 @@ class ShanktuaryApp:
 
             self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col)
             self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=label, fill=txt_col, font=txt_font, anchor="center")
+
+    def draw_nav_rail(self, h):
+        """Persistent left icon rail -- replaces the 8 cramped mode pills.
+
+        Registers hit rects in self.mode_pill_rects, so the existing click
+        handlers keep working unchanged.
+        """
+        rw = theme.RAIL_W
+        self.canvas.create_rectangle(0, 0, rw, h, fill=theme.RAIL, outline="")
+        self.canvas.create_line(rw, 0, rw, h, fill=theme.HAIRLINE)
+
+        # brand mark
+        self.canvas.create_rectangle(18, 20, 46, 48, fill=theme.ACCENT, outline="")
+        self.canvas.create_text(32, 34, text="S", fill="#DFF0E6",
+                                font=("Helvetica", 13, "bold"), anchor="center")
+
+        y = 84
+        for mode_id, label, _tip in theme.NAV_ITEMS:
+            is_active = (self.view_mode == mode_id)
+            # full-width hit target so clicks land on the icon OR the label
+            self.mode_pill_rects[mode_id] = (0, y, rw, y + theme.NAV_ITEM_H - 10)
+
+            if is_active:
+                self.canvas.create_rectangle(8, y, rw - 8, y + 46,
+                                             fill=theme.SURFACE_2, outline="")
+                self.canvas.create_line(0, y + 8, 0, y + 38,
+                                        fill=theme.ACCENT_LINE, width=3)
+                icon_fill, txt_col = theme.ACCENT_LINE, theme.TEXT
+            else:
+                icon_fill, txt_col = "", theme.TEXT_3
+
+            self.canvas.create_rectangle(
+                25, y + 10, 39, y + 24,
+                fill=icon_fill, outline="" if is_active else txt_col,
+                width=0 if is_active else 2)
+            self.canvas.create_text(32, y + 34, text=label, fill=txt_col,
+                                    font=("Helvetica", 7), anchor="center")
+            y += theme.NAV_ITEM_H
+
+        # Setup pinned to the bottom, away from view switching
+        self.canvas.create_rectangle(25, h - 56, 39, h - 42, fill="",
+                                     outline=theme.TEXT_3, width=2)
+        self.canvas.create_text(32, h - 32, text="Setup", fill=theme.TEXT_3,
+                                font=("Helvetica", 7), anchor="center")
 
     def verify_ogc_model_sync(self, shot):
         """Detect drift between our mirrored OGC constants and the live payload.
@@ -3033,7 +3106,7 @@ class ShanktuaryApp:
             attack_angle = 0.0
             dynamic_loft = 0.0
 
-        offset_x = 0 if self.sidebar_collapsed else self.sidebar_width
+        offset_x = theme.RAIL_W if self.sidebar_collapsed else self.sidebar_width
         avail_w = w - offset_x
         top_bar_h = 52 + int(56 * max(0.9, min(2.0, avail_w / 1200.0))) + 8
 
@@ -3050,6 +3123,7 @@ class ShanktuaryApp:
 
         # 1. Left Shot Library Sidebar
         self.draw_left_sidebar(w, h)
+        self.draw_nav_rail(h)
 
         # 2. Top Navigation Bar
         self.draw_top_header(w, h, offset_x=offset_x)
