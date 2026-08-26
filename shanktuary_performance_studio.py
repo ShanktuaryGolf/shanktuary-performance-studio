@@ -528,6 +528,7 @@ class ShanktuaryApp:
         self.balance_modal_close_rect = None
         self.balance_modal_tare_rect = None
         self.balance_modal_align_rect = None
+        self.balance_modal_stance_rect = None
         self.balance_modal_sim_rect = None
         self.balance_modal_pair_rect = None
         self.balance_modal_copy_pin_rect = None
@@ -1624,6 +1625,7 @@ class ShanktuaryApp:
         if self.show_balance_hardware_modal:
             for r in (
                 self.balance_modal_close_rect, self.balance_modal_pair_rect,
+                self.balance_modal_stance_rect,
                 self.balance_modal_tare_rect, self.balance_modal_sim_rect,
                 self.balance_modal_copy_pin_rect, self.balance_modal_bt_settings_rect,
                 self.balance_modal_mode_1_rect, self.balance_modal_mode_2_rect,
@@ -1886,6 +1888,18 @@ class ShanktuaryApp:
                     obs_server.pressure_manager.start_stance_alignment(duration_sec=4.0)
                     self.copy_feedback = "⏳ Stand still in address posture (4s)..."
                     self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                return
+            if self.balance_modal_stance_rect and self.balance_modal_stance_rect[0] <= event.x <= self.balance_modal_stance_rect[2] and self.balance_modal_stance_rect[1] <= event.y <= self.balance_modal_stance_rect[3]:
+                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                    pm_ = obs_server.pressure_manager
+                    if pm_.get_stance_width_status().get("active"):
+                        pm_.cancel_stance_width_calibration()
+                        self.copy_feedback = "Stance width measurement cancelled"
+                    else:
+                        pm_.start_stance_width_calibration()
+                        self.copy_feedback = "📏 Shift weight to your LEFT foot and hold"
+                    self.root.after(2500, self.clear_copy_feedback)
                     self.draw_screen()
                 return
             if self.balance_modal_sim_rect and self.balance_modal_sim_rect[0] <= event.x <= self.balance_modal_sim_rect[2] and self.balance_modal_sim_rect[1] <= event.y <= self.balance_modal_sim_rect[3]:
@@ -5738,8 +5752,29 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(b3_x1, hw_y1, b3_x2, hw_y2, fill="#151926", outline=sim_col)
         self.canvas.create_text((b3_x1 + b3_x2) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator: {'[ON]' if is_sim else '[OFF]'}", fill="#FFFFFF", font=("Helvetica", 8, "bold"))
 
+        # Button 4: Stance WIDTH calibration (shift left, then right).
+        # Separate row so the three buttons above keep their width.
+        sw_y1 = hw_y2 + 8
+        sw_y2 = sw_y1 + (hw_y2 - hw_y1)
+        st_st = pm.get_stance_width_status() if (pm and hasattr(pm, "get_stance_width_status")) else {"active": False, "state": "idle", "instruction": "", "stance_width_mm": None}
+        sw_active = st_st.get("active", False)
+        sw_mm = st_st.get("stance_width_mm")
+
+        self.balance_modal_stance_rect = (b1_x1, sw_y1, b3_x2, sw_y2)
+        if sw_active:
+            sw_bg, sw_bd = "#1E3A2B", "#4ADE80"
+            sw_txt = f"📏 {st_st.get('instruction', '')}"
+        elif sw_mm:
+            sw_bg, sw_bd = "#151926", "#475569"
+            sw_txt = f"📏 Stance Width: {sw_mm:.0f} mm  (tap to redo)"
+        else:
+            sw_bg, sw_bd = "#151926", "#475569"
+            sw_txt = "📏 Measure Stance Width (shift L, then R)"
+        self.canvas.create_rectangle(b1_x1, sw_y1, b3_x2, sw_y2, fill=sw_bg, outline=sw_bd, width=2 if sw_active else 1)
+        self.canvas.create_text((b1_x1 + b3_x2) // 2, (sw_y1 + sw_y2) // 2, text=sw_txt, fill="#FFFFFF", font=("Helvetica", 8, "bold"))
+
         # --- SECTION 3: STEP-BY-STEP PAIRING INSTRUCTIONS ---
-        guide_y1 = hw_y2 + 8
+        guide_y1 = sw_y2 + 8
         guide_y2 = my2 - 12
         self.canvas.create_rectangle(mx1 + 20, guide_y1, mx2 - 20, guide_y2, fill="#141824", outline="#1F2536")
         self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill="#64748B", font=("Helvetica", 7, "bold"), anchor="w")
