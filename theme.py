@@ -48,6 +48,35 @@ MUTED = TEXT_3
 
 # --- layout ---------------------------------------------------------------
 RAIL_W = 64          # left icon rail, always visible
+
+
+# --- typography -------------------------------------------------------------
+# Tk resolves unknown families silently, and "Helvetica" is NOT installed on
+# most Linux systems -- it falls back to Nimbus Sans, a narrow URW clone that
+# reads as monospace-ish at small sizes and is why the UI looked like terminal
+# output. Resolve a real UI face once, at import, and use it everywhere.
+def _resolve_ui_font():
+    try:
+        import tkinter.font as tkfont
+        fams = set(tkfont.families())
+    except Exception:
+        return "Helvetica"
+    for cand in ("Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans",
+                 "Cantarell", "Segoe UI", "Helvetica Neue", "Arial"):
+        if cand in fams:
+            return cand
+    return "Helvetica"
+
+
+_UI_FONT = None
+
+
+def ui_font():
+    """Family name for all UI text. Resolved lazily -- needs a live Tk root."""
+    global _UI_FONT
+    if _UI_FONT is None:
+        _UI_FONT = _resolve_ui_font()
+    return _UI_FONT
 NAV_ITEM_H = 56      # per nav entry
 CORNER = 10          # standard corner radius
 

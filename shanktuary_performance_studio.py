@@ -1165,8 +1165,8 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.ACCENT_TEXT, width=2)
 
         # Header
-        self.canvas.create_text(cx, y1 + 28, text="🏌️ ADD CUSTOM CLUB TO BAG", fill=theme.ACCENT_TEXT, font=("Helvetica", 12, "bold"))
-        self.canvas.create_text(cx, y1 + 52, text="Type custom club name (e.g. 2 Hybrid, 7 Wood, 64° Wedge):", fill=theme.TEXT_2, font=("Helvetica", 9))
+        self.canvas.create_text(cx, y1 + 28, text="🏌️ ADD CUSTOM CLUB TO BAG", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 12, "bold"))
+        self.canvas.create_text(cx, y1 + 52, text="Type custom club name (e.g. 2 Hybrid, 7 Wood, 64° Wedge):", fill=theme.TEXT_2, font=(theme.ui_font(), 9))
 
         # Input Text Box
         in_x1 = cx - 180
@@ -1177,9 +1177,9 @@ class ShanktuaryApp:
 
         if self.custom_club_input_text:
             display_text = self.custom_club_input_text + " |"
-            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text=display_text, fill=theme.TEXT, font=("Consolas", 14, "bold"))
+            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text=display_text, fill=theme.TEXT, font=(theme.ui_font(), 14, "bold"))
         else:
-            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text="Type club name here... |", fill=theme.TEXT_3, font=("Consolas", 12, "italic"))
+            self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text="Type club name here... |", fill=theme.TEXT_3, font=(theme.ui_font(), 12, "italic"))
 
         # Buttons
         btn_y1 = in_y2 + 20
@@ -1191,17 +1191,17 @@ class ShanktuaryApp:
         add_x2 = cx - 10
         self.custom_club_modal_add_rect = (add_x1, btn_y1, add_x2, btn_y2)
         self.canvas.create_rectangle(add_x1, btn_y1, add_x2, btn_y2, fill=theme.ACCENT_TEXT, outline="")
-        self.canvas.create_text((add_x1 + add_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Add Club", fill="#08090C", font=("Helvetica", 9, "bold"))
+        self.canvas.create_text((add_x1 + add_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Add Club", fill="#08090C", font=(theme.ui_font(), 9, "bold"))
 
         # Cancel Button (Right)
         can_x1 = cx + 10
         can_x2 = cx + btn_w + 10
         self.custom_club_modal_cancel_rect = (can_x1, btn_y1, can_x2, btn_y2)
         self.canvas.create_rectangle(can_x1, btn_y1, can_x2, btn_y2, fill=theme.HAIRLINE, outline="#323B50")
-        self.canvas.create_text((can_x1 + can_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel (<Esc>)", fill=theme.TEXT_2, font=("Helvetica", 9, "bold"))
+        self.canvas.create_text((can_x1 + can_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel (<Esc>)", fill=theme.TEXT_2, font=(theme.ui_font(), 9, "bold"))
 
         # Footer shortcut hint
-        self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill=theme.TEXT_3, font=("Helvetica", 8))
+        self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def handle_key_press(self, event):
         if self.show_balance_hardware_modal:
@@ -1428,8 +1428,8 @@ class ShanktuaryApp:
 
         # Title
         title = f"EDIT CLUB SPECS: {self.spec_editor_orig_name}" if self.spec_editor_orig_name else "ADD NEW CLUB TO BAG"
-        self.canvas.create_text(cx, y1 + 24, text=title, fill=theme.ACCENT_TEXT, font=("Helvetica", 11, "bold"))
-        self.canvas.create_text(cx, y1 + 44, text="Configure your club profile, category, and equipment specs", fill=theme.TEXT_2, font=("Helvetica", 8))
+        self.canvas.create_text(cx, y1 + 24, text=title, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 11, "bold"))
+        self.canvas.create_text(cx, y1 + 44, text="Configure your club profile, category, and equipment specs", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
 
         self.spec_editor_cat_chips.clear()
         self.spec_editor_field_rects.clear()
@@ -1450,7 +1450,7 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(cx1, cat_y1, cx2, cat_y2, fill=theme.SURFACE_2 if is_cat_sel else theme.SURFACE_2, outline=theme.ACCENT_TEXT if is_cat_sel else theme.HAIRLINE)
             
             chip_label = "Woods" if cat == "Woods & Drivers" else ("Hybrids" if cat == "Hybrids & Utilities" else cat)
-            self.canvas.create_text((cx1 + cx2) // 2, (cat_y1 + cat_y2) // 2, text=chip_label, fill=theme.ACCENT_TEXT if is_cat_sel else "#A0A7B8", font=("Helvetica", 8, "bold" if is_cat_sel else "normal"))
+            self.canvas.create_text((cx1 + cx2) // 2, (cat_y1 + cat_y2) // 2, text=chip_label, fill=theme.ACCENT_TEXT if is_cat_sel else "#A0A7B8", font=(theme.ui_font(), 8, "bold" if is_cat_sel else "normal"))
 
         # Input Form Grid
         fields = [
@@ -1465,7 +1465,7 @@ class ShanktuaryApp:
         curr_fy = y1 + 102
         field_step = 58
         for f_key, f_label, f_val in fields:
-            self.canvas.create_text(x1 + 35, curr_fy, text=f_label, fill=theme.TEXT_2, font=("Helvetica", 8, "bold"), anchor="w")
+            self.canvas.create_text(x1 + 35, curr_fy, text=f_label, fill=theme.TEXT_2, font=(theme.ui_font(), 8, "bold"), anchor="w")
             
             box_x1 = x1 + 35
             box_x2 = x2 - 35
@@ -1479,7 +1479,7 @@ class ShanktuaryApp:
             val_display = (f_val + " |") if is_f_active else (f_val if f_val else "")
             val_color = theme.TEXT if f_val else (theme.ACCENT_TEXT if is_f_active else "#485065")
             val_text = val_display if val_display else "Click to enter..."
-            self.canvas.create_text(box_x1 + 10, (box_y1 + box_y2) // 2, text=val_text, fill=val_color, font=("Consolas", 9, "bold" if is_f_active else "normal"), anchor="w")
+            self.canvas.create_text(box_x1 + 10, (box_y1 + box_y2) // 2, text=val_text, fill=val_color, font=(theme.ui_font(), 9, "bold" if is_f_active else "normal"), anchor="w")
 
             curr_fy += field_step
 
@@ -1492,14 +1492,14 @@ class ShanktuaryApp:
         save_x2 = cx - 40
         self.spec_editor_save_rect = (save_x1, btn_y1, save_x2, btn_y2)
         self.canvas.create_rectangle(save_x1, btn_y1, save_x2, btn_y2, fill=theme.ACCENT_TEXT, outline="")
-        self.canvas.create_text((save_x1 + save_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Save Specs", fill="#08090C", font=("Helvetica", 9, "bold"))
+        self.canvas.create_text((save_x1 + save_x2) // 2, (btn_y1 + btn_y2) // 2, text="✓ Save Specs", fill="#08090C", font=(theme.ui_font(), 9, "bold"))
 
         # Cancel Button
         cancel_x1 = cx - 30
         cancel_x2 = cx + 70
         self.spec_editor_cancel_rect = (cancel_x1, btn_y1, cancel_x2, btn_y2)
         self.canvas.create_rectangle(cancel_x1, btn_y1, cancel_x2, btn_y2, fill=theme.HAIRLINE, outline="#323B50")
-        self.canvas.create_text((cancel_x1 + cancel_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel", fill=theme.TEXT_2, font=("Helvetica", 9, "bold"))
+        self.canvas.create_text((cancel_x1 + cancel_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel", fill=theme.TEXT_2, font=(theme.ui_font(), 9, "bold"))
 
         # Delete Button (if existing club)
         if self.spec_editor_orig_name:
@@ -1507,12 +1507,12 @@ class ShanktuaryApp:
             del_x2 = cx + 180
             self.spec_editor_delete_rect = (del_x1, btn_y1, del_x2, btn_y2)
             self.canvas.create_rectangle(del_x1, btn_y1, del_x2, btn_y2, fill="#3A141E", outline=theme.DANGER)
-            self.canvas.create_text((del_x1 + del_x2) // 2, (btn_y1 + btn_y2) // 2, text="🗑️ Remove", fill=theme.DANGER, font=("Helvetica", 9, "bold"))
+            self.canvas.create_text((del_x1 + del_x2) // 2, (btn_y1 + btn_y2) // 2, text="🗑️ Remove", fill=theme.DANGER, font=(theme.ui_font(), 9, "bold"))
         else:
             self.spec_editor_delete_rect = None
 
         # Footer Hint
-        self.canvas.create_text(cx, y2 - 12, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill=theme.TEXT_3, font=("Helvetica", 8))
+        self.canvas.create_text(cx, y2 - 12, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def get_club_color(self, club_name):
         """Per-club series colour for charts.
@@ -2394,13 +2394,13 @@ class ShanktuaryApp:
         # 1. Header (y: 0 to 52)
         self.canvas.create_rectangle(0, 0, sb_w, 52, fill=theme.RAIL, outline="")
         self.canvas.create_line(0, 52, sb_w, 52, fill=theme.HAIRLINE)
-        self.canvas.create_text(16, 26, text="Shots", fill=theme.TEXT, font=("Helvetica", 12), anchor="w")
+        self.canvas.create_text(16, 26, text="Shots", fill=theme.TEXT, font=(theme.ui_font(), 12), anchor="w")
         
         # Collapse button [ ◀ ]
         coll_x1, coll_y1, coll_x2, coll_y2 = sb_w - 38, 12, sb_w - 10, 40
         self.sidebar_toggle_rect = (coll_x1, coll_y1, coll_x2, coll_y2)
         self.canvas.create_rectangle(coll_x1, coll_y1, coll_x2, coll_y2, fill=theme.SURFACE_2, outline="")
-        self.canvas.create_text((coll_x1 + coll_x2) // 2, 26, text="◀", fill=theme.TEXT_3, font=("Helvetica", 9))
+        self.canvas.create_text((coll_x1 + coll_x2) // 2, 26, text="◀", fill=theme.TEXT_3, font=(theme.ui_font(), 9))
 
         # 2. Session Bar (y: 52 to 92)
         self.canvas.create_rectangle(0, 52, sb_w, 92, fill=theme.RAIL, outline="")
@@ -2413,19 +2413,19 @@ class ShanktuaryApp:
         btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2 = 10, 58, sb_w - 74, 86
         self.sidebar_session_btn_rect = (btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2)
         self.canvas.create_rectangle(btn_s_x1, btn_s_y1, btn_s_x2, btn_s_y2, fill=theme.SURFACE_2, outline=theme.ACCENT_LINE if self.show_session_dropdown else "")
-        self.canvas.create_text(btn_s_x1 + 10, 72, text=f"{sess_title}  ▼", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(btn_s_x1 + 10, 72, text=f"{sess_title}  ▼", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
         # Rename Session Button [ ✏️ ]
         btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2 = sb_w - 68, 58, sb_w - 40, 86
         self.sidebar_rename_sess_btn_rect = (btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2)
         self.canvas.create_rectangle(btn_ren_x1, btn_ren_y1, btn_ren_x2, btn_ren_y2, fill=theme.SURFACE_2, outline="")
-        self.canvas.create_text((btn_ren_x1 + btn_ren_x2) // 2, 72, text="✎", fill=theme.TEXT_3, font=("Helvetica", 10))
+        self.canvas.create_text((btn_ren_x1 + btn_ren_x2) // 2, 72, text="✎", fill=theme.TEXT_3, font=(theme.ui_font(), 10))
 
         # New Session Button [ ＋ ]
         btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2 = sb_w - 36, 58, sb_w - 8, 86
         self.sidebar_new_sess_btn_rect = (btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2)
         self.canvas.create_rectangle(btn_add_x1, btn_add_y1, btn_add_x2, btn_add_y2, fill=theme.ACCENT, outline="")
-        self.canvas.create_text((btn_add_x1 + btn_add_x2) // 2, 72, text="＋", fill="#EAF5EE", font=("Helvetica", 11, "bold"))
+        self.canvas.create_text((btn_add_x1 + btn_add_x2) // 2, 72, text="＋", fill="#EAF5EE", font=(theme.ui_font(), 11, "bold"))
 
         # 3. Filter Bar (y: 92 to 128)
         self.canvas.create_rectangle(0, 92, sb_w, 128, fill=theme.RAIL, outline="")
@@ -2435,11 +2435,11 @@ class ShanktuaryApp:
         self.sidebar_filter_btn_rect = (filt_x1, filt_y1, filt_x2, filt_y2)
         filt_label = f"🎯 {self.club_filter} ▼"
         self.canvas.create_rectangle(filt_x1, filt_y1, filt_x2, filt_y2, fill=theme.ACCENT_DEEP if self.club_filter != "ALL" else theme.SURFACE_2, outline=theme.ACCENT_LINE if self.show_filter_dropdown else "")
-        self.canvas.create_text(filt_x1 + 10, 110, text=filt_label, fill=theme.ACCENT_TEXT if self.club_filter != "ALL" else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(filt_x1 + 10, 110, text=filt_label, fill=theme.ACCENT_TEXT if self.club_filter != "ALL" else theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
         filtered_shots = self.get_filtered_shots()
         count_str = f"{len(filtered_shots)} shots"
-        self.canvas.create_text(sb_w - 12, 110, text=count_str, fill=theme.TEXT_3, font=("Helvetica", 9), anchor="e")
+        self.canvas.create_text(sb_w - 12, 110, text=count_str, fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="e")
 
         # 4. Shot Card Stream (y: 132 to h - 42)
         card_stream_y1 = 132
@@ -2450,8 +2450,8 @@ class ShanktuaryApp:
         self.sidebar_shot_card_rects.clear()
 
         if not filtered_shots:
-            self.canvas.create_text(sb_w // 2, 220, text="NO SHOTS RECORDED", fill="#353A4B", font=("Helvetica", 10, "bold"))
-            self.canvas.create_text(sb_w // 2, 245, text="Hit a shot with Nova or\nchange active club filter.", fill=theme.TEXT_3, font=("Helvetica", 9), justify="center")
+            self.canvas.create_text(sb_w // 2, 220, text="NO SHOTS RECORDED", fill="#353A4B", font=(theme.ui_font(), 10, "bold"))
+            self.canvas.create_text(sb_w // 2, 245, text="Hit a shot with Nova or\nchange active club filter.", fill=theme.TEXT_3, font=(theme.ui_font(), 9), justify="center")
         else:
             avail_h = card_stream_y2 - card_stream_y1
             max_cards = max(1, avail_h // (card_h + card_gap))
@@ -2487,22 +2487,22 @@ class ShanktuaryApp:
 
                 # Line 1: #N  [Club]  Carry
                 num_txt = f"#{real_idx + 1}"
-                self.canvas.create_text(20, cy1 + 12, text=num_txt, fill=theme.TEXT if is_selected else theme.TEXT_2, font=("Helvetica", 10), anchor="w")
-                self.canvas.create_text(56, cy1 + 13, text=c_tag, fill=theme.ACCENT_TEXT if is_selected else theme.TEXT_3, font=("Helvetica", 8), anchor="w")
-                self.canvas.create_text(sb_w - 20, cy1 + 12, text=f"{carry:.1f} yds", fill=theme.TEXT if is_selected else theme.TEXT_2, font=("Helvetica", 11), anchor="e")
+                self.canvas.create_text(20, cy1 + 12, text=num_txt, fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 10), anchor="w")
+                self.canvas.create_text(56, cy1 + 13, text=c_tag, fill=theme.ACCENT_TEXT if is_selected else theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
+                self.canvas.create_text(sb_w - 20, cy1 + 12, text=f"{carry:.1f} yds", fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 11), anchor="e")
 
                 # Line 2: Speed & Shot Name
-                self.canvas.create_text(20, cy1 + 30, text=f"{bspeed:.1f} mph  ·  {s_name}", fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(20, cy1 + 30, text=f"{bspeed:.1f} mph  ·  {s_name}", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
                 # Line 3: Timestamp only -- smash is a constant when the OGC
                 # model saturates, so repeating it on every card is noise.
-                self.canvas.create_text(20, cy1 + 45, text=t_stamp, fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(20, cy1 + 45, text=t_stamp, fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
         # 5. Footer (y: h - 42 to h)
         clear_y1, clear_y2 = h - 38, h - 8
         self.sidebar_clear_btn_rect = (10, clear_y1, sb_w - 10, clear_y2)
         self.canvas.create_rectangle(10, clear_y1, sb_w - 10, clear_y2, fill=theme.SURFACE_2, outline="")
-        self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="Clear session", fill=theme.TEXT_3, font=("Helvetica", 9))
+        self.canvas.create_text(sb_w // 2, (clear_y1 + clear_y2) // 2, text="Clear session", fill=theme.TEXT_3, font=(theme.ui_font(), 9))
 
         # Shift the whole sidebar group clear of the nav rail, then correct the
         # hit rects registered above by the same delta.
@@ -2548,22 +2548,22 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="")
             if is_sel:
                 self.canvas.create_rectangle(x1 + 4, iy1, x1 + 7, iy2, fill=theme.ACCENT_LINE, outline="")
-            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=s_name, fill=theme.TEXT if is_sel else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
-            self.canvas.create_text(x2 - 12, (iy1 + iy2) // 2, text=f"{shot_cnt}", fill=theme.TEXT_3, font=("Helvetica", 9), anchor="e")
+            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=s_name, fill=theme.TEXT if is_sel else theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
+            self.canvas.create_text(x2 - 12, (iy1 + iy2) // 2, text=f"{shot_cnt}", fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="e")
 
         # ✏️ Rename Active Session item
         ren_iy1 = y1 + 5 + (len(self.sessions) * item_h)
         ren_iy2 = ren_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, ren_iy1, x2 - 4, ren_iy2, -2))
         self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill=theme.SURFACE_2, outline="")
-        self.canvas.create_text(x1 + 14, (ren_iy1 + ren_iy2) // 2, text="Rename session", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(x1 + 14, (ren_iy1 + ren_iy2) // 2, text="Rename session", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
         # + Add New Session item
         add_iy1 = y1 + 5 + ((len(self.sessions) + 1) * item_h)
         add_iy2 = add_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, add_iy1, x2 - 4, add_iy2, -1))
         self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2, fill=theme.ACCENT, outline="")
-        self.canvas.create_text(x1 + 14, (add_iy1 + add_iy2) // 2, text="＋  New session", fill="#EAF5EE", font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(x1 + 14, (add_iy1 + add_iy2) // 2, text="＋  New session", fill="#EAF5EE", font=(theme.ui_font(), 9, "bold"), anchor="w")
 
     def draw_filter_dropdown(self, w, h):
         box_w = 180
@@ -2589,7 +2589,7 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="")
             if is_sel:
                 self.canvas.create_rectangle(x1 + 4, iy1, x1 + 7, iy2, fill=theme.ACCENT_LINE, outline="")
-            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=label, fill=theme.TEXT if is_sel else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=label, fill=theme.TEXT if is_sel else theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
     def draw_top_header(self, w, h, offset_x=0):
         header_h = 52
@@ -2603,14 +2603,14 @@ class ShanktuaryApp:
             hamb_x1, hamb_y1, hamb_x2, hamb_y2 = 10, 10, 42, 42
             self.sidebar_toggle_rect = (hamb_x1, hamb_y1, hamb_x2, hamb_y2)
             self.canvas.create_rectangle(hamb_x1, hamb_y1, hamb_x2, hamb_y2, fill=theme.SURFACE_2, outline="")
-            self.canvas.create_text(26, 26, text="☰", fill=theme.TEXT_2, font=("Helvetica", 12), anchor="center")
+            self.canvas.create_text(26, 26, text="☰", fill=theme.TEXT_2, font=(theme.ui_font(), 12), anchor="center")
             brand_x = 52
             brand_text = "SHANKTUARY STUDIO"
         else:
             brand_x = offset_x + 12
             brand_text = "STUDIO" if avail_w < 1050 else "SHANKTUARY STUDIO"
 
-        brand_id = self.canvas.create_text(brand_x, 26, text=brand_text, fill=theme.TEXT_2, font=("Helvetica", 11), anchor="w")
+        brand_id = self.canvas.create_text(brand_x, 26, text=brand_text, fill=theme.TEXT_2, font=(theme.ui_font(), 11), anchor="w")
         brand_bbox = self.canvas.bbox(brand_id)
         if brand_bbox and isinstance(brand_bbox, (tuple, list)) and len(brand_bbox) >= 4 and isinstance(brand_bbox[2], (int, float)):
             brand_right = int(brand_bbox[2])
@@ -2632,7 +2632,7 @@ class ShanktuaryApp:
         status_x1 = brand_right + 16
         status_x2 = status_x1 + status_w
         self.canvas.create_oval(status_x1, 22, status_x1 + 8, 30, fill=status_col, outline="")
-        self.canvas.create_text(status_x1 + 15, 26, text=status_text, fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(status_x1 + 15, 26, text=status_text, fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
         # 2. Right Utility Pills
         fs_w = 32
@@ -2645,14 +2645,14 @@ class ShanktuaryApp:
         fs_x1 = fs_x2 - fs_w
         self.fullscreen_btn_rect = (fs_x1, 10, fs_x2, 42)
         self.canvas.create_rectangle(fs_x1, 10, fs_x2, 42, fill=theme.SURFACE, outline="")
-        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill=theme.TEXT_3, font=("Helvetica", 11), anchor="center")
+        self.canvas.create_text((fs_x1 + fs_x2) // 2, 26, text="⛶", fill=theme.TEXT_3, font=(theme.ui_font(), 11), anchor="center")
 
         tools_x2 = fs_x1 - gap
         tools_x1 = tools_x2 - tools_w
         self.tools_btn_rect = (tools_x1, 10, tools_x2, 42)
         t_bg = theme.SURFACE_2 if self.show_tools_menu else theme.SURFACE
         self.canvas.create_rectangle(tools_x1, 10, tools_x2, 42, fill=t_bg, outline="")
-        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill=theme.TEXT if self.show_tools_menu else theme.TEXT_2, font=("Helvetica", 10), anchor="center")
+        self.canvas.create_text((tools_x1 + tools_x2) // 2, 26, text="Tools  ▼", fill=theme.TEXT if self.show_tools_menu else theme.TEXT_2, font=(theme.ui_font(), 10), anchor="center")
 
         dex_x2 = tools_x1 - gap
         dex_x1 = dex_x2 - dex_w
@@ -2662,14 +2662,14 @@ class ShanktuaryApp:
         dex_fg = theme.ACCENT_TEXT if self.is_left_handed else theme.TEXT_2
         dex_label = "LH" if self.is_left_handed else "RH"
         self.canvas.create_rectangle(dex_x1, 10, dex_x2, 42, fill=dex_bg, outline="")
-        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=("Helvetica", 10), anchor="center")
+        self.canvas.create_text((dex_x1 + dex_x2) // 2, 26, text=dex_label, fill=dex_fg, font=(theme.ui_font(), 10), anchor="center")
 
         club_x2 = dex_x1 - gap
         club_x1 = club_x2 - club_w
         self.club_btn_rect = (club_x1, 10, club_x2, 42)
         c_bg = theme.SURFACE_2 if self.show_club_menu else theme.SURFACE
         self.canvas.create_rectangle(club_x1, 10, club_x2, 42, fill=c_bg, outline="")
-        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill=theme.TEXT, font=("Helvetica", 10), anchor="center")
+        self.canvas.create_text((club_x1 + club_x2) // 2, 26, text=f"{self.current_club}  ▼", fill=theme.TEXT, font=(theme.ui_font(), 10), anchor="center")
 
         # 3. Mode switching now lives in the persistent left rail
         #    (draw_nav_rail). The old segmented pills were removed: eight
@@ -2691,7 +2691,7 @@ class ShanktuaryApp:
         # brand mark
         self.canvas.create_rectangle(18, 20, 46, 48, fill=theme.ACCENT, outline="")
         self.canvas.create_text(32, 34, text="S", fill="#DFF0E6",
-                                font=("Helvetica", 13, "bold"), anchor="center")
+                                font=(theme.ui_font(), 13, "bold"), anchor="center")
 
         y = 84
         for mode_id, label, _tip in theme.NAV_ITEMS:
@@ -2713,14 +2713,14 @@ class ShanktuaryApp:
                 fill=icon_fill, outline="" if is_active else txt_col,
                 width=0 if is_active else 2)
             self.canvas.create_text(32, y + 34, text=label, fill=txt_col,
-                                    font=("Helvetica", 7), anchor="center")
+                                    font=(theme.ui_font(), 7), anchor="center")
             y += theme.NAV_ITEM_H
 
         # Setup pinned to the bottom, away from view switching
         self.canvas.create_rectangle(25, h - 56, 39, h - 42, fill="",
                                      outline=theme.TEXT_3, width=2)
         self.canvas.create_text(32, h - 32, text="Setup", fill=theme.TEXT_3,
-                                font=("Helvetica", 7), anchor="center")
+                                font=(theme.ui_font(), 7), anchor="center")
 
     def verify_ogc_model_sync(self, shot):
         """Detect drift between our mirrored OGC constants and the live payload.
@@ -2877,8 +2877,8 @@ class ShanktuaryApp:
             ("EFFICIENCY", f"{eff_pct:.0f}%", theme.TEXT_2)
         ]
 
-        lbl_font = ("Helvetica", max(8, int(9 * t_scale)), "bold")
-        val_font = ("Consolas", max(11, int(15 * t_scale)), "bold")
+        lbl_font = (theme.ui_font(), max(8, int(9 * t_scale)), "bold")
+        val_font = (theme.ui_font(), max(11, int(15 * t_scale)), "bold")
 
         col_w = avail_w / len(metrics)
         # Left-aligned label above value, so the eye tracks a column.
@@ -2903,7 +2903,7 @@ class ShanktuaryApp:
 
         self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(x1 + 14, y1 + 12, text="ACTIVE CLUB", fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+        self.canvas.create_text(x1 + 14, y1 + 12, text="ACTIVE CLUB", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
         self.club_menu_items.clear()
         for idx, club_name in enumerate(self.clubs):
@@ -2918,7 +2918,7 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="")
             if is_sel:
                 self.canvas.create_rectangle(x1 + 6, iy1, x1 + 9, iy2, fill=theme.ACCENT_LINE, outline="")
-            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=club_name, fill=txt_col, font=("Helvetica", 9), anchor="w")
+            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=club_name, fill=txt_col, font=(theme.ui_font(), 9), anchor="w")
 
         # Divider & Add Custom Club Action
         div_y = y1 + 22 + (total_items * item_h) + 2
@@ -2928,7 +2928,7 @@ class ShanktuaryApp:
         btn_y2 = btn_y1 + 22
         self.club_menu_items.append((x1 + 6, btn_y1, x2 - 6, btn_y2, "__add_custom__"))
         self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill=theme.SURFACE_2, outline="")
-        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋  Add custom club", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="center")
+        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋  Add custom club", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="center")
 
     def draw_tools_flyout_menu(self, w, h):
         """Tools flyout. Every row states what it does -- navigation says
@@ -2970,7 +2970,7 @@ class ShanktuaryApp:
                 self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
                 curr_y += div_h
             self.canvas.create_text(x1 + 20, curr_y, text=title, fill=theme.TEXT_3,
-                                    font=("Helvetica", 8), anchor="w")
+                                    font=(theme.ui_font(), 8), anchor="w")
             curr_y += sec_h
 
             for action, label, sub, primary in items:
@@ -2981,9 +2981,9 @@ class ShanktuaryApp:
                                                  fill=theme.SURFACE_2, outline="")
                 self.canvas.create_text(x1 + 26, r[1] + 13, text=label,
                                         fill=theme.TEXT if primary else theme.TEXT_2,
-                                        font=("Helvetica", 10), anchor="w")
+                                        font=(theme.ui_font(), 10), anchor="w")
                 self.canvas.create_text(x1 + 26, r[1] + 30, text=sub,
-                                        fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+                                        fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
                 curr_y += item_h
 
         # Hardware status -- Nova and the balance boards answer the same
@@ -2992,7 +2992,7 @@ class ShanktuaryApp:
         self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
         curr_y += 18
         self.canvas.create_text(x1 + 20, curr_y, text="HARDWARE", fill=theme.TEXT_3,
-                                font=("Helvetica", 8), anchor="w")
+                                font=(theme.ui_font(), 8), anchor="w")
         curr_y += 20
 
         nova_up = nova_status["connected"]
@@ -3013,9 +3013,9 @@ class ShanktuaryApp:
             self.canvas.create_oval(x1 + 22, curr_y + 5, x1 + 30, curr_y + 13,
                                     fill=theme.ACCENT_LINE if ok else theme.TEXT_3, outline="")
             self.canvas.create_text(x1 + 40, curr_y + 9, text=label, fill=theme.TEXT_2,
-                                    font=("Helvetica", 9), anchor="w")
+                                    font=(theme.ui_font(), 9), anchor="w")
             self.canvas.create_text(x2 - 20, curr_y + 9, text=str(value), fill=theme.TEXT_3,
-                                    font=("Helvetica", 8), anchor="e")
+                                    font=(theme.ui_font(), 8), anchor="e")
             curr_y += 24
 
         curr_y += 6
@@ -3023,7 +3023,7 @@ class ShanktuaryApp:
         self.tools_menu_items.append((sb[0], sb[1], sb[2], sb[3], "open_setup"))
         self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=theme.SURFACE_2, outline="")
         self.canvas.create_text((sb[0] + sb[2]) // 2, (sb[1] + sb[3]) // 2, text="Open Setup",
-                                fill=theme.ACCENT_TEXT, font=("Helvetica", 10), anchor="center")
+                                fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
 
 
     def draw_screen(self):
@@ -3153,7 +3153,7 @@ class ShanktuaryApp:
             if self.current_shot:
                 self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
             else:
-                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=("Helvetica", 32, "bold"))
+                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=(theme.ui_font(), 32, "bold"))
         elif self.view_mode == 2:
             # Mode 2: 3D Range Viewport
             self.draw_3d_range_viewport(avail_w, h, carry_yds, total_yds, ball_speed_mph, club_speed_mph, peak_height_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=offset_x)
@@ -3189,7 +3189,7 @@ class ShanktuaryApp:
                     shot_name, smash_clamped=smash_clamped, offset_x=offset_x,
                     top_bar_h=52)
             else:
-                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#1D2621", font=("Helvetica", 26))
+                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#1D2621", font=(theme.ui_font(), 26))
         elif self.view_mode == 0:
             # Mode 0: Floor Divot Focus Projector
             self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
@@ -3225,7 +3225,7 @@ class ShanktuaryApp:
             ty1 = h - 60
             ty2 = ty1 + 38
             self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill=theme.ACCENT_DEEP, outline="")
-            self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill=theme.ACCENT_TEXT, font=("Helvetica", 9), anchor="center")
+            self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9), anchor="center")
 
     def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
         self.range_launch_web_rect = None
@@ -3282,7 +3282,7 @@ class ShanktuaryApp:
             
             # Distance Signboard
             self.canvas.create_rectangle(cx_bot - 18, arc_y - 8, cx_bot + 18, arc_y + 8, fill=theme.SURFACE, outline=theme.ACCENT_LINE if yds == 150 else theme.HAIRLINE)
-            self.canvas.create_text(cx_bot, arc_y, text=str(yds), fill=theme.ACCENT_TEXT if yds == 150 else theme.TEXT_3, font=("Helvetica", 8, "bold"))
+            self.canvas.create_text(cx_bot, arc_y, text=str(yds), fill=theme.ACCENT_TEXT if yds == 150 else theme.TEXT_3, font=(theme.ui_font(), 8, "bold"))
 
             # Pin Flag
             if yds in pin_colors:
@@ -3372,13 +3372,13 @@ class ShanktuaryApp:
             
             # Carry Flag Tag
             self.canvas.create_rectangle(lx - 34, ly - 28, lx + 34, ly - 10, fill=theme.SURFACE, outline=theme.ACCENT_LINE, width=1)
-            self.canvas.create_text(lx, ly - 19, text=f"{carry_yds:.1f} YDS", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"))
+            self.canvas.create_text(lx, ly - 19, text=f"{carry_yds:.1f} YDS", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
 
             # Floating Apex Badge
             # Apex is already in the top metric strip; labelling it on the
             # arc as well is redundant and crowds the flight path.
         else:
-            self.canvas.create_text(cx_bot, horizon_y + 80, text="READY FOR SHOT", fill="#1D2621", font=("Helvetica", 22))
+            self.canvas.create_text(cx_bot, horizon_y + 80, text="READY FOR SHOT", fill="#1D2621", font=(theme.ui_font(), 22))
 
         # 4. Top Floating HUD Tiles
         hud_h = 48
@@ -3417,9 +3417,9 @@ class ShanktuaryApp:
             hx1 = offset_x + 18 + i * card_w
             self.canvas.create_text(hx1, hud_y1 + 12, text=h_title,
                                     fill=theme.TEXT_3,
-                                    font=("Helvetica", 7, "bold"), anchor="w")
+                                    font=(theme.ui_font(), 7, "bold"), anchor="w")
             self.canvas.create_text(hx1, hud_y1 + 34, text=h_val, fill=h_col,
-                                    font=("Helvetica", 13), anchor="w")
+                                    font=(theme.ui_font(), 13), anchor="w")
 
         # 5. WebGPU Launch Button (Bottom Right)
         btn_w, btn_h = 240, 32
@@ -3429,7 +3429,7 @@ class ShanktuaryApp:
         by1 = by2 - btn_h
         self.range_launch_web_rect = (bx1, by1, bx2, by2)
         self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.ACCENT, outline="")
-        self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="Open 3D WebGPU Range  ↗", fill="#EAF5EE", font=("Helvetica", 9, "bold"))
+        self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="Open 3D WebGPU Range  ↗", fill="#EAF5EE", font=(theme.ui_font(), 9, "bold"))
 
     def draw_dispersion_and_gapping(self, avail_w, h, offset_x=0):
         self.dispersion_club_chip_rects.clear()
@@ -3463,7 +3463,7 @@ class ShanktuaryApp:
             self.dispersion_submode_rects.append((sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], sm_key))
             is_active = (self.dispersion_view_submode == sm_key)
             self.canvas.create_rectangle(sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], fill=theme.SURFACE_2 if is_active else theme.SURFACE, outline=theme.ACCENT_TEXT if is_active else theme.HAIRLINE)
-            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill=theme.ACCENT_TEXT if is_active else theme.TEXT_2, font=("Helvetica", 8, "bold" if is_active else "normal"))
+            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill=theme.ACCENT_TEXT if is_active else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_active else "normal"))
             sub_x += sm_w + 8
 
         # Filter session shots
@@ -3516,7 +3516,7 @@ class ShanktuaryApp:
 
         # 2. Right Gapping & Distribution Panel
         self.canvas.create_rectangle(gap_x1, top_y, gap_x1 + gap_w, bot_y, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="📊 CLUB GAPPING & SPREAD", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="📊 CLUB GAPPING & SPREAD", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
 
         # Club Filter Chips along top of right panel
         chip_y1 = top_y + 30
@@ -3525,7 +3525,7 @@ class ShanktuaryApp:
         self.dispersion_club_chip_rects.append((all_chip_rect[0], all_chip_rect[1], all_chip_rect[2], all_chip_rect[3], "ALL"))
         is_all = (self.dispersion_selected_club == "ALL")
         self.canvas.create_rectangle(all_chip_rect[0], all_chip_rect[1], all_chip_rect[2], all_chip_rect[3], fill=theme.SURFACE_2 if is_all else theme.SURFACE, outline=theme.ACCENT_TEXT if is_all else theme.HAIRLINE)
-        self.canvas.create_text((all_chip_rect[0] + all_chip_rect[2]) // 2, (chip_y1 + chip_y2) // 2, text="ALL", fill=theme.ACCENT_TEXT if is_all else theme.TEXT_2, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((all_chip_rect[0] + all_chip_rect[2]) // 2, (chip_y1 + chip_y2) // 2, text="ALL", fill=theme.ACCENT_TEXT if is_all else theme.TEXT_2, font=(theme.ui_font(), 8, "bold"))
 
         # Gapping Cards per club
         card_start_y = top_y + 60
@@ -3539,7 +3539,7 @@ class ShanktuaryApp:
                 session_clubs.append(c)
 
         if not session_clubs:
-            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 150, text="NO SHOTS RECORDED", fill=theme.TEXT_3, font=("Helvetica", 10, "bold"))
+            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 150, text="NO SHOTS RECORDED", fill=theme.TEXT_3, font=(theme.ui_font(), 10, "bold"))
         else:
             prev_avg_carry = None
             for i, c_name in enumerate(session_clubs[:6]):
@@ -3570,22 +3570,22 @@ class ShanktuaryApp:
                 self.canvas.create_rectangle(gap_x1 + 10, cy1, gap_x1 + 15, cy2, fill=c_color, outline="")
 
                 # Line 1: Club Name & Shot Count
-                self.canvas.create_text(gap_x1 + 22, cy1 + 14, text=f"🏌️ {c_name}", fill=theme.TEXT, font=("Helvetica", 9, "bold"), anchor="w")
-                self.canvas.create_text(gap_x1 + gap_w - 18, cy1 + 14, text=f"{len(c_shots)} shots", fill=theme.TEXT_2, font=("Consolas", 8), anchor="e")
+                self.canvas.create_text(gap_x1 + 22, cy1 + 14, text=f"🏌️ {c_name}", fill=theme.TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+                self.canvas.create_text(gap_x1 + gap_w - 18, cy1 + 14, text=f"{len(c_shots)} shots", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="e")
 
                 # Line 2: Average Carry with Std Dev & Gap Delta
                 gap_str = f"({avg_c - prev_avg_carry:+.1f}y gap)" if (prev_avg_carry is not None and avg_c > 0) else ""
-                self.canvas.create_text(gap_x1 + 22, cy1 + 34, text=f"Carry: {avg_c:.1f} yds (±{std_c:.1f}y)  {gap_str}", fill=c_color, font=("Consolas", 9, "bold"), anchor="w")
+                self.canvas.create_text(gap_x1 + 22, cy1 + 34, text=f"Carry: {avg_c:.1f} yds (±{std_c:.1f}y)  {gap_str}", fill=c_color, font=(theme.ui_font(), 9, "bold"), anchor="w")
 
                 # Line 3: Min-Max window & Offline Dispersion
-                self.canvas.create_text(gap_x1 + 22, cy1 + 52, text=f"Window: {min_c:.0f}–{max_c:.0f}y  •  Lateral: {abs(avg_off):.1f}y {off_dir}", fill=theme.TEXT_2, font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(gap_x1 + 22, cy1 + 52, text=f"Window: {min_c:.0f}–{max_c:.0f}y  •  Lateral: {abs(avg_off):.1f}y {off_dir}", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
                 if avg_c > 0:
                     prev_avg_carry = avg_c
 
     def _draw_side_trajectory_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, margin_x, chart_w, max_x_yds, grouped_shots):
         self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="📈 TRAJECTORY PROFILE (ELEVATION & APEX)", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="📈 TRAJECTORY PROFILE (ELEVATION & APEX)", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         base_y = plot_y2 - 20
         chart_h = base_y - (plot_y1 + 28)
@@ -3596,13 +3596,13 @@ class ShanktuaryApp:
         for t in ticks:
             tx = margin_x + int((t / max_x_yds) * chart_w)
             self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill=theme.SURFACE_2, width=1, dash=(2, 2))
-            self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Y height grid lines
         for hy in [0, 20, 40, 60]:
             ty = base_y - int((hy / max_h_yds) * chart_h)
             self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill=theme.SURFACE_2, width=1, dash=(2, 2))
-            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Ground baseline
         self.canvas.create_line(margin_x, base_y, margin_x + chart_w, base_y, fill=theme.ACCENT_TEXT, width=1)
@@ -3640,7 +3640,7 @@ class ShanktuaryApp:
 
     def _draw_topdown_dispersion_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, max_range_yds, grouped_shots):
         self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="🎯 OVERHEAD DISPERSION & COVARIANCE ELLIPSES", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="🎯 OVERHEAD DISPERSION & COVARIANCE ELLIPSES", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         plot_w = plot_x2 - plot_x1
         cx = (plot_x1 + plot_x2) // 2
@@ -3655,14 +3655,14 @@ class ShanktuaryApp:
         for lat in [-30, -15, 15, 30]:
             lx = cx + int((lat / max_lat_yds) * (plot_w * 0.45))
             self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill=theme.SURFACE_2, width=1, dash=(2, 4))
-            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Concentric distance arcs
         for yds in [50, 100, 150, 200, 250, 300, 350]:
             frac = yds / max_range_yds
             arc_y = tee_y - int(frac * plot_h)
             self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill=theme.SURFACE_2, width=1, dash=(3, 3))
-            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Render Ellipses & Dots
         for c_name, items in grouped_shots.items():
@@ -3696,7 +3696,7 @@ class ShanktuaryApp:
                 # Mean marker
                 self.canvas.create_line(cen_x - 5, cen_y, cen_x + 5, cen_y, fill=theme.TEXT, width=2)
                 self.canvas.create_line(cen_x, cen_y - 5, cen_x, cen_y + 5, fill=theme.TEXT, width=2)
-                self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y", fill=c_color, font=("Helvetica", 7, "bold"))
+                self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y", fill=c_color, font=(theme.ui_font(), 7, "bold"))
 
             # Draw dots
             for real_idx, s in items:
@@ -3743,7 +3743,7 @@ class ShanktuaryApp:
         badge_x1 = table_x1 + 10
         badge_x2 = badge_x1 + badge_w
         self.canvas.create_rectangle(badge_x1, avg_y1 + 6, badge_x2, avg_y2 - 6, fill=theme.SURFACE_2, outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill=theme.ACCENT_TEXT, font=("Helvetica", max(8, int(10 * font_scale)), "bold"))
+        self.canvas.create_text((badge_x1 + badge_x2) // 2, (avg_y1 + avg_y2) // 2, text=f"SESSION AVERAGES ({active_count})", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), max(8, int(10 * font_scale)), "bold"))
         
         if avgs:
             metrics_x = badge_x2 + 16
@@ -3771,7 +3771,7 @@ class ShanktuaryApp:
                 f"Apex: {avgs.get('apex', 0.0):.1f}y  |  "
                 f"Offline: {avgs.get('offline', 0.0):+.1f}y"
             )
-            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill=theme.TEXT_2, font=("Helvetica", max(9, int(11 * font_scale))), anchor="w")
+            self.canvas.create_text(metrics_x, (avg_y1 + avg_y2) // 2, text=avg_metrics, fill=theme.TEXT_2, font=(theme.ui_font(), max(9, int(11 * font_scale))), anchor="w")
 
         # 2. Interactive Column Headers (Proportionally distributed across 100% width)
         head_h = int(32 * ui_scale)
@@ -3820,7 +3820,7 @@ class ShanktuaryApp:
             else:
                 tx = curr_x + 8
 
-            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=("Helvetica", max(8, int(10 * font_scale)), "bold"), anchor=align)
+            self.canvas.create_text(tx, (head_y1 + head_y2) // 2, text=col_title + sort_arrow, fill=txt_col, font=(theme.ui_font(), max(8, int(10 * font_scale)), "bold"), anchor=align)
             curr_x = cx2
 
         # 3. Sortable Data Rows
@@ -3926,7 +3926,7 @@ class ShanktuaryApp:
                 if col_key == "excluded":
                     self.table_checkbox_rects.append((curr_x, ry1, cx2, ry2, real_idx))
                     chk_color = theme.DANGER if is_ex else theme.ACCENT_TEXT
-                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=("Consolas", max(9, int(11 * font_scale)), "bold"))
+                    self.canvas.create_text((curr_x + cx2) // 2, (ry1 + ry2) // 2, text=val_text, fill=chk_color, font=(theme.ui_font(), max(9, int(11 * font_scale)), "bold"))
                 else:
                     if align == "c":
                         tx = (curr_x + cx2) // 2
@@ -3934,7 +3934,7 @@ class ShanktuaryApp:
                         tx = cx2 - 8
                     else:
                         tx = curr_x + 8
-                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=("Consolas", max(8, int(11 * font_scale)), "bold" if is_sel else "normal"), anchor=align)
+                    self.canvas.create_text(tx, (ry1 + ry2) // 2, text=val_text, fill=txt_color, font=(theme.ui_font(), max(8, int(11 * font_scale)), "bold" if is_sel else "normal"), anchor=align)
 
                 curr_x = cx2
 
@@ -3996,10 +3996,10 @@ class ShanktuaryApp:
         card_w = (grid_w - (cols - 1) * col_gap) // cols
         card_h = (grid_h - (rows - 1) * row_gap) // rows
 
-        lbl_font = ("Helvetica", max(8, int(10 * ui_scale)), "bold")
-        val_font = ("Helvetica", max(20, int(30 * ui_scale)))
-        unit_font = ("Helvetica", max(7, int(9 * ui_scale)), "bold")
-        tag_font = ("Helvetica", max(7, int(8 * ui_scale)), "bold")
+        lbl_font = (theme.ui_font(), max(8, int(10 * ui_scale)), "bold")
+        val_font = (theme.ui_font(), max(20, int(30 * ui_scale)))
+        unit_font = (theme.ui_font(), max(7, int(9 * ui_scale)), "bold")
+        tag_font = (theme.ui_font(), max(7, int(8 * ui_scale)), "bold")
 
         for idx, (c_label, c_val, c_unit, c_color, c_tag) in enumerate(cards):
             r = idx // cols
@@ -4041,7 +4041,7 @@ class ShanktuaryApp:
                 f_size = max(15, int(22 * ui_scale))
             else:
                 f_size = max(18, int(28 * ui_scale))
-            dynamic_val_font = ("Consolas", f_size, "bold")
+            dynamic_val_font = (theme.ui_font(), f_size, "bold")
             self.canvas.create_text((x1 + x2) // 2, y1 + (card_h // 2) + 4, text=c_val, fill=c_color, font=dynamic_val_font, anchor="center")
 
             # Bottom Unit Tag
@@ -4069,12 +4069,12 @@ class ShanktuaryApp:
         idx = (self.selected_shot_index + 1) if self.selected_shot_index is not None else n
         hid = self.canvas.create_text(x0, y + 12, text=f"Shot {idx}",
                                       fill=theme.TEXT,
-                                      font=("Helvetica", 19, "bold"), anchor="w")
+                                      font=(theme.ui_font(), 19, "bold"), anchor="w")
         hbb = self.canvas.bbox(hid)
         hx = (hbb[2] + 10) if hbb else (x0 + 90)
         oid = self.canvas.create_text(hx, y + 16, text=f"of {n}",
                                       fill=theme.TEXT_3,
-                                      font=("Helvetica", 10), anchor="w")
+                                      font=(theme.ui_font(), 10), anchor="w")
 
         # Shot shape as a quiet chip. Measure the "of N" text rather than
         # assuming a width -- a hardcoded offset overlaps as soon as the
@@ -4084,7 +4084,7 @@ class ShanktuaryApp:
             chip_x = (obb[2] + 14) if obb else (hx + 46)
             tid = self.canvas.create_text(chip_x + 12, y + 15, text=shot_name,
                                           fill=theme.TEXT_2,
-                                          font=("Helvetica", 9), anchor="w")
+                                          font=(theme.ui_font(), 9), anchor="w")
             tbb = self.canvas.bbox(tid)
             if tbb:
                 self.canvas.create_rectangle(chip_x, y + 4, tbb[2] + 12, y + 26,
@@ -4098,7 +4098,7 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(bx1, y + 2, bx2, y + 28,
                                          fill=theme.SURFACE, outline="")
             self.canvas.create_text((bx1 + bx2) / 2, y + 15, text=glyph,
-                                    fill=theme.TEXT_2, font=("Helvetica", 12),
+                                    fill=theme.TEXT_2, font=(theme.ui_font(), 12),
                                     anchor="center")
         y += 40
         self.canvas.create_line(x0, y, x1, y, fill=theme.HAIRLINE)
@@ -4117,21 +4117,21 @@ class ShanktuaryApp:
         for i, (lb, v, u, col) in enumerate(prim):
             cx = x0 + i * step
             self.canvas.create_text(cx, y, text=lb, fill=theme.TEXT_3,
-                                    font=("Helvetica", 8), anchor="w")
+                                    font=(theme.ui_font(), 8), anchor="w")
             vid = self.canvas.create_text(cx, y + 26, text=v, fill=col,
-                                          font=("Helvetica", 27), anchor="w")
+                                          font=(theme.ui_font(), 27), anchor="w")
             if u:
                 bb = self.canvas.bbox(vid)
                 if bb:
                     self.canvas.create_text(bb[2] + 6, y + 34, text=u,
                                             fill=theme.TEXT_3,
-                                            font=("Helvetica", 9), anchor="w")
+                                            font=(theme.ui_font(), 9), anchor="w")
         y += 48
         if smash_clamped:
             self.canvas.create_text(
                 x0, y + 6,
                 text="Club speed and smash unavailable — OpenGolfCoach estimate saturated for this shot",
-                fill=theme.TEXT_3, font=("Helvetica", 9), anchor="w")
+                fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="w")
         y += 22
 
         # ---- three cards ---------------------------------------------------
@@ -4155,19 +4155,19 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(cx0, y, cx1, y + card_h,
                                          fill=theme.SURFACE, outline="")
             self.canvas.create_text(cx0 + 16, y + 15, text=title,
-                                    fill=theme.TEXT_3, font=("Helvetica", 8),
+                                    fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                     anchor="w")
             if tag:
                 self.canvas.create_text(cx1 - 16, y + 15, text=tag,
                                         fill=theme.TEXT_3,
-                                        font=("Helvetica", 8), anchor="e")
+                                        font=(theme.ui_font(), 8), anchor="e")
             rh = (card_h - 44) / max(1, len(rows))
             for i, (k, v) in enumerate(rows):
                 ry = y + 40 + i * rh + rh / 2
                 self.canvas.create_text(cx0 + 16, ry, text=k, fill=theme.TEXT_2,
-                                        font=("Helvetica", 9), anchor="w")
+                                        font=(theme.ui_font(), 9), anchor="w")
                 self.canvas.create_text(cx1 - 16, ry, text=v, fill=theme.TEXT,
-                                        font=("Helvetica", 10), anchor="e")
+                                        font=(theme.ui_font(), 10), anchor="e")
                 if i < len(rows) - 1:
                     self.canvas.create_line(cx0 + 16, ry + rh / 2, cx1 - 16,
                                             ry + rh / 2, fill=theme.HAIRLINE)
@@ -4193,7 +4193,7 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(sx0, y, sx1, y + card_h,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(sx0 + 16, y + 15, text="STRIKE",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="w")
         head, detail, hcol = self.summarize_strike(self.current_shot)
 
@@ -4209,20 +4209,20 @@ class ShanktuaryApp:
                                          fill="#2A2118", outline="")
             self.canvas.create_text(sx0 + 60, ty + 10, text="ESTIMATE",
                                     fill=theme.WARN,
-                                    font=("Helvetica", 8, "bold"),
+                                    font=(theme.ui_font(), 8, "bold"),
                                     anchor="center")
             ty += 25
         parts = head.split(" ", 1) if " " in head else [head]
         for li, part in enumerate(parts):
             self.canvas.create_text(sx0 + 16, ty + line_h * 0.5 + li * line_h,
                                     text=part, fill=theme.TEXT,
-                                    font=("Helvetica", head_size), anchor="w")
+                                    font=(theme.ui_font(), head_size), anchor="w")
         text_bot = ty + line_h * len(parts) + 6
 
         self.canvas.create_line(sx0 + 16, text_bot, sx1 - 16, text_bot,
                                 fill=theme.HAIRLINE)
         self.canvas.create_text(sx0 + 16, y + card_h - 20, text=detail,
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="w")
 
         # Face centred between the verdict block and the footer.
@@ -4254,9 +4254,9 @@ class ShanktuaryApp:
 
         # ---- recent strip + session summary --------------------------------
         self.canvas.create_text(x0, y, text="RECENT", fill=theme.TEXT_3,
-                                font=("Helvetica", 8), anchor="w")
+                                font=(theme.ui_font(), 8), anchor="w")
         self.canvas.create_text(x1, y, text="View all", fill=theme.TEXT_3,
-                                font=("Helvetica", 8), anchor="e")
+                                font=(theme.ui_font(), 8), anchor="e")
         y += 14
 
         recent = shots[-5:]
@@ -4291,12 +4291,12 @@ class ShanktuaryApp:
                 else:
                     lab_col = theme.TEXT if sel else theme.TEXT_3
                 self.canvas.create_text(bx + bw / 2, lab_y, text=f"{cv:.0f}",
-                                        fill=lab_col, font=("Helvetica", 9),
+                                        fill=lab_col, font=(theme.ui_font(), 9),
                                         anchor="center")
                 lbl = f"#{n - len(recent) + i + 1}"
                 self.canvas.create_text(bx + bw / 2, base_y + 13, text=lbl,
                                         fill=theme.TEXT if sel else theme.TEXT_3,
-                                        font=("Helvetica", 8), anchor="center")
+                                        font=(theme.ui_font(), 8), anchor="center")
 
         # session summary card sits to the right of the bars
         sm_x = x0 + bars_w + 24
@@ -4305,10 +4305,10 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(sm_x, sm_y1, x1, sm_y2,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(sm_x + 18, sm_y1 + 16, text="SESSION",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="w")
         self.canvas.create_text(x1 - 18, sm_y1 + 16, text=f"{n} shots",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="e")
 
         avgs = self.calculate_session_averages()
@@ -4330,15 +4330,15 @@ class ShanktuaryApp:
         for i, (lb, v, u) in enumerate(sm):
             cxp = sm_x + 18 + i * inner
             self.canvas.create_text(cxp, lab_y, text=lb, fill=theme.TEXT_3,
-                                    font=("Helvetica", 8), anchor="w")
+                                    font=(theme.ui_font(), 8), anchor="w")
             vid2 = self.canvas.create_text(cxp, val_y, text=v, fill=theme.TEXT,
-                                           font=("Helvetica", val_size),
+                                           font=(theme.ui_font(), val_size),
                                            anchor="w")
             bb2 = self.canvas.bbox(vid2)
             if bb2:
                 self.canvas.create_text(bb2[2] + 6, val_y + val_size * 0.28,
                                         text=u, fill=theme.TEXT_3,
-                                        font=("Helvetica", 9), anchor="w")
+                                        font=(theme.ui_font(), 9), anchor="w")
         y += recent_h + 2
 
         # ---- bottom band: dispersion + tendencies --------------------------
@@ -4410,7 +4410,7 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(x, y, x + w, y + hh,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(x + 16, y + 15, text="DISPERSION",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="w")
         pts = []
         for s in self.session_shots[-20:]:
@@ -4423,7 +4423,7 @@ class ShanktuaryApp:
                 continue
             pts.append((float(off), float(car), s is self.current_shot))
         self.canvas.create_text(x + w - 16, y + 15, text=f"last {len(pts)}",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="e")
         if not pts:
             return
@@ -4442,9 +4442,9 @@ class ShanktuaryApp:
         for dash_y in range(int(py1), int(py2), 6):
             self.canvas.create_line(cx, dash_y, cx, dash_y + 3, fill=theme.GUIDE)
         self.canvas.create_text(cx - w * 0.22, py2 + 13, text="L",
-                                fill=theme.TEXT_3, font=("Helvetica", 8))
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8))
         self.canvas.create_text(cx + w * 0.22, py2 + 13, text="R",
-                                fill=theme.TEXT_3, font=("Helvetica", 8))
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
         for off, car, sel in pts:
             dx = cx + (off / max_off) * ((px2 - px1) / 2)
@@ -4464,7 +4464,7 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(x, y, x + w, y + hh,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(x + 16, y + 15, text="TENDENCIES",
-                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="w")
 
         shots = [s for s in self.session_shots if not s.get("excluded")]
@@ -4524,7 +4524,7 @@ class ShanktuaryApp:
         for i, (label, frac, verdict, col) in enumerate(rows):
             ry = top + i * step + step / 2
             self.canvas.create_text(x + 16, ry, text=label, fill=theme.TEXT_2,
-                                    font=("Helvetica", 9), anchor="w")
+                                    font=(theme.ui_font(), 9), anchor="w")
             self.canvas.create_line(bar_x1, ry, bar_x2, ry,
                                     fill=theme.SURFACE_2, width=6)
             if frac is not None:
@@ -4532,7 +4532,7 @@ class ShanktuaryApp:
                                         bar_x1 + (bar_x2 - bar_x1) * frac, ry,
                                         fill=col, width=6)
             self.canvas.create_text(x + w - 16, ry, text=verdict, fill=col,
-                                    font=("Helvetica", 8), anchor="e")
+                                    font=(theme.ui_font(), 8), anchor="e")
 
     def summarize_strike(self, shot):
         """Plain-language strike direction for the current shot.
@@ -4597,8 +4597,9 @@ class ShanktuaryApp:
 
         # Inspection Banner Header
         if 0 <= self.selected_shot_index < len(self.session_shots):
-            insp_text = f"INSPECTING SHOT #{self.selected_shot_index + 1} OF {len(self.session_shots)}"
-            self.canvas.create_text(mid_x, top_bar_h + int(14 * font_scale), text=insp_text, fill=theme.TEXT_3, font=("Helvetica", max(9, int(10 * font_scale))))
+            # Shot position is already stated in the footer; a centred banner
+            # here collided with the panel captions.
+            pass
 
         # Quadrant 1 (Top-Left): Overhead View
         q1_cx, q1_cy = offset_x + (quad_w // 2), top_bar_h + (quad_h // 2)
@@ -4612,8 +4613,41 @@ class ShanktuaryApp:
         face_target_str = f"Face To Target: {abs(face_to_target):.1f}° {'Open' if face_to_target > 0 else 'Closed'}"
         face_path_str = f"Face To Path: {abs(face_to_path):.1f}° {'Open' if face_to_path > 0 else 'Closed'}"
 
-        self.canvas.create_text(q1_cx, q1_top + int(24 * font_scale), text=path_str, fill=theme.ACCENT_TEXT, font=("Consolas", max(10, int(13 * font_scale)), "bold"))
-        self.canvas.create_line(q1_cx - int(150 * scale), q1_cy, q1_cx + int(150 * scale), q1_cy, fill=theme.TEXT_2, width=1, dash=(4, 4))
+        # Panel annotations follow the mockup: a small quiet caption with the
+        # value beneath it, anchored to the panel gutter -- not a centred
+        # "Label: Value" headline in monospace.
+        cap_f = (theme.ui_font(), max(7, int(8 * font_scale)))
+        val_f = (theme.ui_font(), max(9, int(12 * font_scale)))
+
+        def annot(ax, ay, cap, val, anchor="w", col=None):
+            self.canvas.create_text(ax, ay, text=cap, fill=theme.TEXT_3,
+                                    font=cap_f, anchor=anchor)
+            self.canvas.create_text(ax, ay + int(15 * font_scale), text=val,
+                                    fill=col or theme.TEXT, font=val_f,
+                                    anchor=anchor)
+
+        def panel_cap(px, py, text, tag=None, tag_col=None):
+            self.canvas.create_text(px, py, text=text, fill=theme.TEXT_3,
+                                    font=cap_f, anchor="w")
+            if tag:
+                self.canvas.create_text(px + int(len(text) * 5.4 * font_scale) + 14,
+                                        py, text=tag,
+                                        fill=tag_col or theme.TEXT_3,
+                                        font=cap_f, anchor="w")
+
+        gut_l = offset_x + int(18 * font_scale)          # left gutter
+        gut_r = offset_x + quad_w - int(18 * font_scale)  # right gutter of col 1
+
+        panel_cap(gut_l, q1_top + int(16 * font_scale), "CLUB PATH & FACE")
+        self.canvas.create_text(gut_r, q1_top + int(16 * font_scale),
+                                text="DERIVED", fill=theme.TEXT_3,
+                                font=cap_f, anchor="e")
+
+        path_val = f"{abs(club_path):.1f}° " + (
+            ("in-to-out" if club_path < 0 else "out-to-in") if self.is_left_handed
+            else ("in-to-out" if club_path > 0 else "out-to-in"))
+        annot(gut_l, q1_top + int(56 * font_scale), "CLUB PATH", path_val)
+        self.canvas.create_line(q1_cx - int(150 * scale), q1_cy, q1_cx + int(150 * scale), q1_cy, fill=theme.GUIDE, width=1, dash=(4, 4))
         
         overhead_h = int(140 * scale)
         ov_img = self.get_rotated_overhead_asset(overhead_h, face_to_target, mirror=self.is_left_handed)
@@ -4630,8 +4664,12 @@ class ShanktuaryApp:
         ball_r = int(9 * scale)
         self.canvas.create_oval(q1_cx + ball_offset_x - ball_r, q1_cy - ball_r, q1_cx + ball_offset_x + ball_r, q1_cy + ball_r, fill=theme.TEXT, outline=theme.TEXT_2)
 
-        self.canvas.create_text(q1_cx, q1_bot - int(38 * font_scale), text=face_target_str, fill=theme.TEXT_2, font=("Helvetica", max(9, int(12 * font_scale))))
-        self.canvas.create_text(q1_cx, q1_bot - int(18 * font_scale), text=face_path_str, fill=theme.TEXT_2, font=("Helvetica", max(9, int(12 * font_scale))))
+        annot(gut_l, q1_bot - int(64 * font_scale), "FACE TO PATH",
+              f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}")
+        annot(gut_l, q1_bot - int(26 * font_scale), "FACE TO TARGET",
+              f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}")
+        annot(gut_r, q1_cy + int(20 * font_scale), "SIDESPIN",
+              f"{int(abs(sidespin))} rpm", anchor="e")
 
         # Quadrant 2 (Bottom-Left): Trajectory Arc
         q2_cx, q2_cy = offset_x + (quad_w // 2), mid_y + (quad_h // 2)
@@ -4642,7 +4680,14 @@ class ShanktuaryApp:
         top_elev_str = f"Launch Angle: {vert_launch:.1f}°   |   Apex: {apex_yds:.1f} yds"
         bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
 
-        self.canvas.create_text(q2_cx, q2_top + int(24 * font_scale), text=top_elev_str, fill=theme.ACCENT_TEXT, font=("Consolas", max(10, int(12 * font_scale)), "bold"))
+        panel_cap(gut_l, q2_top + int(16 * font_scale), "LAUNCH & LOFT")
+        annot(gut_l, q2_top + int(56 * font_scale), "LAUNCH ANGLE",
+              f"{vert_launch:.1f}°")
+        _c = self.get_bag_club((self.current_shot or {}).get("club") or self.current_club) or {}
+        _lf = float(_c.get("loft_deg") or 0.0)
+        if _lf > 0:
+            annot(gut_l, q2_top + int(96 * font_scale), "STATIC LOFT",
+                  f"{_lf:.1f}°")
         self.canvas.create_line(q2_cx - int(160 * scale), ground_y, q2_cx + int(160 * scale), ground_y, fill=theme.GUIDE, width=2, dash=(4, 4))
         
         side_h = int(115 * scale)
@@ -4664,7 +4709,14 @@ class ShanktuaryApp:
         ball_r2 = int(7 * scale)
         self.canvas.create_oval(q2_cx - side_offset_x - ball_r2, ground_y - ball_r2, q2_cx - side_offset_x + ball_r2, ground_y + ball_r2, fill=theme.TEXT)
 
-        self.canvas.create_text(q2_cx, q2_bot - int(18 * font_scale), text=bot_elev_str, fill=theme.TEXT_2, font=("Helvetica", max(9, int(12 * font_scale)), "bold"))
+        annot(gut_r, q2_top + int(56 * font_scale), "BACKSPIN",
+              f"{int(backspin)} rpm", anchor="e")
+        annot(gut_r, q2_bot - int(46 * font_scale), "DESCENT",
+              f"{descent:.1f}°", anchor="e")
+        # The Nova measures ball flight only -- say so rather than leave a gap.
+        self.canvas.create_text(gut_l, q2_bot - int(14 * font_scale),
+                                text="Attack angle not measured",
+                                fill=theme.TEXT_3, font=cap_f, anchor="w")
 
         # Quadrant 3 (Top-Right): 3D Spin Axis
         q3_cx, q3_cy = offset_x + (3 * quad_w // 2), top_bar_h + (quad_h // 2)
@@ -4672,15 +4724,22 @@ class ShanktuaryApp:
         q3_bot = mid_y
         
         rank_colors = {"A": theme.ACCENT_TEXT, "B": theme.ACCENT_TEXT, "C": theme.WARN, "D": theme.DANGER}
+        gut_l3 = offset_x + quad_w + int(18 * font_scale)
+        gut_r3 = offset_x + avail_w - int(18 * font_scale)
+        panel_cap(gut_l3, q3_top + int(16 * font_scale), "SPIN")
+        # Shot shape sits above the ball, not in a coloured grade pill.
+        self.canvas.create_text(q3_cx, q3_top + int(30 * font_scale),
+                                text=shot_name, fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), max(10, int(12 * font_scale))),
+                                anchor="center")
         badge_color = rank_colors.get(shot_rank, theme.ACCENT_TEXT)
         
         badge_h = int(24 * font_scale)
         badge_y1 = q3_top + int(12 * font_scale)
         badge_y2 = badge_y1 + badge_h
         badge_w = int(32 * font_scale)
-        self.canvas.create_rectangle(q3_cx - badge_w - int(60 * font_scale), badge_y1, q3_cx - int(60 * font_scale), badge_y2, fill=badge_color, outline="")
-        self.canvas.create_text(q3_cx - (badge_w // 2) - int(60 * font_scale), (badge_y1 + badge_y2) // 2, text=shot_rank, fill=theme.BG, font=("Helvetica", max(10, int(12 * font_scale)), "bold"))
-        self.canvas.create_text(q3_cx - int(50 * font_scale), (badge_y1 + badge_y2) // 2, text=shot_name.upper(), fill=badge_color, font=("Helvetica", max(12, int(14 * font_scale)), "bold"), anchor="w")
+        # (grade pill and duplicated shape label removed -- the shape is drawn
+        # above the ball and the grade is not part of the mockup)
 
         ball_r3 = int(30 * scale)
         self.canvas.create_oval(q3_cx - ball_r3, q3_cy - ball_r3, q3_cx + ball_r3, q3_cy + ball_r3, fill=theme.TEXT, outline=theme.TEXT_2, width=2)
@@ -4694,8 +4753,12 @@ class ShanktuaryApp:
         spin_line1 = f"Spin Axis: {abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}   |   Sidespin: {int(sidespin)} rpm"
         spin_line2 = f"Total Spin: {int(total_spin)} rpm   |   Opt. Potential: {opt_max:.1f} YDS"
 
-        self.canvas.create_text(q3_cx, q3_bot - int(38 * font_scale), text=spin_line1, fill=theme.ACCENT_TEXT, font=("Consolas", max(9, int(12 * font_scale)), "bold"))
-        self.canvas.create_text(q3_cx, q3_bot - int(18 * font_scale), text=spin_line2, fill=theme.TEXT_2, font=("Consolas", max(8, int(10 * font_scale))))
+        annot(gut_l3, q3_cy - int(30 * font_scale), "SPIN AXIS",
+              f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}")
+        annot(gut_r3, q3_bot - int(64 * font_scale), "TOTAL SPIN",
+              f"{int(total_spin)} rpm", anchor="e")
+        annot(gut_r3, q3_bot - int(26 * font_scale), "BACKSPIN",
+              f"{int(backspin)} rpm", anchor="e")
 
         # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
         q4_cx, q4_cy = offset_x + (3 * quad_w // 2), mid_y + (quad_h // 2)
@@ -4962,16 +5025,27 @@ class ShanktuaryApp:
                 and "(DIR ?)" not in strike_rank and strike_rank != "STRIKE UNKNOWN"):
             strike_rank = f"~{strike_rank}"
 
-        # Top Pill Badges (Exact Strike Coordinates)
-        badge_y = q4_top + int(24 * font_scale)
-        badge_w = int(145 * font_scale)
-        badge_h = int(22 * font_scale)
-        # Lateral Pill
-        self.canvas.create_rectangle(q4_cx - badge_w - 6, badge_y - badge_h // 2, q4_cx - 6, badge_y + badge_h // 2, fill=theme.SURFACE, outline=h_badge_col, width=1)
-        self.canvas.create_text(q4_cx - (badge_w // 2) - 6, badge_y, text=h_text, fill=h_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
-        # Vertical Pill
-        self.canvas.create_rectangle(q4_cx + 6, badge_y - badge_h // 2, q4_cx + badge_w + 6, badge_y + badge_h // 2, fill=theme.SURFACE, outline=v_badge_col, width=1)
-        self.canvas.create_text(q4_cx + (badge_w // 2) + 6, badge_y, text=v_text, fill=v_badge_col, font=("Consolas", max(9, int(10 * font_scale)), "bold"))
+        # Caption + ESTIMATE chip, then the two readings as gutter
+        # annotations -- the mockup has no outlined pills here.
+        gut_l4 = offset_x + quad_w + int(18 * font_scale)
+        cap_y4 = q4_top + int(16 * font_scale)
+        panel_cap(gut_l4, cap_y4, "IMPACT LOCATION")
+        chip_x = gut_l4 + int(96 * font_scale)
+        self.canvas.create_rectangle(chip_x, cap_y4 - int(9 * font_scale),
+                                     chip_x + int(64 * font_scale),
+                                     cap_y4 + int(9 * font_scale),
+                                     fill="#2A2118", outline="")
+        self.canvas.create_text(chip_x + int(32 * font_scale), cap_y4,
+                                text="ESTIMATE", fill=theme.WARN,
+                                font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"),
+                                anchor="center")
+
+        annot(gut_l4, q4_top + int(56 * font_scale), "VERTICAL",
+              v_text.split(" ", 1)[-1] if " " in v_text else v_text,
+              col=v_badge_col)
+        annot(gut_l4, q4_top + int(96 * font_scale), "HORIZONTAL",
+              h_text.split(" ", 1)[-1] if " " in h_text else h_text,
+              col=h_badge_col)
 
         # Clubface Graphic
         # Raw iron_face.png: toe on LEFT (x: 36..167 are grooves), hosel on RIGHT (x: 180..290)
@@ -5034,12 +5108,12 @@ class ShanktuaryApp:
             r_dot = int(3.5 * scale)
             self.canvas.create_oval(impact_x - r_zone, impact_y - r_zone, impact_x + r_zone, impact_y + r_zone, fill="", outline=strike_color, width=1, dash=(4, 3))
             self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
-            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text=zone_tag, fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
+            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text=zone_tag, fill=strike_color, font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"))
         else:
             # Off-center but direction unknown: dashed ring around sweet spot
             r_ring = max(int(12 * scale), int(total_offset_mm * scale_px))
             self.canvas.create_oval(center_x - r_ring, center_y - r_ring, center_x + r_ring, center_y + r_ring, fill="", outline=strike_color, width=1, dash=(4, 3))
-            self.canvas.create_text(center_x, center_y - r_ring - int(8 * scale), text="EST RADIUS", fill=strike_color, font=("Consolas", max(7, int(8 * font_scale)), "bold"))
+            self.canvas.create_text(center_x, center_y - r_ring - int(8 * scale), text="EST RADIUS", fill=strike_color, font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"))
 
         # Footer Metrics
         if measured:
@@ -5048,16 +5122,20 @@ class ShanktuaryApp:
             footer_main = f"🎯 STRIKE: {strike_rank}  (~{total_offset_mm:.0f} mm, from smash)"
         else:
             footer_main = f"🎯 STRIKE: {strike_rank}  (direction only — no club data)"
-        self.canvas.create_text(q4_cx, q4_bot - int(28 * font_scale), text=footer_main, fill=strike_color, font=("Helvetica", max(9, int(11 * font_scale)), "bold"))
-        # Strike purity and smash both derive from the (possibly clamped) smash
-        # factor -- suppress rather than print a constant dressed as a metric.
-        if measured or magnitude_known:
-            sub_text = f"Strike Purity: {purity_pct:.0f}%  |  Smash: {float(smash or 0.0):.2f}  |  Dist. Eff: {eff_pct:.0f}%"
-            sub_col = theme.ACCENT_TEXT
+        # Footer sits in the gutter as quiet caption text, matching the
+        # mockup -- no centred bold banner.
+        if measured:
+            foot1 = f"{total_offset_mm:.1f} mm from centre"
+        elif magnitude_known:
+            foot1 = f"~{total_offset_mm:.0f} mm from centre, from smash"
         else:
-            sub_text = f"Strike Purity: --  |  Smash: --  |  Dist. Eff: {eff_pct:.0f}%"
-            sub_col = "#7E8496"
-        self.canvas.create_text(q4_cx, q4_bot - int(10 * font_scale), text=sub_text, fill=sub_col, font=("Consolas", max(8, int(10 * font_scale)), "bold"))
+            foot1 = "Direction only — no club-speed data"
+        self.canvas.create_text(gut_l4, q4_bot - int(30 * font_scale),
+                                text=foot1, fill=theme.TEXT_3, font=cap_f,
+                                anchor="w")
+        self.canvas.create_text(gut_l4, q4_bot - int(14 * font_scale),
+                                text="Nova measures ball flight, not face contact",
+                                fill=theme.TEXT_3, font=cap_f, anchor="w")
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
@@ -5097,8 +5175,8 @@ class ShanktuaryApp:
 
         self.canvas.create_oval(cx - 10, cy - 10, cx + 10, cy + 10, outline=theme.ACCENT_LINE, width=2)
         self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill=theme.DANGER, outline="")
-        self.canvas.create_text(cx, cy + 22, text="🎯 PHYSICAL BALL ORIGIN", fill=theme.DANGER, font=("Helvetica", 8, "bold"))
-        self.canvas.create_text(cx, 55, text=f"DIVOT PROJECTOR  •  {shot_name.upper()}", fill=theme.ACCENT_TEXT, font=("Helvetica", 14, "bold"))
+        self.canvas.create_text(cx, cy + 22, text="🎯 PHYSICAL BALL ORIGIN", fill=theme.DANGER, font=(theme.ui_font(), 8, "bold"))
+        self.canvas.create_text(cx, 55, text=f"DIVOT PROJECTOR  •  {shot_name.upper()}", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 14, "bold"))
 
     def draw_my_bag_viewport(self, avail_w, h, offset_x=0):
         # 1. Background
@@ -5118,8 +5196,8 @@ class ShanktuaryApp:
         display_shots = sess_shots if self.bag_scope == "session" else total_shots
         scope_str = "Current Session" if self.bag_scope == "session" else "All-Time History"
 
-        self.canvas.create_text(offset_x + 18, 66, text="MY BAG MAPPING & GAPPING MATRIX", fill=theme.ACCENT_TEXT, font=("Helvetica", 11, "bold"), anchor="w")
-        self.canvas.create_text(offset_x + 18, 84, text=f"{len(self.bag)} Clubs in Bag  •  {display_shots} Shots ({scope_str})", fill=theme.TEXT_2, font=("Helvetica", 8), anchor="w")
+        self.canvas.create_text(offset_x + 18, 66, text="MY BAG MAPPING & GAPPING MATRIX", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 11, "bold"), anchor="w")
+        self.canvas.create_text(offset_x + 18, 84, text=f"{len(self.bag)} Clubs in Bag  •  {display_shots} Shots ({scope_str})", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
         # Scope Selector Pills (Center-Right)
         pill_w = 120
@@ -5134,18 +5212,18 @@ class ShanktuaryApp:
 
         is_sess = (self.bag_scope == "session")
         self.canvas.create_rectangle(p1_x1, py1, p1_x2, py2, fill=theme.ACCENT_DEEP if is_sess else theme.SURFACE_2, outline=theme.ACCENT_TEXT if is_sess else theme.HAIRLINE)
-        self.canvas.create_text((p1_x1 + p1_x2) // 2, (py1 + py2) // 2, text="Current Session", fill=theme.ACCENT_TEXT if is_sess else theme.TEXT_2, font=("Helvetica", 8, "bold" if is_sess else "normal"), anchor="center")
+        self.canvas.create_text((p1_x1 + p1_x2) // 2, (py1 + py2) // 2, text="Current Session", fill=theme.ACCENT_TEXT if is_sess else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_sess else "normal"), anchor="center")
 
         is_all = (self.bag_scope == "all_time")
         self.canvas.create_rectangle(p2_x1, py1, p2_x2, py2, fill=theme.ACCENT_DEEP if is_all else theme.SURFACE_2, outline=theme.ACCENT_TEXT if is_all else theme.HAIRLINE)
-        self.canvas.create_text((p2_x1 + p2_x2) // 2, (py1 + py2) // 2, text="All-Time History", fill=theme.ACCENT_TEXT if is_all else theme.TEXT_2, font=("Helvetica", 8, "bold" if is_all else "normal"), anchor="center")
+        self.canvas.create_text((p2_x1 + p2_x2) // 2, (py1 + py2) // 2, text="All-Time History", fill=theme.ACCENT_TEXT if is_all else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_all else "normal"), anchor="center")
 
         # Add Club to Bag Button (Far Right)
         add_x1 = offset_x + avail_w - 146
         add_x2 = offset_x + avail_w - 16
         self.bag_add_club_btn_rect = (add_x1, py1, add_x2, py2)
         self.canvas.create_rectangle(add_x1, py1, add_x2, py2, fill=theme.ACCENT_TEXT, outline="")
-        self.canvas.create_text((add_x1 + add_x2) // 2, (py1 + py2) // 2, text="+ Add Club to Bag", fill="#08090C", font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((add_x1 + add_x2) // 2, (py1 + py2) // 2, text="+ Add Club to Bag", fill="#08090C", font=(theme.ui_font(), 8, "bold"), anchor="center")
 
         # 3. Dual-Pane Dimensions
         content_y = 104
@@ -5159,8 +5237,8 @@ class ShanktuaryApp:
 
     def _draw_bag_rack_pane(self, x1, y1, w, h):
         self.canvas.create_rectangle(x1, y1, x1 + w, y1 + h, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(x1 + 16, y1 + 16, text="BAG EQUIPMENT & SHOT AVERAGES", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
-        self.canvas.create_text(x1 + w - 16, y1 + 16, text="Click card to Select  •  Edit Specs for Details", fill=theme.TEXT_3, font=("Helvetica", 8), anchor="e")
+        self.canvas.create_text(x1 + 16, y1 + 16, text="BAG EQUIPMENT & SHOT AVERAGES", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+        self.canvas.create_text(x1 + w - 16, y1 + 16, text="Click card to Select  •  Edit Specs for Details", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="e")
 
         card_area_y1 = y1 + 30
         curr_y = card_area_y1 - self.bag_scroll_offset
@@ -5173,7 +5251,7 @@ class ShanktuaryApp:
             # Category Header Bar
             if y1 + 24 <= curr_y <= y1 + h - 10:
                 self.canvas.create_rectangle(x1 + 8, curr_y, x1 + w - 8, curr_y + 18, fill=theme.SURFACE, outline=theme.HAIRLINE)
-                self.canvas.create_text(x1 + 16, curr_y + 9, text=f"{cat} ({len(cat_clubs)})", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+                self.canvas.create_text(x1 + 16, curr_y + 9, text=f"{cat} ({len(cat_clubs)})", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
             curr_y += 22
 
             for c in cat_clubs:
@@ -5197,25 +5275,25 @@ class ShanktuaryApp:
 
                     # Line 1: Name, Loft, Active badge, Specs
                     name_x = cx1 + 12
-                    self.canvas.create_text(name_x, cy1 + 12, text=c_name, fill=theme.TEXT, font=("Helvetica", 10, "bold"), anchor="w")
+                    self.canvas.create_text(name_x, cy1 + 12, text=c_name, fill=theme.TEXT, font=(theme.ui_font(), 10, "bold"), anchor="w")
                     
                     loft = c.get("loft_deg", 0.0)
                     loft_str = f"{loft:.1f}°" if loft else ""
                     if loft_str:
-                        self.canvas.create_text(name_x + 95, cy1 + 12, text=loft_str, fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+                        self.canvas.create_text(name_x + 95, cy1 + 12, text=loft_str, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
                     specs_parts = [p for p in [c.get("brand", ""), c.get("model", ""), c.get("shaft", "")] if p]
                     specs_str = " • ".join(specs_parts)
                     if len(specs_str) > 26:
                         specs_str = specs_str[:24] + "..."
-                    self.canvas.create_text(name_x + 135, cy1 + 12, text=specs_str, fill=theme.TEXT_2, font=("Helvetica", 8), anchor="w")
+                    self.canvas.create_text(name_x + 135, cy1 + 12, text=specs_str, fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
                     if is_active:
                         badge_x2 = cx2 - 130
                         badge_x1 = badge_x2 - 54
                         # Selected club is a STATE, not a caution -- accent it.
                         self.canvas.create_rectangle(badge_x1, cy1 + 4, badge_x2, cy1 + 19, fill=theme.ACCENT_DEEP, outline="")
-                        self.canvas.create_text((badge_x1 + badge_x2) // 2, cy1 + 11, text="ACTIVE", fill=theme.ACCENT_TEXT, font=("Helvetica", 7, "bold"))
+                        self.canvas.create_text((badge_x1 + badge_x2) // 2, cy1 + 11, text="ACTIVE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
 
                     # Action buttons: Edit Specs, Move Up, Move Down
                     btn_ey1 = cy1 + 6
@@ -5224,19 +5302,19 @@ class ShanktuaryApp:
                     edit_x2 = cx2 - 54
                     self.bag_edit_btn_rects.append((edit_x1, btn_ey1, edit_x2, btn_ey2, c_name))
                     self.canvas.create_rectangle(edit_x1, btn_ey1, edit_x2, btn_ey2, fill=theme.SURFACE_2, outline=theme.HAIRLINE)
-                    self.canvas.create_text((edit_x1 + edit_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="Edit Specs", fill=theme.ACCENT_TEXT, font=("Helvetica", 7, "bold"))
+                    self.canvas.create_text((edit_x1 + edit_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="Edit Specs", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
 
                     up_x1 = cx2 - 48
                     up_x2 = cx2 - 28
                     self.bag_move_up_rects.append((up_x1, btn_ey1, up_x2, btn_ey2, c_name))
                     self.canvas.create_rectangle(up_x1, btn_ey1, up_x2, btn_ey2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-                    self.canvas.create_text((up_x1 + up_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▲", fill=theme.TEXT_2, font=("Helvetica", 8))
+                    self.canvas.create_text((up_x1 + up_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▲", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
 
                     dn_x1 = cx2 - 24
                     dn_x2 = cx2 - 4
                     self.bag_move_down_rects.append((dn_x1, btn_ey1, dn_x2, btn_ey2, c_name))
                     self.canvas.create_rectangle(dn_x1, btn_ey1, dn_x2, btn_ey2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-                    self.canvas.create_text((dn_x1 + dn_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▼", fill=theme.TEXT_2, font=("Helvetica", 8))
+                    self.canvas.create_text((dn_x1 + dn_x2) // 2, (btn_ey1 + btn_ey2) // 2, text="▼", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
 
                     # Line 2 & 3: Performance stats
                     stats = self.get_bag_club_stats(c_name, scope=self.bag_scope)
@@ -5244,22 +5322,22 @@ class ShanktuaryApp:
                         carry_str = f"Carry: {stats['avg_carry']:.1f}y (±{stats['std_carry']:.1f}y)"
                         tot_str = f"Total: {stats['avg_total']:.1f}y"
                         cnt_str = f"{stats['shot_count']} shots"
-                        self.canvas.create_text(name_x, cy1 + 31, text=f"{carry_str}   |   {tot_str}   |   {cnt_str}", fill=theme.ACCENT_TEXT, font=("Consolas", 8, "bold"), anchor="w")
+                        self.canvas.create_text(name_x, cy1 + 31, text=f"{carry_str}   |   {tot_str}   |   {cnt_str}", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
                         sub_stats = f"Ball: {stats['avg_ball_speed']:.1f}mph  •  Smash: {stats['avg_smash']:.2f}  •  Launch: {stats['avg_launch']:.1f}°  •  Spin: {stats['avg_spin']:.0f}rpm"
-                        self.canvas.create_text(name_x, cy1 + 48, text=sub_stats, fill=theme.TEXT_2, font=("Consolas", 8), anchor="w")
+                        self.canvas.create_text(name_x, cy1 + 48, text=sub_stats, fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
                     else:
-                        self.canvas.create_text(name_x, cy1 + 38, text="No shots recorded for this club in selected scope", fill=theme.TEXT_3, font=("Helvetica", 8, "italic"), anchor="w")
+                        self.canvas.create_text(name_x, cy1 + 38, text="No shots recorded for this club in selected scope", fill=theme.TEXT_3, font=(theme.ui_font(), 8, "italic"), anchor="w")
 
                 curr_y += card_h + 5
 
     def _draw_bag_gapping_ladder_pane(self, x1, y1, w, h):
         self.canvas.create_rectangle(x1, y1, x1 + w, y1 + h, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(x1 + 16, y1 + 16, text="DISTANCE GAPPING LADDER", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(x1 + 16, y1 + 16, text="DISTANCE GAPPING LADDER", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
 
         gapping = self.calculate_bag_gapping(scope=self.bag_scope)
         grade_text = f"Consistency: {gapping['consistency_grade']}  •  Mean Gap: {gapping['mean_gap']:.1f} yds"
-        self.canvas.create_text(x1 + w - 16, y1 + 16, text=grade_text, fill=gapping['consistency_color'], font=("Helvetica", 8, "bold"), anchor="e")
+        self.canvas.create_text(x1 + w - 16, y1 + 16, text=grade_text, fill=gapping['consistency_color'], font=(theme.ui_font(), 8, "bold"), anchor="e")
 
         ladder_top = y1 + 44
         ladder_bot = y1 + h - 26
@@ -5271,11 +5349,11 @@ class ShanktuaryApp:
         for yds in grid_steps:
             gy = ladder_bot - int(((yds - min_yds) / (max_yds - min_yds)) * ladder_h)
             self.canvas.create_line(x1 + 65, gy, x1 + w - 20, gy, fill=theme.SURFACE_2, dash=(2, 4))
-            self.canvas.create_text(x1 + 45, gy, text=f"{yds}y", fill=theme.TEXT_3, font=("Consolas", 8), anchor="e")
+            self.canvas.create_text(x1 + 45, gy, text=f"{yds}y", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="e")
 
         clubs_with_shots = gapping["clubs"]
         if not clubs_with_shots:
-            self.canvas.create_text(x1 + w // 2, y1 + h // 2, text="No shot data recorded for current scope.\nHit shots or switch to All-Time History to view your visual gapping ladder.", fill=theme.TEXT_3, font=("Helvetica", 10), justify="center")
+            self.canvas.create_text(x1 + w // 2, y1 + h // 2, text="No shot data recorded for current scope.\nHit shots or switch to All-Time History to view your visual gapping ladder.", fill=theme.TEXT_3, font=(theme.ui_font(), 10), justify="center")
             return
 
         bar_x1 = x1 + 105
@@ -5290,7 +5368,7 @@ class ShanktuaryApp:
             club_y_coords[c["name"]] = cy
 
             # Club Label on left
-            self.canvas.create_text(x1 + 95, cy, text=c["name"], fill=c["color"], font=("Helvetica", 8, "bold"), anchor="e")
+            self.canvas.create_text(x1 + 95, cy, text=c["name"], fill=c["color"], font=(theme.ui_font(), 8, "bold"), anchor="e")
 
             # Min-Max Whisker
             min_c = c.get("min_carry", carry)
@@ -5309,7 +5387,7 @@ class ShanktuaryApp:
             self.canvas.create_oval(cx_pos - 4, cy - 4, cx_pos + 4, cy + 4, fill=c["color"], outline=theme.TEXT, width=1)
 
             # Yardage readout on right
-            self.canvas.create_text(bar_x2 + 10, cy, text=f"{carry:.1f} yds", fill=theme.TEXT, font=("Consolas", 8, "bold"), anchor="w")
+            self.canvas.create_text(bar_x2 + 10, cy, text=f"{carry:.1f} yds", fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         # Plot Step Callout Indicators
         for step in gapping["steps"]:
@@ -5328,7 +5406,7 @@ class ShanktuaryApp:
                 badge_w = 68
                 badge_h = 16
                 self.canvas.create_rectangle(bx + 4, mid_y - badge_h // 2, bx + 4 + badge_w, mid_y + badge_h // 2, fill=theme.BG, outline=step["color"])
-                self.canvas.create_text(bx + 4 + badge_w // 2, mid_y, text=step["status_text"], fill=step["color"], font=("Consolas", 7, "bold"), anchor="center")
+                self.canvas.create_text(bx + 4 + badge_w // 2, mid_y, text=step["status_text"], fill=step["color"], font=(theme.ui_font(), 7, "bold"), anchor="center")
 
     def get_fitting_clubs(self):
         """Returns list of distinct club names present in the active session, or current club + bag."""
@@ -5497,7 +5575,7 @@ class ShanktuaryApp:
             self.fitting_submode_rects.append((sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], sm_key))
             is_active = (self.fitting_submode == sm_key)
             self.canvas.create_rectangle(sm_rect[0], sm_rect[1], sm_rect[2], sm_rect[3], fill=theme.SURFACE_2 if is_active else theme.SURFACE, outline=theme.ACCENT_TEXT if is_active else theme.HAIRLINE)
-            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill=theme.ACCENT_TEXT if is_active else theme.TEXT_2, font=("Helvetica", 8, "bold" if is_active else "normal"))
+            self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill=theme.ACCENT_TEXT if is_active else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_active else "normal"))
             sub_x += sm_w + 6
 
         # Vertical separator between view modes and club chips
@@ -5541,7 +5619,7 @@ class ShanktuaryApp:
             # Color dot
             mid_y_chip = (cy1 + cy2) // 2
             self.canvas.create_oval(cx1 + 8, mid_y_chip - 4, cx1 + 16, mid_y_chip + 4, fill=c_color, outline="")
-            self.canvas.create_text(cx1 + 22, mid_y_chip, text=chip_text, fill=theme.TEXT if is_active else theme.TEXT_2, font=("Helvetica", 8, "bold" if is_active else "normal"), anchor="w")
+            self.canvas.create_text(cx1 + 22, mid_y_chip, text=chip_text, fill=theme.TEXT if is_active else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_active else "normal"), anchor="w")
 
             # Dedicated non-overlapping Baseline pill
             if is_baseline:
@@ -5551,7 +5629,7 @@ class ShanktuaryApp:
                 by2 = cy2 - 3
                 self.fitting_baseline_chip_rects.append((bx1, by1, bx2, by2, c_name))
                 self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.ACCENT_DEEP, outline=theme.ACCENT_TEXT, width=1)
-                self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="BASE", fill=theme.ACCENT_TEXT, font=("Helvetica", 7, "bold"), anchor="center")
+                self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="BASE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"), anchor="center")
 
             chip_x += chip_w + 8
 
@@ -5561,7 +5639,7 @@ class ShanktuaryApp:
         add_x1 = add_x2 - add_w
         self.fitting_add_club_rect = (add_x1, bar_y1 + 7, add_x2, bar_y2 - 7)
         self.canvas.create_rectangle(add_x1, bar_y1 + 7, add_x2, bar_y2 - 7, fill=theme.ACCENT_DEEP, outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text((add_x1 + add_x2) // 2, (bar_y1 + bar_y2) // 2, text="+ New Club", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((add_x1 + add_x2) // 2, (bar_y1 + bar_y2) // 2, text="+ New Club", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="center")
 
         # 3. Dual-Pane Dimensions & Splitter
         content_top = bar_y2 + 8
@@ -5629,7 +5707,7 @@ class ShanktuaryApp:
 
     def _draw_fitting_topdown_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, max_range_yds, stats_by_club, grouped_shots):
         self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="OVERLAID DISPERSION & CONFIDENCE ELLIPSES", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="OVERLAID DISPERSION & CONFIDENCE ELLIPSES", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         plot_w = plot_x2 - plot_x1
         cx = (plot_x1 + plot_x2) // 2
@@ -5642,17 +5720,17 @@ class ShanktuaryApp:
         for lat in [-30, -15, 15, 30]:
             lx = cx + int((lat / max_lat_yds) * (plot_w * 0.45))
             self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill=theme.SURFACE_2, width=1, dash=(2, 4))
-            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Concentric distance arcs
         for yds in [50, 100, 150, 200, 250, 300, 350]:
             frac = yds / max_range_yds
             arc_y = tee_y - int(frac * plot_h)
             self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill=theme.SURFACE_2, width=1, dash=(3, 3))
-            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         if not stats_by_club:
-            self.canvas.create_text(cx, (plot_y1 + plot_y2) // 2, text="No shots recorded yet for fitting clubs", fill=theme.TEXT_3, font=("Helvetica", 9))
+            self.canvas.create_text(cx, (plot_y1 + plot_y2) // 2, text="No shots recorded yet for fitting clubs", fill=theme.TEXT_3, font=(theme.ui_font(), 9))
             return
 
         # Render Multi-Club Overlaid Ellipses
@@ -5676,7 +5754,7 @@ class ShanktuaryApp:
             self.canvas.create_line(cen_x - 6, cen_y, cen_x + 6, cen_y, fill=theme.TEXT, width=2)
             self.canvas.create_line(cen_x, cen_y - 6, cen_x, cen_y + 6, fill=theme.TEXT, width=2)
             # Label badge
-            self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y (±{std_c:.1f}y)", fill=c_color, font=("Helvetica", 7, "bold"))
+            self.canvas.create_text(cen_x, cen_y - ry1 - 8, text=f"{c_name}: {mu_c:.1f}y (±{std_c:.1f}y)", fill=c_color, font=(theme.ui_font(), 7, "bold"))
 
         # Render Dots for each shot
         for c_name, items in grouped_shots.items():
@@ -5699,7 +5777,7 @@ class ShanktuaryApp:
 
     def _draw_fitting_side_chart(self, plot_x1, plot_y1, plot_x2, plot_y2, margin_x, chart_w, max_x_yds, max_h_yds, stats_by_club, grouped_shots):
         self.canvas.create_rectangle(plot_x1, plot_y1, plot_x2, plot_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="TRAJECTORY PROFILES & APEX HEIGHT COMPARISON", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(plot_x1 + 14, plot_y1 + 14, text="TRAJECTORY PROFILES & APEX HEIGHT COMPARISON", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         base_y = plot_y2 - 22
         chart_h = max(30, base_y - plot_y1 - 32)
@@ -5708,19 +5786,19 @@ class ShanktuaryApp:
         for t in [0, 50, 100, 150, 200, 250, 300, 350]:
             tx = margin_x + int((t / max_x_yds) * chart_w)
             self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill=theme.SURFACE_2, width=1, dash=(2, 2))
-            self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Y height grid lines
         for hy in [0, 20, 40, 60]:
             ty = base_y - int((hy / max_h_yds) * chart_h)
             self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill=theme.SURFACE_2, width=1, dash=(2, 2))
-            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=("Consolas", 7))
+            self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
         # Ground baseline
         self.canvas.create_line(margin_x, base_y, margin_x + chart_w, base_y, fill=theme.ACCENT_TEXT, width=1)
 
         if not stats_by_club:
-            self.canvas.create_text(margin_x + chart_w // 2, (plot_y1 + plot_y2) // 2, text="No trajectory data recorded yet", fill=theme.TEXT_3, font=("Helvetica", 9))
+            self.canvas.create_text(margin_x + chart_w // 2, (plot_y1 + plot_y2) // 2, text="No trajectory data recorded yet", fill=theme.TEXT_3, font=(theme.ui_font(), 9))
             return
 
         # Render Overlaid Flight Arcs
@@ -5747,7 +5825,7 @@ class ShanktuaryApp:
             apex_x_px = margin_x + int((avg_c * 0.5 / max_x_yds) * chart_w)
             apex_y_px = base_y - int((avg_apex_y / max_h_yds) * chart_h)
             self.canvas.create_oval(apex_x_px - 3, apex_y_px - 3, apex_x_px + 3, apex_y_px + 3, fill=c_color, outline=theme.TEXT)
-            self.canvas.create_text(apex_x_px, apex_y_px - 8, text=f"{c_name}: {st['avg_apex_ft']:.0f}ft", fill=c_color, font=("Helvetica", 7, "bold"))
+            self.canvas.create_text(apex_x_px, apex_y_px - 8, text=f"{c_name}: {st['avg_apex_ft']:.0f}ft", fill=c_color, font=(theme.ui_font(), 7, "bold"))
 
             # Carry Landing Flag marker
             land_x = margin_x + int((avg_c / max_x_yds) * chart_w)
@@ -5755,18 +5833,18 @@ class ShanktuaryApp:
 
     def _draw_fitting_h2h_matrix(self, gap_x1, top_y, gap_w, bot_y, stats_by_club, session_clubs):
         self.canvas.create_rectangle(gap_x1, top_y, gap_x1 + gap_w, bot_y, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="HEAD-TO-HEAD STAT MATRIX & DELTAS", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="HEAD-TO-HEAD STAT MATRIX & DELTAS", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
 
         baseline_name = self.fitting_baseline_club or (session_clubs[0] if session_clubs else None)
         base_st = stats_by_club.get(baseline_name)
 
         if not stats_by_club or len(stats_by_club) == 0:
-            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 160, text="No competitor clubs recorded.\nHit shots or select clubs from the top bar to compare.", fill=theme.TEXT_3, font=("Helvetica", 10), justify="center")
+            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 160, text="No competitor clubs recorded.\nHit shots or select clubs from the top bar to compare.", fill=theme.TEXT_3, font=(theme.ui_font(), 10), justify="center")
             return
 
         # Baseline indicator strip
         base_text = f"Baseline Club: {baseline_name}" if baseline_name else "Baseline"
-        self.canvas.create_text(gap_x1 + gap_w - 14, top_y + 16, text=base_text, fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="e")
+        self.canvas.create_text(gap_x1 + gap_w - 14, top_y + 16, text=base_text, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="e")
 
         clubs_to_render = [c for c in session_clubs if c in stats_by_club]
         if not clubs_to_render:
@@ -5792,8 +5870,8 @@ class ShanktuaryApp:
             # Top Club Name Banner
             self.canvas.create_rectangle(cx1, cy1, cx2, cy1 + 24, fill=theme.SURFACE_2, outline="")
             self.canvas.create_rectangle(cx1, cy1, cx1 + 5, cy1 + 24, fill=c_color, outline="")
-            self.canvas.create_text(cx1 + 12, cy1 + 12, text=c_name, fill=theme.TEXT, font=("Helvetica", 8, "bold"), anchor="w")
-            self.canvas.create_text(cx2 - 8, cy1 + 12, text=f"{st['count']} shots", fill=theme.TEXT_2, font=("Consolas", 7), anchor="e")
+            self.canvas.create_text(cx1 + 12, cy1 + 12, text=c_name, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
+            self.canvas.create_text(cx2 - 8, cy1 + 12, text=f"{st['count']} shots", fill=theme.TEXT_2, font=(theme.ui_font(), 7), anchor="e")
 
             # Metrics with Deltas vs Baseline
             metrics = [
@@ -5816,10 +5894,10 @@ class ShanktuaryApp:
             row_y = cy1 + 32
             row_h = (card_h - 40) // len(metrics)
             for m_label, m_val, delta, unit, higher_is_better in metrics:
-                self.canvas.create_text(cx1 + 10, row_y + 4, text=m_label, fill=theme.TEXT_3, font=("Helvetica", 7), anchor="w")
+                self.canvas.create_text(cx1 + 10, row_y + 4, text=m_label, fill=theme.TEXT_3, font=(theme.ui_font(), 7), anchor="w")
                 
                 # Primary Val
-                self.canvas.create_text(cx1 + card_w // 2 + 4, row_y + 4, text=m_val, fill=theme.TEXT, font=("Consolas", 7, "bold"), anchor="w")
+                self.canvas.create_text(cx1 + card_w // 2 + 4, row_y + 4, text=m_val, fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
                 # Delta vs baseline (if not baseline itself)
                 if not is_base and base_st:
@@ -5834,7 +5912,7 @@ class ShanktuaryApp:
                     else:
                         d_col = theme.TEXT_3
                         d_str = "0.0"
-                    self.canvas.create_text(cx2 - 8, row_y + 4, text=d_str, fill=d_col, font=("Consolas", 7, "bold"), anchor="e")
+                    self.canvas.create_text(cx2 - 8, row_y + 4, text=d_str, fill=d_col, font=(theme.ui_font(), 7, "bold"), anchor="e")
 
                 row_y += row_h
 
@@ -5842,7 +5920,7 @@ class ShanktuaryApp:
         summary_y1 = bot_y - 72
         summary_y2 = bot_y - 8
         self.canvas.create_rectangle(gap_x1 + 10, summary_y1, gap_x1 + gap_w - 10, summary_y2, fill=theme.BG, outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 14, text="FITTING WINNER & RECOMMENDATION", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 14, text="FITTING WINNER & RECOMMENDATION", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         # Calculate winners
         best_carry_club = max(clubs_to_render, key=lambda c: stats_by_club[c]["avg_carry"])
@@ -5861,8 +5939,8 @@ class ShanktuaryApp:
               if best_smash_club else
               "Efficiency: not comparable — smash estimate saturated")
 
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 34, text=f"• {w1}", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 50, text=f"• {w2}   |   • {w3}", fill=theme.TEXT, font=("Helvetica", 8), anchor="w")
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 34, text=f"• {w1}", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
+        self.canvas.create_text(gap_x1 + 20, summary_y1 + 50, text=f"• {w2}   |   • {w3}", fill=theme.TEXT, font=(theme.ui_font(), 8), anchor="w")
 
 
     def draw_swing_lab_viewport(self, avail_w, h, offset_x=0):
@@ -5902,14 +5980,14 @@ class ShanktuaryApp:
         pill_x1 = bar_x1 + 8
         pill_x2 = pill_x1 + p_pill_w
         self.canvas.create_rectangle(pill_x1, bar_y1 + 8, pill_x2, bar_y2 - 8, fill=theme.SURFACE_2, outline=p_col)
-        self.canvas.create_text((pill_x1 + pill_x2) // 2, (bar_y1 + bar_y2) // 2, text=f"● {phase_str}", fill=p_col, font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_text((pill_x1 + pill_x2) // 2, (bar_y1 + bar_y2) // 2, text=f"● {phase_str}", fill=p_col, font=(theme.ui_font(), 8, "bold"), anchor="center")
 
         # 2. Weight & Force Stats (Left-aligned, dedicated width)
         wt_x1 = pill_x2 + 14
         wt_w = 135
         wt_x2 = wt_x1 + wt_w
-        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 - 6, text="TOTAL WEIGHT", fill=theme.TEXT_3, font=("Helvetica", 7, "bold"), anchor="w")
-        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{total_kg:.1f} kg ({force_bw:.2f} BW)", fill=theme.TEXT, font=("Consolas", 8, "bold"), anchor="w")
+        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 - 6, text="TOTAL WEIGHT", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{total_kg:.1f} kg ({force_bw:.2f} BW)", fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
 
         # 3. L/R Balance Gauge (Strict left-to-right flow, no backwards anchor!)
         bg_x1 = wt_x2 + 14
@@ -5920,18 +5998,18 @@ class ShanktuaryApp:
         b_bar_cy = (bar_y1 + bar_y2) // 2
 
         # A left/right split is a state, not good-vs-bad: neutral both sides.
-        self.canvas.create_text(bg_x1, b_bar_cy, text=f"{int(pct_l)}% L", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(bg_x1, b_bar_cy, text=f"{int(pct_l)}% L", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
         self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, b_bar_x2, b_bar_cy + 4, fill=theme.SURFACE_2, outline="")
         fill_x = b_bar_x1 + int((pct_l / 100.0) * (b_bar_x2 - b_bar_x1))
         self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, fill_x, b_bar_cy + 4, fill=theme.ACCENT, outline="")
         self.canvas.create_line((b_bar_x1 + b_bar_x2) // 2, b_bar_cy - 7, (b_bar_x1 + b_bar_x2) // 2, b_bar_cy + 7, fill=theme.TEXT, width=1)
-        self.canvas.create_text(b_bar_x2 + 6, b_bar_cy, text=f"{int(pct_r)}% R", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(b_bar_x2 + 6, b_bar_cy, text=f"{int(pct_r)}% R", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
         bg_x2 = b_bar_x2 + 44
 
         # 4. Torque
         torq_x1 = bg_x2 + 12
-        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 - 6, text="TORQUE", fill=theme.TEXT_3, font=("Helvetica", 7, "bold"), anchor="w")
-        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{torque_nm:+.1f} N·m", fill=theme.TEXT, font=("Helvetica", 9), anchor="w")
+        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 - 6, text="TORQUE", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{torque_nm:+.1f} N·m", fill=theme.TEXT, font=(theme.ui_font(), 9), anchor="w")
 
         # 5. Right Action Buttons (Right-aligned with 12px fixed gap and generous width)
         btn_w = 96 if avail_w >= 1000 else 88
@@ -5955,15 +6033,15 @@ class ShanktuaryApp:
         demo_txt = "■ Stop Demo" if is_demo_on else "▶ Demo Swing"
         demo_col = theme.ACCENT_TEXT if is_demo_on else theme.TEXT_2
         self.canvas.create_rectangle(demo_x1, btn_y1, demo_x2, btn_y2, fill=demo_bg, outline=demo_border, width=1)
-        self.canvas.create_text((demo_x1 + demo_x2) // 2, (btn_y1 + btn_y2) // 2, text=demo_txt, fill=demo_col, font=("Helvetica", 8, "bold" if is_demo_on else "normal"), anchor="center")
+        self.canvas.create_text((demo_x1 + demo_x2) // 2, (btn_y1 + btn_y2) // 2, text=demo_txt, fill=demo_col, font=(theme.ui_font(), 8, "bold" if is_demo_on else "normal"), anchor="center")
 
         self.swing_lab_hw_rect = (hw_x1, btn_y1, hw_x2, btn_y2)
         self.canvas.create_rectangle(hw_x1, btn_y1, hw_x2, btn_y2, fill=theme.SURFACE, outline=theme.HAIRLINE, width=1)
-        self.canvas.create_text((hw_x1 + hw_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚙ Hardware", fill=theme.TEXT_2, font=("Helvetica", 8), anchor="center")
+        self.canvas.create_text((hw_x1 + hw_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚙ Hardware", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="center")
 
         self.swing_lab_tare_rect = (tare_x1, btn_y1, tare_x2, btn_y2)
         self.canvas.create_rectangle(tare_x1, btn_y1, tare_x2, btn_y2, fill=theme.SURFACE, outline=theme.HAIRLINE, width=1)
-        self.canvas.create_text((tare_x1 + tare_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚖ Tare Zero", fill=theme.TEXT_2, font=("Helvetica", 8), anchor="center")
+        self.canvas.create_text((tare_x1 + tare_x2) // 2, (btn_y1 + btn_y2) // 2, text="⚖ Tare Zero", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="center")
 
         # 3. Main Workspace Split (Left: Heatmap, Right: COP & Curves)
         content_y1 = bar_y2 + 10
@@ -5977,7 +6055,7 @@ class ShanktuaryApp:
 
         # --- LEFT PANE: DUAL-FOOT PRESSURE HEATMAP ---
         self.canvas.create_rectangle(left_x1, content_y1, left_x2, bot_y, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(left_x1 + 14, content_y1 + 16, text="🦶 DUAL-FOOT PRESSURE HEATMAP", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(left_x1 + 14, content_y1 + 16, text="🦶 DUAL-FOOT PRESSURE HEATMAP", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
 
         # Draw Footbeds
         foot_w = (left_w - 50) // 2
@@ -6000,12 +6078,12 @@ class ShanktuaryApp:
 
         # Top Right: COP Stance Box
         self.canvas.create_rectangle(right_x1, cop_y1, right_x2, cop_y2, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(right_x1 + 14, cop_y1 + 16, text="🎯 CENTER OF PRESSURE (COP) TRAIL", fill=theme.ACCENT_TEXT, font=("Helvetica", 9, "bold"), anchor="w")
+        self.canvas.create_text(right_x1 + 14, cop_y1 + 16, text="🎯 CENTER OF PRESSURE (COP) TRAIL", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
         self.draw_cop_trajectory_canvas(right_x1, cop_y1 + 28, right_w, cop_h - 32, latest=latest)
 
         # Bottom Right: Timeline Curves
         self.canvas.create_rectangle(right_x1, curves_y1, right_x2, curves_y2, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(right_x1 + 14, curves_y1 + 14, text="📈 WEIGHT TRANSFER & FORCE CURVES", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_text(right_x1 + 14, curves_y1 + 14, text="📈 WEIGHT TRANSFER & FORCE CURVES", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
         self.draw_force_timeline_canvas(right_x1, curves_y1 + 26, right_w, curves_h - 30)
 
     def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
@@ -6015,7 +6093,7 @@ class ShanktuaryApp:
             foot_label = "TRAIL FOOT (LEFT)" if is_left else "LEAD FOOT (RIGHT)"
         else:
             foot_label = "LEAD FOOT (LEFT)" if is_left else "TRAIL FOOT (RIGHT)"
-        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill=theme.TEXT_2, font=("Helvetica", 8))
+        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill=theme.TEXT_2, font=(theme.ui_font(), 8))
 
         # Foot Outline
         cx = (x1 + x2) // 2
@@ -6076,11 +6154,11 @@ class ShanktuaryApp:
                 glow_col = theme.ACCENT_DEEP
             self.canvas.create_oval(sx - rad, sy - rad, sx + rad, sy + rad, fill="", outline=glow_col, width=2)
             self.canvas.create_oval(sx - rad // 2, sy - rad // 2, sx + rad // 2, sy + rad // 2, fill=glow_col, outline="")
-            self.canvas.create_text(sx, sy + rad + 9, text=f"{kg:.1f}kg", fill=theme.TEXT_2, font=("Helvetica", 7))
+            self.canvas.create_text(sx, sy + rad + 9, text=f"{kg:.1f}kg", fill=theme.TEXT_2, font=(theme.ui_font(), 7))
 
         # Foot Total Badge
         self.canvas.create_rectangle(x1 + 10, y2 - 24, x2 - 10, y2 - 6, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text((x1 + x2) // 2, y2 - 15, text=f"Total: {int(tot_foot)}%", fill=theme.TEXT_2, font=("Helvetica", 8))
+        self.canvas.create_text((x1 + x2) // 2, y2 - 15, text=f"Total: {int(tot_foot)}%", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
 
     def draw_cop_trajectory_canvas(self, x1, y1, w, h, latest=None):
         x2, y2 = x1 + w, y1 + h
@@ -6091,15 +6169,15 @@ class ShanktuaryApp:
         for r_frac, label in [(0.33, "50mm"), (0.66, "100mm"), (1.0, "150mm")]:
             r = int(max_r * r_frac)
             self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill="", outline=theme.HAIRLINE, dash=(2, 4))
-            self.canvas.create_text(cx + r + 4, cy - 6, text=label, fill=theme.TEXT_3, font=("Helvetica", 6), anchor="w")
+            self.canvas.create_text(cx + r + 4, cy - 6, text=label, fill=theme.TEXT_3, font=(theme.ui_font(), 6), anchor="w")
 
         # Crosshairs
         self.canvas.create_line(x1 + 20, cy, x2 - 20, cy, fill=theme.HAIRLINE, width=1)
         self.canvas.create_line(cx, y1 + 10, cx, y2 - 10, fill=theme.HAIRLINE, width=1)
-        self.canvas.create_text(cx - max_r + 10, cy - 8, text="◀ LEAD (L)", fill=theme.TEXT_3, font=("Helvetica", 6))
-        self.canvas.create_text(cx + max_r - 10, cy - 8, text="TRAIL (R) ▶", fill=theme.TEXT_3, font=("Helvetica", 6))
-        self.canvas.create_text(cx + 6, y1 + 14, text="▲ TOES", fill=theme.TEXT_3, font=("Helvetica", 6))
-        self.canvas.create_text(cx + 6, y2 - 14, text="▼ HEELS", fill=theme.TEXT_3, font=("Helvetica", 6))
+        self.canvas.create_text(cx - max_r + 10, cy - 8, text="◀ LEAD (L)", fill=theme.TEXT_3, font=(theme.ui_font(), 6))
+        self.canvas.create_text(cx + max_r - 10, cy - 8, text="TRAIL (R) ▶", fill=theme.TEXT_3, font=(theme.ui_font(), 6))
+        self.canvas.create_text(cx + 6, y1 + 14, text="▲ TOES", fill=theme.TEXT_3, font=(theme.ui_font(), 6))
+        self.canvas.create_text(cx + 6, y2 - 14, text="▼ HEELS", fill=theme.TEXT_3, font=(theme.ui_font(), 6))
 
         # Scale: 150mm maps to max_r
         scale = max_r / 150.0
@@ -6130,7 +6208,7 @@ class ShanktuaryApp:
 
         self.canvas.create_oval(dot_x - 12, dot_y - 12, dot_x + 12, dot_y + 12, fill="", outline=theme.ACCENT_TEXT, width=2)
         self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5, fill=theme.ACCENT_TEXT, outline=theme.TEXT)
-        self.canvas.create_text(dot_x + 14, dot_y, text=f"({cur_cop_x:+.0f}, {cur_cop_y:+.0f})", fill=theme.TEXT, font=("Consolas", 7, "bold"), anchor="w")
+        self.canvas.create_text(dot_x + 14, dot_y, text=f"({cur_cop_x:+.0f}, {cur_cop_y:+.0f})", fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
     def draw_force_timeline_canvas(self, x1, y1, w, h):
         x2, y2 = x1 + w, y1 + h
@@ -6141,7 +6219,7 @@ class ShanktuaryApp:
             trail = self.current_shot["pressure_trace"]
 
         if len(trail) < 2:
-            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Awaiting Swing Data...", fill=theme.TEXT_3, font=("Helvetica", 8))
+            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Awaiting Swing Data...", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
             return
 
         graph_x1 = x1 + 20
@@ -6154,7 +6232,7 @@ class ShanktuaryApp:
         # Center 50% line
         mid_y = graph_y1 + gh // 2
         self.canvas.create_line(graph_x1, mid_y, graph_x2, mid_y, fill=theme.HAIRLINE, dash=(2, 4))
-        self.canvas.create_text(graph_x1 - 4, mid_y, text="50%", fill=theme.TEXT_3, font=("Helvetica", 6), anchor="e")
+        self.canvas.create_text(graph_x1 - 4, mid_y, text="50%", fill=theme.TEXT_3, font=(theme.ui_font(), 6), anchor="e")
 
         samples = trail[-100:]
         n = len(samples)
@@ -6179,11 +6257,11 @@ class ShanktuaryApp:
         leg_x2 = x2 - 20
         # Right Foot % Legend (Magenta)
         self.canvas.create_line(leg_x2 - 82, y1 + 10, leg_x2 - 64, y1 + 10, fill=theme.DANGER, width=2)
-        self.canvas.create_text(leg_x2 - 60, y1 + 10, text="Right Foot %", fill=theme.DANGER, font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(leg_x2 - 60, y1 + 10, text="Right Foot %", fill=theme.DANGER, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
         # Left Foot % Legend (Cyan)
         self.canvas.create_line(leg_x2 - 164, y1 + 10, leg_x2 - 146, y1 + 10, fill=theme.ACCENT_TEXT, width=2)
-        self.canvas.create_text(leg_x2 - 142, y1 + 10, text="Left Foot %", fill=theme.ACCENT_TEXT, font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(leg_x2 - 142, y1 + 10, text="Left Foot %", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
     def draw_balance_hardware_modal(self, w, h):
         # Modal dark backdrop
@@ -6195,12 +6273,12 @@ class ShanktuaryApp:
 
         # Modal Window Container
         self.canvas.create_rectangle(mx1, my1, mx2, my2, fill=theme.SURFACE, outline=theme.ACCENT_TEXT, width=2)
-        self.canvas.create_text(mx1 + 20, my1 + 22, text="⚙️ WII BALANCE BOARD HARDWARE & PAIRING", fill=theme.ACCENT_TEXT, font=("Helvetica", 10, "bold"), anchor="w")
+        self.canvas.create_text(mx1 + 20, my1 + 22, text="⚙️ WII BALANCE BOARD HARDWARE & PAIRING", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10, "bold"), anchor="w")
 
         # Close button [X]
         self.balance_modal_close_rect = (mx2 - 36, my1 + 10, mx2 - 12, my1 + 34)
         self.canvas.create_rectangle(mx2 - 36, my1 + 10, mx2 - 12, my1 + 34, fill="#1E222E", outline="#383E50")
-        self.canvas.create_text(mx2 - 24, my1 + 22, text="✕", fill=theme.TEXT, font=("Helvetica", 9, "bold"))
+        self.canvas.create_text(mx2 - 24, my1 + 22, text="✕", fill=theme.TEXT, font=(theme.ui_font(), 9, "bold"))
 
         pm = obs_server.pressure_manager if hasattr(obs_server, "pressure_manager") else None
         board_mode = pm.board_mode if pm else "single"
@@ -6218,14 +6296,14 @@ class ShanktuaryApp:
         bd1 = theme.ACCENT_TEXT if not is_dual else theme.HAIRLINE
         col1 = theme.ACCENT_TEXT if not is_dual else theme.TEXT_2
         self.canvas.create_rectangle(m1_x1, mode_y1, m1_x2, mode_y2, fill=bg1, outline=bd1, width=2 if not is_dual else 1)
-        self.canvas.create_text((m1_x1 + m1_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶 1 Board (Single Mat)", fill=col1, font=("Helvetica", 8, "bold" if not is_dual else "normal"))
+        self.canvas.create_text((m1_x1 + m1_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶 1 Board (Single Mat)", fill=col1, font=(theme.ui_font(), 8, "bold" if not is_dual else "normal"))
 
         self.balance_modal_mode_2_rect = (m2_x1, mode_y1, m2_x2, mode_y2)
         bg2 = theme.SURFACE_2 if is_dual else theme.SURFACE
         bd2 = theme.ACCENT_TEXT if is_dual else theme.HAIRLINE
         col2 = theme.ACCENT_TEXT if is_dual else theme.TEXT_2
         self.canvas.create_rectangle(m2_x1, mode_y1, m2_x2, mode_y2, fill=bg2, outline=bd2, width=2 if is_dual else 1)
-        self.canvas.create_text((m2_x1 + m2_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶🦶 2 Boards (Dual Plate)", fill=col2, font=("Helvetica", 8, "bold" if is_dual else "normal"))
+        self.canvas.create_text((m2_x1 + m2_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶🦶 2 Boards (Dual Plate)", fill=col2, font=(theme.ui_font(), 8, "bold" if is_dual else "normal"))
 
         # --- SECTION 0B: DUAL-BOARD FOOT ASSIGNMENT WIZARD CARD (When Dual Mode is Active) ---
         next_y = mode_y2 + 8
@@ -6255,8 +6333,8 @@ class ShanktuaryApp:
                 p_text = "Step on boards to assign Left & Right feet:"
                 p_col = "#CBD5E1"
 
-            self.canvas.create_text(mx1 + 32, card_y1 + 14, text=p_text, fill=p_col, font=("Helvetica", 8, "bold"), anchor="w")
-            self.canvas.create_text(mx1 + 32, card_y1 + 32, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill=theme.TEXT_2, font=("Consolas", 8), anchor="w")
+            self.canvas.create_text(mx1 + 32, card_y1 + 14, text=p_text, fill=p_col, font=(theme.ui_font(), 8, "bold"), anchor="w")
+            self.canvas.create_text(mx1 + 32, card_y1 + 32, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
             # Step simulation chips during wizard
             if wiz_phase in ("waiting_left", "waiting_right"):
@@ -6269,11 +6347,11 @@ class ShanktuaryApp:
 
                 self.balance_modal_step_a_rect = (sa_x1, s_y1, sa_x2, s_y2)
                 self.canvas.create_rectangle(sa_x1, s_y1, sa_x2, s_y2, fill=theme.HAIRLINE, outline=theme.ACCENT_TEXT)
-                self.canvas.create_text((sa_x1 + sa_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board A", fill=theme.ACCENT_TEXT, font=("Helvetica", 7, "bold"))
+                self.canvas.create_text((sa_x1 + sa_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board A", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
 
                 self.balance_modal_step_b_rect = (sb_x1, s_y1, sb_x2, s_y2)
                 self.canvas.create_rectangle(sb_x1, s_y1, sb_x2, s_y2, fill=theme.HAIRLINE, outline=theme.DANGER)
-                self.canvas.create_text((sb_x1 + sb_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board B", fill=theme.DANGER, font=("Helvetica", 7, "bold"))
+                self.canvas.create_text((sb_x1 + sb_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board B", fill=theme.DANGER, font=(theme.ui_font(), 7, "bold"))
             else:
                 self.balance_modal_step_a_rect = None
                 self.balance_modal_step_b_rect = None
@@ -6288,7 +6366,7 @@ class ShanktuaryApp:
             btn_lbl = "🎯 Re-Assign" if wiz_phase == "complete" else ("⏳ Detecting..." if wiz_phase in ("waiting_left", "waiting_right") else "🎯 Start Wizard")
             btn_bg = "#0284C7" if wiz_phase != "idle" else theme.HAIRLINE
             self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill=btn_bg, outline="#38BDF8")
-            self.canvas.create_text((b_x1 + b_x2) // 2, (b_y1 + b_y2) // 2, text=btn_lbl, fill=theme.TEXT, font=("Helvetica", 8, "bold"))
+            self.canvas.create_text((b_x1 + b_x2) // 2, (b_y1 + b_y2) // 2, text=btn_lbl, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
 
             next_y = card_y2 + 8
         else:
@@ -6318,14 +6396,14 @@ class ShanktuaryApp:
         pin_card_y1 = next_y
         pin_card_y2 = pin_card_y1 + 130
         self.canvas.create_rectangle(mx1 + 20, pin_card_y1, mx2 - 20, pin_card_y2, fill="#171B2A", outline=theme.HAIRLINE)
-        self.canvas.create_text(mx1 + 32, pin_card_y1 + 14, text="WINDOWS BLUETOOTH PAIRING PIN", fill=theme.TEXT_3, font=("Helvetica", 7, "bold"), anchor="w")
-        self.canvas.create_text(mx1 + 32, pin_card_y1 + 28, text=f"Host Adapter MAC: {mac_disp}", fill=theme.TEXT_2, font=("Consolas", 8), anchor="w")
+        self.canvas.create_text(mx1 + 32, pin_card_y1 + 14, text="WINDOWS BLUETOOTH PAIRING PIN", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        self.canvas.create_text(mx1 + 32, pin_card_y1 + 28, text=f"Host Adapter MAC: {mac_disp}", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
         # Big Glowing PIN Box
         p_box_y1 = pin_card_y1 + 40
         p_box_y2 = p_box_y1 + 44
         self.canvas.create_rectangle(mx1 + 32, p_box_y1, mx2 - 32, p_box_y2, fill="#0B0F17", outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text((mx1 + mx2) // 2, (p_box_y1 + p_box_y2) // 2, text=pin_disp, fill=theme.ACCENT_TEXT, font=("Consolas", 16, "bold"))
+        self.canvas.create_text((mx1 + mx2) // 2, (p_box_y1 + p_box_y2) // 2, text=pin_disp, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 16, "bold"))
 
         # Action Buttons under PIN (Copy PIN + Open BT Settings)
         act_y1 = p_box_y2 + 8
@@ -6338,11 +6416,11 @@ class ShanktuaryApp:
 
         self.balance_modal_copy_pin_rect = (btn_copy_x1, act_y1, btn_copy_x2, act_y2)
         self.canvas.create_rectangle(btn_copy_x1, act_y1, btn_copy_x2, act_y2, fill=theme.SURFACE_2, outline=theme.ACCENT_TEXT)
-        self.canvas.create_text((btn_copy_x1 + btn_copy_x2) // 2, (act_y1 + act_y2) // 2, text="📋 Copy PIN to Clipboard", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((btn_copy_x1 + btn_copy_x2) // 2, (act_y1 + act_y2) // 2, text="📋 Copy PIN to Clipboard", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
 
         self.balance_modal_bt_settings_rect = (btn_open_x1, act_y1, btn_open_x2, act_y2)
         self.canvas.create_rectangle(btn_open_x1, act_y1, btn_open_x2, act_y2, fill="#1E2A3A", outline="#38BDF8")
-        self.canvas.create_text((btn_open_x1 + btn_open_x2) // 2, (act_y1 + act_y2) // 2, text="🌐 Open Bluetooth Settings", fill="#38BDF8", font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((btn_open_x1 + btn_open_x2) // 2, (act_y1 + act_y2) // 2, text="🌐 Open Bluetooth Settings", fill="#38BDF8", font=(theme.ui_font(), 8, "bold"))
 
         # --- SECTION 2: HARDWARE CONTROLS ---
         hw_y1 = pin_card_y2 + 8
@@ -6358,7 +6436,7 @@ class ShanktuaryApp:
         # Button 1: Tare Zero
         self.balance_modal_tare_rect = (b1_x1, hw_y1, b1_x2, hw_y2)
         self.canvas.create_rectangle(b1_x1, hw_y1, b1_x2, hw_y2, fill=theme.HAIRLINE, outline=theme.ACCENT_TEXT)
-        self.canvas.create_text((b1_x1 + b1_x2) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare Resting Zero", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((b1_x1 + b1_x2) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare Resting Zero", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
 
         # Button 2: 50/50 Stance Calibration (5s Lead-in + 4s Sample)
         align_st = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {"active": False, "remaining_sec": 0.0, "in_lead_in": False, "message": "Idle"}
@@ -6382,13 +6460,13 @@ class ShanktuaryApp:
             align_txt = "🎯 50/50 Stance Calibrate"
 
         self.canvas.create_rectangle(b2_x1, hw_y1, b2_x2, hw_y2, fill=align_bg, outline=align_bd, width=2 if is_aligning else 1)
-        self.canvas.create_text((b2_x1 + b2_x2) // 2, (hw_y1 + hw_y2) // 2, text=align_txt, fill=theme.TEXT, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((b2_x1 + b2_x2) // 2, (hw_y1 + hw_y2) // 2, text=align_txt, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
 
         # Button 3: Simulator Toggle
         self.balance_modal_sim_rect = (b3_x1, hw_y1, b3_x2, hw_y2)
         sim_col = theme.ACCENT_TEXT if is_sim else theme.TEXT_3
         self.canvas.create_rectangle(b3_x1, hw_y1, b3_x2, hw_y2, fill=theme.SURFACE, outline=sim_col)
-        self.canvas.create_text((b3_x1 + b3_x2) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator: {'[ON]' if is_sim else '[OFF]'}", fill=theme.TEXT, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((b3_x1 + b3_x2) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator: {'[ON]' if is_sim else '[OFF]'}", fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
 
         # Button 4: Stance WIDTH calibration (shift left, then right).
         # Separate row so the three buttons above keep their width.
@@ -6409,19 +6487,19 @@ class ShanktuaryApp:
             sw_bg, sw_bd = theme.SURFACE, theme.TEXT_3
             sw_txt = "📏 Measure Stance Width (shift L, then R)"
         self.canvas.create_rectangle(b1_x1, sw_y1, b3_x2, sw_y2, fill=sw_bg, outline=sw_bd, width=2 if sw_active else 1)
-        self.canvas.create_text((b1_x1 + b3_x2) // 2, (sw_y1 + sw_y2) // 2, text=sw_txt, fill=theme.TEXT, font=("Helvetica", 8, "bold"))
+        self.canvas.create_text((b1_x1 + b3_x2) // 2, (sw_y1 + sw_y2) // 2, text=sw_txt, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
 
         # --- SECTION 3: STEP-BY-STEP PAIRING INSTRUCTIONS ---
         guide_y1 = sw_y2 + 8
         guide_y2 = my2 - 12
         self.canvas.create_rectangle(mx1 + 20, guide_y1, mx2 - 20, guide_y2, fill="#141824", outline="#1F2536")
-        self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill=theme.TEXT_3, font=("Helvetica", 7, "bold"), anchor="w")
+        self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
         # Alignment feedback banner if present
         msg = align_st.get("message", "")
         if msg and msg != "Idle":
             msg_col = theme.ACCENT_TEXT if msg.startswith("✓") else (theme.WARN if "Sampling" in msg or "Stand" in msg else theme.DANGER)
-            self.canvas.create_text(mx2 - 32, guide_y1 + 12, text=msg, fill=msg_col, font=("Helvetica", 7, "bold"), anchor="e")
+            self.canvas.create_text(mx2 - 32, guide_y1 + 12, text=msg, fill=msg_col, font=(theme.ui_font(), 7, "bold"), anchor="e")
 
         steps = [
             "1. Press red SYNC button on board(s) (4 LEDs blink) → Open BT Settings → Paste PIN.",
@@ -6430,7 +6508,7 @@ class ShanktuaryApp:
             "4. Step off and click 'Tare Resting Zero' → Stand at address and click '50/50 Stance (4s)'."
         ]
         for idx, s in enumerate(steps):
-            self.canvas.create_text(mx1 + 32, guide_y1 + 26 + (idx * 14), text=s, fill="#CBD5E1", font=("Helvetica", 7), anchor="w")
+            self.canvas.create_text(mx1 + 32, guide_y1 + 26 + (idx * 14), text=s, fill="#CBD5E1", font=(theme.ui_font(), 7), anchor="w")
 
 def main():
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
