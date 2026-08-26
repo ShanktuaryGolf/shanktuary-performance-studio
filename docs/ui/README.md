@@ -1,6 +1,6 @@
 # UI redesign — reference mockups
 
-All ten views at 1600×900. These are the implementation target: the layout,
+All ten views plus the Tools menu at 1600×900. These are the implementation target: the layout,
 spacing, and colour decisions here are settled, so building a view means
 reproducing its mockup rather than re-litigating the design.
 
@@ -22,6 +22,7 @@ dependency or a framework change.
 | Fitting | `view_fit.png` | mockup |
 | Swing Lab | `view_lab.png` | mockup |
 | Setup / Hardware | `view_setup.png` | mockup |
+| Tools menu | `view_tools.png` | mockup |
 
 Shipped so far: `theme.py` (design tokens) and `draw_nav_rail()` (the left
 rail, live on all views).
@@ -130,5 +131,14 @@ python3 render_quad.py    /tmp/quad.png         # Quad
 python3 render_views_a.py                       # Range, Disp, Table
 python3 render_views_b.py                       # Nums, Bag, Fit, Lab
 python3 render_setup.py                         # Setup / Hardware
+python3 render_tools.py                         # Tools menu
 SPS_PALETTE=hunter python3 render_quad.py out.png   # palette variants
 ```
+
+**Tools menu** — dropdown from the top bar. Keeps all six actions
+(`open_config`, `copy_obs_url`, `open_range`, `copy_divot_url`, `open_divot`,
+`set_mode_2`). Each row states what it does — "opens /config in your browser"
+vs the literal URL for copy actions — with a matching glyph, so open-vs-copy
+is scannable instead of read word by word. The Nova host line becomes a
+hardware status block with live dots covering both Nova and the balance
+boards, and a route into Setup.
