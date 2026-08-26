@@ -105,7 +105,11 @@ it is a constant at these speeds.
 
 **Swing Lab** — CoP trail with address/transition/impact markers, dual-foot
 heatmap, lead/trail balance bar, and weight-transfer / force curves plotted
-per foot against a shared phase timeline.
+per foot against a shared phase timeline. Keeps the view's three existing
+controls in a top action bar (`swing_lab_demo_rect` / `_hw_rect` /
+`_tare_rect`). Tare belongs here rather than in Setup: you zero your
+standing weight at the mat immediately before hitting, not by navigating to
+a settings screen.
 
 **Setup / Hardware** — board pairing was previously reachable only from Swing
 Lab via a small "⚙ Hardware" button, which is hard to find when the thing you
