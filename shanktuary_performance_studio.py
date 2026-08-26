@@ -3221,6 +3221,19 @@ class ShanktuaryApp:
         elif self.view_mode == 7:
             # Mode 7: Club Fitting & Head-to-Head Comparison
             self.draw_fitting_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 9:
+            # Mode 9: Overview -- the landing view
+            self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
+            if self.current_shot:
+                self.draw_overview_viewport(
+                    avail_w, h, carry_yds, total_yds, ball_speed_mph,
+                    club_speed_mph, smash, vert_launch, total_spin,
+                    peak_height_yds, offline_yds, descent_angle, hang_time,
+                    club_path, face_to_path, spin_axis,
+                    smash_clamped=smash_clamped, offset_x=offset_x,
+                    top_bar_h=top_bar_h)
+            else:
+                self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#1D2621", font=("Helvetica", 26))
         elif self.view_mode == 0:
             # Mode 0: Floor Divot Focus Projector
             self.draw_divot_focus(avail_w, h, club_path, face_to_path, ball_speed_mph, club_speed_mph, carry_yds, shot_name, offset_x=offset_x)
@@ -4029,6 +4042,230 @@ class ShanktuaryApp:
 
             # Bottom Unit Tag
             self.canvas.create_text((x1 + x2) // 2, y2 - int(12 * ui_scale), text=c_unit, fill="#50566A", font=unit_font, anchor="center")
+
+    def draw_overview_viewport(self, avail_w, h, carry, total, ball_speed,
+                               club_speed, smash, launch, spin, apex, offline,
+                               descent, hang_time, club_path, face_to_path,
+                               spin_axis, smash_clamped=False, offset_x=0,
+                               top_bar_h=108):
+        """Landing view: this shot at a glance, plus session context."""
+        pad = 20
+        x0, x1 = offset_x + pad, offset_x + avail_w - pad
+        y = top_bar_h + 16
+
+        shots = self.session_shots
+        n = len(shots)
+
+        # ---- header -------------------------------------------------------
+        idx = (self.selected_shot_index + 1) if self.selected_shot_index is not None else n
+        hid = self.canvas.create_text(x0, y + 14, text=f"Shot {idx}",
+                                      fill=theme.TEXT,
+                                      font=("Helvetica", 19, "bold"), anchor="w")
+        hbb = self.canvas.bbox(hid)
+        self.canvas.create_text((hbb[2] + 10) if hbb else (x0 + 90), y + 18,
+                                text=f"of {n}", fill=theme.TEXT_3,
+                                font=("Helvetica", 10), anchor="w")
+        club = (self.current_shot or {}).get("club", self.current_club)
+        self.canvas.create_text(x1, y + 16, text=club, fill=theme.TEXT_2,
+                                font=("Helvetica", 11), anchor="e")
+        y += 40
+        self.canvas.create_line(x0, y, x1, y, fill=theme.HAIRLINE)
+        y += 20
+
+        # ---- primary metrics ----------------------------------------------
+        prim = [("CARRY", f"{carry:.1f}", "yds", theme.ACCENT_TEXT),
+                ("TOTAL", f"{total:.1f}", "yds", theme.TEXT),
+                ("BALL SPEED", f"{ball_speed:.1f}", "mph", theme.TEXT),
+                ("CLUB SPEED", "--" if smash_clamped else f"{club_speed:.1f}",
+                 "" if smash_clamped else "mph",
+                 theme.MUTED if smash_clamped else theme.TEXT),
+                ("SMASH", "--" if smash_clamped else f"{smash:.2f}", "",
+                 theme.MUTED if smash_clamped else theme.TEXT)]
+        step = (x1 - x0) / len(prim)
+        for i, (lb, v, u, col) in enumerate(prim):
+            cx = x0 + i * step
+            self.canvas.create_text(cx, y, text=lb, fill=theme.TEXT_3,
+                                    font=("Helvetica", 8), anchor="w")
+            vid = self.canvas.create_text(cx, y + 28, text=v, fill=col,
+                                          font=("Helvetica", 30), anchor="w")
+            if u:
+                bb = self.canvas.bbox(vid)
+                if bb:
+                    self.canvas.create_text(bb[2] + 7, y + 38, text=u,
+                                            fill=theme.TEXT_3,
+                                            font=("Helvetica", 10), anchor="w")
+        y += 56
+        self.canvas.create_line(x0, y, x1, y, fill=theme.HAIRLINE)
+        if smash_clamped:
+            self.canvas.create_text(
+                x0, y + 14,
+                text="Club speed and smash unavailable — OpenGolfCoach estimate saturated for this shot",
+                fill=theme.TEXT_3, font=("Helvetica", 9), anchor="w")
+        y += 32
+
+        # ---- three cards ---------------------------------------------------
+        gap = 16
+        card_w = (x1 - x0 - gap * 2) / 3
+        card_h = max(150, min(210, h - y - 190))
+
+        def card(cx0, title, rows, tag=None):
+            cx1 = cx0 + card_w
+            self.canvas.create_rectangle(cx0, y, cx1, y + card_h,
+                                         fill=theme.SURFACE, outline="")
+            self.canvas.create_text(cx0 + 16, y + 16, text=title,
+                                    fill=theme.TEXT_3, font=("Helvetica", 8),
+                                    anchor="w")
+            if tag:
+                self.canvas.create_text(cx1 - 16, y + 16, text=tag,
+                                        fill=theme.TEXT_3,
+                                        font=("Helvetica", 8), anchor="e")
+            rh = (card_h - 46) / max(1, len(rows))
+            for i, (k, v) in enumerate(rows):
+                ry = y + 42 + i * rh
+                self.canvas.create_text(cx0 + 16, ry, text=k, fill=theme.TEXT_2,
+                                        font=("Helvetica", 9), anchor="w")
+                self.canvas.create_text(cx1 - 16, ry, text=v, fill=theme.TEXT,
+                                        font=("Helvetica", 10), anchor="e")
+                if i < len(rows) - 1:
+                    self.canvas.create_line(cx0 + 16, ry + rh / 2, cx1 - 16,
+                                            ry + rh / 2, fill=theme.HAIRLINE)
+            return cx1
+
+        card(x0, "BALL FLIGHT", [
+            ("Launch angle", f"{launch:.1f}°"),
+            ("Apex", f"{apex:.1f} yds"),
+            ("Descent", f"{descent:.1f}°"),
+            ("Hang time", f"{hang_time:.1f} s"),
+            ("Offline", f"{abs(offline):.1f} yds {'L' if offline < 0 else 'R'}"),
+        ])
+        card(x0 + card_w + gap, "CLUB DELIVERY", [
+            ("Club path", f"{abs(club_path):.1f}° {'in-out' if club_path > 0 else 'out-in'}"),
+            ("Face to path", f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}"),
+            ("Spin axis", f"{abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}"),
+            ("Total spin", f"{int(spin)} rpm"),
+        ], tag="DERIVED")
+
+        # strike card
+        sx0 = x0 + (card_w + gap) * 2
+        sx1 = sx0 + card_w
+        self.canvas.create_rectangle(sx0, y, sx1, y + card_h,
+                                     fill=theme.SURFACE, outline="")
+        self.canvas.create_text(sx0 + 16, y + 16, text="STRIKE",
+                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                anchor="w")
+        head, detail, hcol = self.summarize_strike(self.current_shot)
+        if hcol == theme.WARN:
+            self.canvas.create_rectangle(sx0 + 16, y + 32, sx0 + 104, y + 52,
+                                         fill="#2A2118", outline="")
+            self.canvas.create_text(sx0 + 60, y + 42, text="ESTIMATE",
+                                    fill=theme.WARN, font=("Helvetica", 8, "bold"),
+                                    anchor="center")
+        self.canvas.create_text(sx0 + 16, y + 76, text=head, fill=theme.TEXT,
+                                font=("Helvetica", 18), anchor="w")
+        self.canvas.create_text(sx0 + 16, y + 104, text=detail,
+                                fill=theme.TEXT_3, font=("Helvetica", 9),
+                                anchor="w")
+        y += card_h + 24
+
+        # ---- recent shots --------------------------------------------------
+        self.canvas.create_text(x0, y, text="RECENT", fill=theme.TEXT_3,
+                                font=("Helvetica", 8), anchor="w")
+        y += 18
+        bar_max = max(40, min(90, h - y - 40))
+        recent = shots[-8:]
+        if recent:
+            carries = []
+            for s in recent:
+                us = (s.get("open_golf_coach", {}) or {}).get("us_customary_units", {}) or {}
+                carries.append(float(us.get("carry_distance_yards") or 0.0))
+            mx = max(carries) or 1.0
+            # Reserve the right side for the session summary.
+            bars_right = x1 - 300
+            bw = min(80.0, max(30.0, (bars_right - x0) / max(1, len(recent)) - 14))
+            base_y = y + bar_max
+            for i, (s, cv) in enumerate(zip(recent, carries)):
+                bx = x0 + i * (bw + 14)
+                bh = max(6, int(bar_max * (cv / mx)))
+                sel = (s is self.current_shot)
+                self.canvas.create_rectangle(bx, base_y - bh, bx + bw, base_y,
+                                             fill=theme.ACCENT if sel else theme.SURFACE_2,
+                                             outline="")
+                self.canvas.create_text(bx + bw / 2, base_y - bh - 12,
+                                        text=f"{cv:.0f}",
+                                        fill=theme.TEXT if sel else theme.TEXT_3,
+                                        font=("Helvetica", 9), anchor="center")
+                self.canvas.create_text(bx + bw / 2, base_y + 12,
+                                        text=s.get("club", ""),
+                                        fill=theme.TEXT_3, font=("Helvetica", 8),
+                                        anchor="center")
+            self.canvas.create_line(x0, base_y, x0 + len(recent) * (bw + 14) - 14,
+                                    base_y, fill=theme.HAIRLINE)
+
+            # session summary, right side
+            avgs = self.calculate_session_averages()
+            if avgs:
+                sm = [("AVG CARRY", f"{avgs.get('carry', 0.0):.1f}", "yds"),
+                      ("BEST", f"{max(carries):.1f}", "yds"),
+                      ("SHOTS", str(n), "")]
+                sm_x = x1 - 280
+                self.canvas.create_rectangle(sm_x, y - 6, x1, max(base_y + 26, y + 92),
+                                             fill=theme.SURFACE, outline="")
+                self.canvas.create_text(sm_x + 18, y + 10, text="SESSION",
+                                        fill=theme.TEXT_3,
+                                        font=("Helvetica", 8), anchor="w")
+                inner = (x1 - sm_x - 36) / len(sm)
+                for i, (lb, v, u) in enumerate(sm):
+                    cxp = sm_x + 18 + i * inner
+                    self.canvas.create_text(cxp, y + 36, text=lb,
+                                            fill=theme.TEXT_3,
+                                            font=("Helvetica", 8), anchor="w")
+                    self.canvas.create_text(cxp, y + 58, text=v,
+                                            fill=theme.TEXT,
+                                            font=("Helvetica", 18), anchor="w")
+                    if u:
+                        self.canvas.create_text(cxp, y + 76, text=u,
+                                                fill=theme.TEXT_3,
+                                                font=("Helvetica", 8),
+                                                anchor="w")
+
+    def summarize_strike(self, shot):
+        """Plain-language strike direction for the current shot.
+
+        Reuses the same launch-deviation signal the quad studio plots, but
+        returns text rather than drawing, so Overview can show a verdict
+        without duplicating the estimator.
+
+        Returns (headline, detail, colour).
+        """
+        if not shot:
+            return ("No shot", "", theme.TEXT_3)
+
+        club = shot.get("club") or self.current_club
+        ogc = shot.get("open_golf_coach", {}) or {}
+        vla = float(shot.get("vertical_launch_angle_degrees") or 0.0)
+
+        c = self.get_bag_club(club) or {}
+        loft = float(c.get("loft_deg") or 0.0)
+        if loft > 0:
+            base_launch = 2.0 if "Putter" in club else loft * 0.68
+        else:
+            base_launch = 21.0
+
+        clamped = self.compute_smash_confidence(
+            shot.get("ball_speed_meters_per_second"),
+            shot.get("vertical_launch_angle_degrees"),
+            shot.get("total_spin_rpm"),
+        )["clamped"]
+
+        dev = vla - base_launch
+        if abs(dev) < 1.0:
+            return ("Centre strike", "launch matches this club's loft",
+                    theme.ACCENT_TEXT)
+
+        side = "High on face" if dev > 0 else "Low on face"
+        detail = ("direction only — no club-speed data" if clamped
+                  else f"{abs(dev):.1f}° from expected launch")
+        return (side, detail, theme.WARN)
 
     def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108):
         if isinstance(shot_rank, dict):
