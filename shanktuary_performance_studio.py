@@ -2050,6 +2050,10 @@ class ShanktuaryApp:
                         self.launch_3d_range()
                     elif action == "set_mode_2" or action == "set_mode_0":
                         self.set_mode(0)
+                    elif action == "open_setup":
+                        # Setup lives in the balance-hardware modal; the rail's
+                        # Setup slot and this action both route here.
+                        self.show_balance_hardware_modal = True
                     elif action == "clear_session":
                         self.clear_session()
                     break
@@ -2510,8 +2514,8 @@ class ShanktuaryApp:
         x2, y2 = x1 + box_w, y1 + box_h
 
         self.canvas.create_rectangle(x1 + 3, y1 + 3, x2 + 3, y2 + 3, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
-        
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+
         self.session_menu_items.clear()
         for idx, sess in enumerate(self.sessions):
             iy1 = y1 + 5 + (idx * item_h)
@@ -2519,27 +2523,29 @@ class ShanktuaryApp:
             self.session_menu_items.append((x1 + 4, iy1, x2 - 4, iy2, idx))
 
             is_sel = (idx == self.active_session_index)
-            bg = "#0E2A38" if is_sel else ("#1C1F2B" if idx % 2 == 0 else "#161822")
+            bg = theme.SURFACE_2 if is_sel else theme.SURFACE
             s_name = sess.get("name", f"Session {idx+1}")
             shot_cnt = len(sess.get("shots", []))
 
-            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
-            self.canvas.create_text(x1 + 10, (iy1 + iy2) // 2, text=f"📂 {s_name}", fill="#00E5FF" if is_sel else "#D0D5DD", font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
-            self.canvas.create_text(x2 - 10, (iy1 + iy2) // 2, text=f"{shot_cnt}s", fill="#70788C", font=("Consolas", 8), anchor="e")
+            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="")
+            if is_sel:
+                self.canvas.create_rectangle(x1 + 4, iy1, x1 + 7, iy2, fill=theme.ACCENT_LINE, outline="")
+            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=s_name, fill=theme.TEXT if is_sel else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
+            self.canvas.create_text(x2 - 12, (iy1 + iy2) // 2, text=f"{shot_cnt}", fill=theme.TEXT_3, font=("Helvetica", 9), anchor="e")
 
         # ✏️ Rename Active Session item
         ren_iy1 = y1 + 5 + (len(self.sessions) * item_h)
         ren_iy2 = ren_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, ren_iy1, x2 - 4, ren_iy2, -2))
-        self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill="#1C2130", outline="#2E374D")
-        self.canvas.create_text(x1 + 10, (ren_iy1 + ren_iy2) // 2, text="✏️  Rename Active Session", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text(x1 + 14, (ren_iy1 + ren_iy2) // 2, text="Rename session", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="w")
 
         # + Add New Session item
         add_iy1 = y1 + 5 + ((len(self.sessions) + 1) * item_h)
         add_iy2 = add_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, add_iy1, x2 - 4, add_iy2, -1))
-        self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2, fill="#0D2A1C", outline="#00FF66")
-        self.canvas.create_text(x1 + 10, (add_iy1 + add_iy2) // 2, text="＋  Create New Session", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2, fill=theme.ACCENT, outline="")
+        self.canvas.create_text(x1 + 14, (add_iy1 + add_iy2) // 2, text="＋  New session", fill="#EAF5EE", font=("Helvetica", 9, "bold"), anchor="w")
 
     def draw_filter_dropdown(self, w, h):
         box_w = 180
@@ -2550,7 +2556,7 @@ class ShanktuaryApp:
         x2, y2 = x1 + box_w, y1 + box_h
 
         self.canvas.create_rectangle(x1 + 3, y1 + 3, x2 + 3, y2 + 3, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
 
         self.filter_menu_items.clear()
         for idx, club_opt in enumerate(options[:15]):
@@ -2559,11 +2565,13 @@ class ShanktuaryApp:
             self.filter_menu_items.append((x1 + 4, iy1, x2 - 4, iy2, club_opt))
 
             is_sel = (club_opt == self.club_filter)
-            bg = "#0E2A38" if is_sel else ("#1C1F2B" if idx % 2 == 0 else "#161822")
-            label = "All Clubs (No Filter)" if club_opt == "ALL" else f"🏌️ {club_opt}"
+            bg = theme.SURFACE_2 if is_sel else theme.SURFACE
+            label = "All clubs" if club_opt == "ALL" else club_opt
 
-            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
-            self.canvas.create_text(x1 + 10, (iy1 + iy2) // 2, text=label, fill="#00E5FF" if is_sel else "#D0D5DD", font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+            self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="")
+            if is_sel:
+                self.canvas.create_rectangle(x1 + 4, iy1, x1 + 7, iy2, fill=theme.ACCENT_LINE, outline="")
+            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=label, fill=theme.TEXT if is_sel else theme.TEXT_2, font=("Helvetica", 9), anchor="w")
 
     def draw_top_header(self, w, h, offset_x=0):
         header_h = 52
@@ -2940,8 +2948,8 @@ class ShanktuaryApp:
         y2 = y1 + box_h
 
         self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161822", outline="#00E5FF", width=2)
-        self.canvas.create_text(x1 + 14, y1 + 12, text="SELECT ACTIVE CLUB", fill="#7E8496", font=("Helvetica", 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self.canvas.create_text(x1 + 14, y1 + 12, text="ACTIVE CLUB", fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
 
         self.club_menu_items.clear()
         for idx, club_name in enumerate(self.clubs):
@@ -2950,87 +2958,119 @@ class ShanktuaryApp:
             self.club_menu_items.append((x1 + 6, iy1, x2 - 6, iy2, club_name))
 
             is_sel = (club_name == self.current_club)
-            bg = "#0E2A38" if is_sel else ("#1D202B" if idx % 2 == 0 else "#161822")
-            txt_col = "#00E5FF" if is_sel else "#D0D5DD"
-            
-            self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="#00E5FF" if is_sel else "")
-            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=f"•  {club_name}", fill=txt_col, font=("Helvetica", 8, "bold" if is_sel else "normal"), anchor="w")
+            bg = theme.SURFACE_2 if is_sel else theme.SURFACE
+            txt_col = theme.TEXT if is_sel else theme.TEXT_2
+
+            self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="")
+            if is_sel:
+                self.canvas.create_rectangle(x1 + 6, iy1, x1 + 9, iy2, fill=theme.ACCENT_LINE, outline="")
+            self.canvas.create_text(x1 + 16, (iy1 + iy2) // 2, text=club_name, fill=txt_col, font=("Helvetica", 9), anchor="w")
 
         # Divider & Add Custom Club Action
         div_y = y1 + 22 + (total_items * item_h) + 2
-        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill="#282E40", width=1)
+        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill=theme.HAIRLINE, width=1)
 
         btn_y1 = div_y + 4
         btn_y2 = btn_y1 + 22
         self.club_menu_items.append((x1 + 6, btn_y1, x2 - 6, btn_y2, "__add_custom__"))
-        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill="#142C24", outline="#00FF66", width=1)
-        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋ Add Custom Club...", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="center")
+        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋  Add custom club", fill=theme.TEXT_2, font=("Helvetica", 9), anchor="center")
 
     def draw_tools_flyout_menu(self, w, h):
-        box_w = 320
+        """Tools flyout. Every row states what it does -- navigation says
+        where it opens, copy actions show the literal URL -- so open-vs-copy
+        is scannable rather than read word by word."""
+        box_w = 372
         x2 = self.tools_btn_rect[2] if self.tools_btn_rect else w - 16
         x1 = x2 - box_w
         y1 = 48
-        y2 = y1 + 395
+
+        port = obs_server.OBS_PORT
+        sections = [
+            ("BROADCAST & OVERLAYS", [
+                ("open_config", "OBS Overlay Config", "opens /config in your browser", True),
+                ("copy_obs_url", "Copy Overlay URL", f"http://localhost:{port}", False),
+                ("open_range", "Open 3D Range", "opens /range in your browser", False),
+            ]),
+            ("FLOOR PROJECTION", [
+                ("copy_divot_url", "Copy Virtual Divot URL", f"http://localhost:{port}/divot", False),
+                ("open_divot", "Open Virtual Divot", "opens /divot in your browser", False),
+                ("set_mode_2", "Switch to Divot Mode", "fullscreen floor projector", False),
+            ]),
+        ]
+
+        item_h, sec_h, div_h = 46, 22, 20
+        n_items = sum(len(items) for _, items in sections)
+        box_h = (14 + len(sections) * sec_h + n_items * item_h
+                 + (len(sections) - 1) * div_h + 20 + 2 * 24 + 46 + 16)
+        y2 = y1 + box_h
 
         self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill="#161922", outline="#00E5FF", width=2)
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
 
         self.tools_menu_items.clear()
-        curr_y = y1 + 14
+        curr_y = y1 + 16
 
-        self.canvas.create_text(x1 + 14, curr_y, text="⚙️ STUDIO TOOLS & STREAMING", fill="#00E5FF", font=("Helvetica", 10, "bold"), anchor="w")
-        curr_y += 24
+        for s_idx, (title, items) in enumerate(sections):
+            if s_idx > 0:
+                self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
+                curr_y += div_h
+            self.canvas.create_text(x1 + 20, curr_y, text=title, fill=theme.TEXT_3,
+                                    font=("Helvetica", 8), anchor="w")
+            curr_y += sec_h
 
-        # Section 1: Broadcast & Overlays
-        self.canvas.create_text(x1 + 14, curr_y, text="🎥 BROADCAST & OVERLAYS", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
-        curr_y += 14
+            for action, label, sub, primary in items:
+                r = (x1 + 12, curr_y, x2 - 12, curr_y + item_h - 4)
+                self.tools_menu_items.append((r[0], r[1], r[2], r[3], action))
+                if primary:
+                    self.canvas.create_rectangle(r[0], r[1], r[2], r[3],
+                                                 fill=theme.SURFACE_2, outline="")
+                self.canvas.create_text(x1 + 26, r[1] + 13, text=label,
+                                        fill=theme.TEXT if primary else theme.TEXT_2,
+                                        font=("Helvetica", 10), anchor="w")
+                self.canvas.create_text(x1 + 26, r[1] + 30, text=sub,
+                                        fill=theme.TEXT_3, font=("Helvetica", 8), anchor="w")
+                curr_y += item_h
 
-        btn1_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], "open_config"))
-        self.canvas.create_rectangle(btn1_rect[0], btn1_rect[1], btn1_rect[2], btn1_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn1_rect[1] + btn1_rect[3]) // 2, text="🎛️ OBS Overlay Config (/config)", fill="#FFFFFF", font=("Helvetica", 8, "bold"), anchor="w")
-        curr_y += 32
+        # Hardware status -- Nova and the balance boards answer the same
+        # question ("is my hardware talking to me"), so they sit together.
+        curr_y += 4
+        self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
+        curr_y += 18
+        self.canvas.create_text(x1 + 20, curr_y, text="HARDWARE", fill=theme.TEXT_3,
+                                font=("Helvetica", 8), anchor="w")
+        curr_y += 20
 
-        btn2_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], "copy_obs_url"))
-        self.canvas.create_rectangle(btn2_rect[0], btn2_rect[1], btn2_rect[2], btn2_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn2_rect[1] + btn2_rect[3]) // 2, text="📋 Copy Full Overlay URL (OBS)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
-        curr_y += 32
+        nova_up = nova_status["connected"]
+        pm = getattr(obs_server, "pressure_manager", None)
+        try:
+            b_open = bool(pm and pm.backend and pm.backend.is_open)
+            b_dual = bool(pm and getattr(pm, "board_mode", "single") == "dual")
+        except Exception:
+            b_open, b_dual = False, False
 
-        btn3_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], "open_range"))
-        self.canvas.create_rectangle(btn3_rect[0], btn3_rect[1], btn3_rect[2], btn3_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn3_rect[1] + btn3_rect[3]) // 2, text="⛳ Open 3D Range Source (/range)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
-        curr_y += 36
+        rows = [
+            ("Nova", nova_status["host"] if nova_up else "searching...", nova_up),
+            ("Balance boards",
+             ("2 paired · dual plate" if b_dual else "1 paired") if b_open else "not connected",
+             b_open),
+        ]
+        for label, value, ok in rows:
+            self.canvas.create_oval(x1 + 22, curr_y + 5, x1 + 30, curr_y + 13,
+                                    fill=theme.ACCENT_LINE if ok else theme.TEXT_3, outline="")
+            self.canvas.create_text(x1 + 40, curr_y + 9, text=label, fill=theme.TEXT_2,
+                                    font=("Helvetica", 9), anchor="w")
+            self.canvas.create_text(x2 - 20, curr_y + 9, text=str(value), fill=theme.TEXT_3,
+                                    font=("Helvetica", 8), anchor="e")
+            curr_y += 24
 
-        # Section 2: Floor Projection & Virtual Divot
-        self.canvas.create_text(x1 + 14, curr_y, text="🎯 FLOOR PROJECTION & VIRTUAL DIVOT", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
-        curr_y += 14
+        curr_y += 6
+        sb = (x1 + 12, curr_y, x2 - 12, curr_y + 38)
+        self.tools_menu_items.append((sb[0], sb[1], sb[2], sb[3], "open_setup"))
+        self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((sb[0] + sb[2]) // 2, (sb[1] + sb[3]) // 2, text="Open Setup",
+                                fill=theme.ACCENT_TEXT, font=("Helvetica", 10), anchor="center")
 
-        btn4_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], "copy_divot_url"))
-        self.canvas.create_rectangle(btn4_rect[0], btn4_rect[1], btn4_rect[2], btn4_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn4_rect[1] + btn4_rect[3]) // 2, text="📋 Copy Virtual Divot URL (/divot)", fill="#00E5FF", font=("Helvetica", 8, "bold"), anchor="w")
-        curr_y += 32
-
-        btn5_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], "open_divot"))
-        self.canvas.create_rectangle(btn5_rect[0], btn5_rect[1], btn5_rect[2], btn5_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn5_rect[1] + btn5_rect[3]) // 2, text="🎯 Open Virtual Divot (/divot)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
-        curr_y += 32
-
-        btn6_rect = (x1 + 10, curr_y, x2 - 10, curr_y + 26)
-        self.tools_menu_items.append((btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], "set_mode_2"))
-        self.canvas.create_rectangle(btn6_rect[0], btn6_rect[1], btn6_rect[2], btn6_rect[3], fill="#1F2432", outline="#2E374D")
-        self.canvas.create_text(x1 + 18, (btn6_rect[1] + btn6_rect[3]) // 2, text="🎚️ Switch App to Divot Mode (2)", fill="#D0D5DD", font=("Helvetica", 8), anchor="w")
-        curr_y += 36
-
-        # Section 3: Hardware
-        self.canvas.create_text(x1 + 14, curr_y, text="📡 NOVA & HARDWARE", fill="#00FF66", font=("Helvetica", 8, "bold"), anchor="w")
-        curr_y += 16
-        nova_host_line = f"Host: {nova_status['host']} (connected)" if nova_status["connected"] else "Host: — (searching...)"
-        self.canvas.create_text(x1 + 18, curr_y, text=nova_host_line, fill="#8E94A5", font=("Consolas", 8), anchor="w")
 
     def draw_screen(self):
         self.canvas.delete("all")
