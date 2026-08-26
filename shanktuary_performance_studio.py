@@ -4131,9 +4131,15 @@ class ShanktuaryApp:
         # ---- three cards ---------------------------------------------------
         gap = 14
         card_w = (x1 - x0 - gap * 2) / 3
-        band_h = 150                      # reserved for the bottom band
-        recent_h = 128
-        card_h = max(120, h - y - band_h - recent_h - 40)
+
+        # Split the remaining height proportionally instead of giving the
+        # cards everything and leaving the band the remainder -- that made
+        # the band the only section that could be clipped, so growing the
+        # window fed the cards while dispersion stayed cut off.
+        avail_v = max(320, h - y - 56)          # 56 = inter-section gaps
+        card_h = max(150, avail_v * 0.46)
+        recent_h = max(112, avail_v * 0.24)
+        band_h = max(132, avail_v * 0.30)
 
         def card(cx0, title, rows, tag=None):
             cx1 = cx0 + card_w
@@ -4195,7 +4201,11 @@ class ShanktuaryApp:
         self.canvas.create_text(sx0 + 16, y + card_h - 26, text=detail,
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
                                 anchor="w")
-        self._draw_overview_face(sx1 - 118, y + card_h / 2, 92)
+        # Face scales with the card -- it was pinned at 92px, so a taller
+        # window grew the card around a stamp-sized club.
+        face_h = max(110, min(card_h - 96, card_w * 0.62))
+        self._draw_overview_face(sx1 - face_h * 0.62 - 22,
+                                 y + card_h / 2 + 12, face_h)
         y += card_h + 20
 
         # ---- recent strip + session summary --------------------------------
@@ -4215,28 +4225,38 @@ class ShanktuaryApp:
         if recent:
             mx = max(carries) or 1.0
             bw = (bars_w - 4 * 10) / len(recent)
-            base_y = y + 88
+            base_y = y + recent_h - 34
+            bar_span = recent_h - 66        # room for value above, label below
             for i, (s, cv) in enumerate(zip(recent, carries)):
                 bx = x0 + i * (bw + 10)
                 # Bars share one baseline and scale to the session max, so
                 # height is comparable across the strip.
-                bh = max(10, int(60 * (cv / mx)))
+                bh = max(10, int(bar_span * (cv / mx)))
                 sel = (s is self.current_shot)
                 self.canvas.create_rectangle(bx, base_y - bh, bx + bw, base_y,
                                              fill=theme.ACCENT if sel else theme.SURFACE_2,
                                              outline="")
-                self.canvas.create_text(bx + bw / 2, base_y - bh - 10,
-                                        text=f"{cv:.0f}",
-                                        fill=theme.TEXT if sel else theme.TEXT_3,
-                                        font=("Helvetica", 9), anchor="center")
+                # Tall bars have no room for a label above them, so the value
+                # moves inside the bar rather than off the top of the strip.
+                lab_y = base_y - bh - 10
+                if lab_y < y + 6:
+                    # No room above: drop the value inside the bar. Keep it off
+                    # pure white so it reads against the accent fill.
+                    lab_y = base_y - bh + 14
+                    lab_col = theme.BG if sel else theme.TEXT_2
+                else:
+                    lab_col = theme.TEXT if sel else theme.TEXT_3
+                self.canvas.create_text(bx + bw / 2, lab_y, text=f"{cv:.0f}",
+                                        fill=lab_col, font=("Helvetica", 9),
+                                        anchor="center")
                 lbl = f"#{n - len(recent) + i + 1}"
-                self.canvas.create_text(bx + bw / 2, base_y + 11, text=lbl,
+                self.canvas.create_text(bx + bw / 2, base_y + 13, text=lbl,
                                         fill=theme.TEXT if sel else theme.TEXT_3,
                                         font=("Helvetica", 8), anchor="center")
 
         # session summary card sits to the right of the bars
         sm_x = x0 + bars_w + 24
-        self.canvas.create_rectangle(sm_x, y - 4, x1, y + 100,
+        self.canvas.create_rectangle(sm_x, y - 4, x1, y + recent_h - 14,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(sm_x + 18, y + 12, text="SESSION",
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
@@ -4258,10 +4278,10 @@ class ShanktuaryApp:
                 self.canvas.create_text(bb2[2] + 5, y + 66, text=u,
                                         fill=theme.TEXT_3,
                                         font=("Helvetica", 8), anchor="w")
-        y += 116
+        y += recent_h + 2
 
         # ---- bottom band: dispersion + tendencies --------------------------
-        bb_h = max(96, h - y - 16)
+        bb_h = max(120, h - y - 14)
         dw = (x1 - x0) * 0.30
         self._draw_overview_dispersion(x0, y, dw, bb_h)
         self._draw_overview_tendencies(x0 + dw + 16, y, x1 - (x0 + dw + 16),
@@ -4347,8 +4367,10 @@ class ShanktuaryApp:
         if not pts:
             return
 
+        # Keep the axis labels INSIDE the panel: py2 must leave room for the
+        # L / R row beneath it, or the scatter runs off the bottom edge.
         px1, py1 = x + 20, y + 34
-        px2, py2 = x + w - 20, y + hh - 24
+        px2, py2 = x + w - 20, y + hh - 26
         cx = (px1 + px2) / 2
         max_off = max(6.0, max(abs(p[0]) for p in pts) * 1.25)
         cars = [p[1] for p in pts]
@@ -4358,9 +4380,9 @@ class ShanktuaryApp:
         # centre line and L / R markers
         for dash_y in range(int(py1), int(py2), 6):
             self.canvas.create_line(cx, dash_y, cx, dash_y + 3, fill=theme.GUIDE)
-        self.canvas.create_text(cx - w * 0.22, py2 + 10, text="L",
+        self.canvas.create_text(cx - w * 0.22, py2 + 13, text="L",
                                 fill=theme.TEXT_3, font=("Helvetica", 8))
-        self.canvas.create_text(cx + w * 0.22, py2 + 10, text="R",
+        self.canvas.create_text(cx + w * 0.22, py2 + 13, text="R",
                                 fill=theme.TEXT_3, font=("Helvetica", 8))
 
         for off, car, sel in pts:
