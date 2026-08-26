@@ -6598,7 +6598,23 @@ def main():
     obs_server.launch_obs_server_thread()
 
     root = tk.Tk()
-    root.geometry("1150x780")
+    # Default to 1080p. Clamp to the display so the window can never open with
+    # its lower-right corner (footer, launch button, tendencies) off the
+    # desktop, but allow an exact match: on a 1920x1080 screen the intent is
+    # a full 1920x1080 window, positioned at the origin, not a shrunken one.
+    DEFAULT_W, DEFAULT_H = 1920, 1080
+    scr_w = root.winfo_screenwidth()
+    scr_h = root.winfo_screenheight()
+    if scr_w >= DEFAULT_W and scr_h >= DEFAULT_H:
+        win_w, win_h = DEFAULT_W, DEFAULT_H
+    else:
+        # Smaller display: leave room for a taskbar/panel.
+        win_w = min(DEFAULT_W, scr_w - 40)
+        win_h = min(DEFAULT_H, scr_h - 80)
+    pos_x = max(0, (scr_w - win_w) // 2)
+    pos_y = max(0, (scr_h - win_h) // 3)
+    root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+    root.minsize(1100, 720)
     app = ShanktuaryApp(root)
     try:
         root.mainloop()
