@@ -371,7 +371,7 @@ class ShanktuaryApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"Shanktuary Performance Studio {APP_VERSION} - Launch Monitor Suite")
-        self.root.configure(bg="#101114")
+        self.root.configure(bg=theme.BG)
         self.fullscreen = False
         self.view_mode = 1  # 1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite
 
@@ -502,7 +502,7 @@ class ShanktuaryApp:
 
         self.img_cache = {}
 
-        self.canvas = tk.Canvas(root, bg="#101114", highlightthickness=0)
+        self.canvas = tk.Canvas(root, bg=theme.BG, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         # Centralized Keyboard Handler (Modal & Global Hotkeys)
@@ -2677,70 +2677,6 @@ class ShanktuaryApp:
         #    "Nums"/"Fit"/"Lab" were a large part of the amateur feel.
         return
 
-        left_limit = status_x2 + 8
-        right_limit = club_x1 - 8
-        avail_middle = right_limit - left_limit
-        n_tabs = 8
-        tab_gap = 3
-        calc_tab_w = (avail_middle - (n_tabs - 1) * tab_gap) // n_tabs
-        tab_w = max(46, min(76, calc_tab_w))
-        total_tab_w = n_tabs * tab_w + (n_tabs - 1) * tab_gap
-        start_tab_x = max(left_limit, left_limit + (avail_middle - total_tab_w) // 2)
-
-        if tab_w >= 70:
-            mode_tabs = [
-                (1, "Quad View"),
-                (2, "3D Range"),
-                (3, "Dispersion"),
-                (4, "Table"),
-                (5, "Big Numbers"),
-                (6, "My Bag"),
-                (7, "Club Fitting"),
-                (8, "Swing Lab")
-            ]
-            tab_font = ("Helvetica", 8)
-            tab_font_bold = ("Helvetica", 8, "bold")
-        elif tab_w >= 54:
-            mode_tabs = [
-                (1, "Quad"),
-                (2, "Range"),
-                (3, "Dispersion"),
-                (4, "Table"),
-                (5, "Numbers"),
-                (6, "My Bag"),
-                (7, "Fitting"),
-                (8, "Swing Lab")
-            ]
-            tab_font = ("Helvetica", 7)
-            tab_font_bold = ("Helvetica", 7, "bold")
-        else:
-            mode_tabs = [
-                (1, "Quad"),
-                (2, "Range"),
-                (3, "Disp"),
-                (4, "Table"),
-                (5, "Nums"),
-                (6, "Bag"),
-                (7, "Fit"),
-                (8, "Lab")
-            ]
-            tab_font = ("Helvetica", 7)
-            tab_font_bold = ("Helvetica", 7, "bold")
-
-        for i, (m_id, label) in enumerate(mode_tabs):
-            x1 = start_tab_x + i * (tab_w + tab_gap)
-            x2 = x1 + tab_w
-            y1, y2 = 10, 42
-            self.mode_pill_rects[m_id] = (x1, y1, x2, y2)
-
-            is_active = (self.view_mode == m_id)
-            bg_col = "#0E2A38" if is_active else "#181A22"
-            border_col = "#00E5FF" if is_active else "#282C3A"
-            txt_col = "#00E5FF" if is_active else "#8E94A5"
-            txt_font = tab_font_bold if is_active else tab_font
-
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col)
-            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=label, fill=txt_col, font=txt_font, anchor="center")
 
     def draw_nav_rail(self, h):
         """Persistent left icon rail -- replaces the 8 cramped mode pills.
@@ -3286,8 +3222,8 @@ class ShanktuaryApp:
             tx2 = tx1 + toast_w
             ty1 = h - 60
             ty2 = ty1 + 38
-            self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill="#0F2B1D", outline="#00FF66", width=2)
-            self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill="#00FF66", font=("Helvetica", 9, "bold"), anchor="center")
+            self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill=theme.ACCENT_DEEP, outline="")
+            self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill=theme.ACCENT_TEXT, font=("Helvetica", 9), anchor="center")
 
     def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
         self.range_launch_web_rect = None
@@ -3329,7 +3265,8 @@ class ShanktuaryApp:
 
         # Yardage Arcs & Pins
         yardages = [50, 100, 150, 200, 250, 300, 350]
-        pin_colors = {100: theme.DANGER, 150: theme.TEXT, 200: "#2979FF", 250: "#FFD600", 300: "#00E676"}
+        # Distance pins: one cool-to-warm ramp, same idea as get_club_color.
+        pin_colors = {100: "#7FB3C8", 150: "#96CE99", 200: "#C9D78D", 250: "#E0C689", 300: "#E59187"}
         
         for yds in yardages:
             frac = yds / 380.0
