@@ -4193,25 +4193,42 @@ class ShanktuaryApp:
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
                                 anchor="w")
         head, detail, hcol = self.summarize_strike(self.current_shot)
+
+        # Verdict block sits top-left: chip, then the plain-language answer.
+        # The club is the hero, so it gets the whole width below rather than
+        # being squeezed beside the text.
+        ty = y + 34
         if hcol == theme.WARN:
-            self.canvas.create_rectangle(sx0 + 16, y + 32, sx0 + 100, y + 52,
+            self.canvas.create_rectangle(sx0 + 16, ty, sx0 + 100, ty + 20,
                                          fill="#2A2118", outline="")
-            self.canvas.create_text(sx0 + 58, y + 42, text="ESTIMATE",
+            self.canvas.create_text(sx0 + 58, ty + 10, text="ESTIMATE",
                                     fill=theme.WARN,
                                     font=("Helvetica", 8, "bold"),
                                     anchor="center")
+            ty += 28
         for li, part in enumerate(head.split(" ", 1) if " " in head else [head]):
-            self.canvas.create_text(sx0 + 16, y + 74 + li * 24, text=part,
+            self.canvas.create_text(sx0 + 16, ty + 12 + li * 23, text=part,
                                     fill=theme.TEXT, font=("Helvetica", 17),
                                     anchor="w")
-        self.canvas.create_text(sx0 + 16, y + card_h - 26, text=detail,
+        text_bot = ty + 12 + 23 * (2 if " " in head else 1)
+
+        self.canvas.create_line(sx0 + 16, text_bot, sx1 - 16, text_bot,
+                                fill=theme.HAIRLINE)
+        self.canvas.create_text(sx0 + 16, y + card_h - 20, text=detail,
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
                                 anchor="w")
-        # Face scales with the card -- it was pinned at 92px, so a taller
-        # window grew the card around a stamp-sized club.
-        face_h = max(110, min(card_h - 96, card_w * 0.62))
-        self._draw_overview_face(sx1 - face_h * 0.62 - 22,
-                                 y + card_h / 2 + 12, face_h)
+
+        # Face centred in the space between the verdict block and the footer,
+        # sized to whichever of width/height is the real constraint.
+        face_top = text_bot + 10
+        face_bot = y + card_h - 34
+        # iron_face.png is 290x220, i.e. 1.32x wider than tall, so a height
+        # that fits vertically can still overflow the card width.
+        FACE_ASPECT = 290.0 / 220.0
+        face_h = max(96, min(face_bot - face_top,
+                             (card_w - 40) / FACE_ASPECT))
+        self._draw_overview_face((sx0 + sx1) / 2,
+                                 (face_top + face_bot) / 2, face_h)
         y += card_h + 20
 
         # ---- recent strip + session summary --------------------------------
