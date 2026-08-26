@@ -537,6 +537,7 @@ class ShanktuaryApp:
         self.overview_prev_rect = None
         self.overview_next_rect = None
         self.overview_bar_rects = []
+        self.nav_setup_rect = None
         # Cache for _text_width(): measuring is cheap but this runs per card
         # per redraw, and the set of strings is small and repetitive.
         self._text_w_cache = {}
@@ -1762,6 +1763,13 @@ class ShanktuaryApp:
                     self.canvas.config(cursor="hand2")
                     return
 
+        # 1a. Rail Setup slot
+        if self.nav_setup_rect:
+            r = self.nav_setup_rect
+            if r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                self.canvas.config(cursor="hand2")
+                return
+
         # 1b. Overview interactive regions
         if self.view_mode == 9:
             for r in (self.overview_viewall_rect, self.overview_prev_rect,
@@ -1917,6 +1925,15 @@ class ShanktuaryApp:
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
+        # 0a. Rail Setup slot. Checked before the modal handler so the button
+        # also closes the modal -- otherwise clicking it while open would be
+        # swallowed by the modal's own hit testing and feel dead.
+        r = self.nav_setup_rect
+        if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+            self.show_balance_hardware_modal = not self.show_balance_hardware_modal
+            self.draw_screen()
+            return
+
         # 0. In-Canvas Balance Hardware Modal Click Handling
         if self.show_balance_hardware_modal:
             if self.balance_modal_close_rect and self.balance_modal_close_rect[0] <= event.x <= self.balance_modal_close_rect[2] and self.balance_modal_close_rect[1] <= event.y <= self.balance_modal_close_rect[3]:
@@ -2823,11 +2840,19 @@ class ShanktuaryApp:
                                     font=(theme.ui_font(), 7), anchor="center")
             y += theme.NAV_ITEM_H
 
-        # Setup pinned to the bottom, away from view switching
+        # Setup pinned to the bottom, away from view switching. It opens the
+        # balance-hardware modal rather than switching view_mode, so it gets
+        # its own hit rect instead of joining mode_pill_rects.
+        setup_active = self.show_balance_hardware_modal
+        s_col = theme.ACCENT_TEXT if setup_active else theme.TEXT_3
+        if setup_active:
+            self.canvas.create_rectangle(4, h - 64, theme.RAIL_W - 4, h - 20,
+                                         fill=theme.ACCENT_DEEP, outline="")
         self.canvas.create_rectangle(25, h - 56, 39, h - 42, fill="",
-                                     outline=theme.TEXT_3, width=2)
-        self.canvas.create_text(32, h - 32, text="Setup", fill=theme.TEXT_3,
+                                     outline=s_col, width=2)
+        self.canvas.create_text(32, h - 32, text="Setup", fill=s_col,
                                 font=(theme.ui_font(), 7), anchor="center")
+        self.nav_setup_rect = (4, h - 64, theme.RAIL_W - 4, h - 20)
 
     def verify_ogc_model_sync(self, shot):
         """Detect drift between our mirrored OGC constants and the live payload.
@@ -6610,8 +6635,10 @@ class ShanktuaryApp:
         self.canvas.create_text(mx1 + 32, pin_card_y1 + 14, text="WINDOWS BLUETOOTH PAIRING PIN", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
         self.canvas.create_text(mx1 + 32, pin_card_y1 + 28, text=f"Host Adapter MAC: {mac_disp}", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
-        # Big Glowing PIN Box
-        p_box_y1 = pin_card_y1 + 40
+        # Big Glowing PIN Box. Starts at +48, not +40: the MAC line above
+        # baselines at +28 and a real UI face is tall enough that the box
+        # edge cut through its descenders.
+        p_box_y1 = pin_card_y1 + 48
         p_box_y2 = p_box_y1 + 44
         self.canvas.create_rectangle(mx1 + 32, p_box_y1, mx2 - 32, p_box_y2, fill="#0B0F17", outline=theme.ACCENT_TEXT, width=1)
         self.canvas.create_text((mx1 + mx2) // 2, (p_box_y1 + p_box_y2) // 2, text=pin_disp, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 16, "bold"))
@@ -6643,6 +6670,21 @@ class ShanktuaryApp:
         b1_x1, b1_x2 = mx1 + 20, mx1 + 20 + btn_w3
         b2_x1, b2_x2 = b1_x2 + 10, b1_x2 + 10 + btn_w3
         b3_x1, b3_x2 = b2_x2 + 10, mx2 - 20
+
+        # Pair over Bluetooth. The click handler for this existed but nothing
+        # ever assigned balance_modal_pair_rect, so pairing was unreachable
+        # from the UI. Its own full-width row above the three action buttons.
+        pair_y2 = hw_y1 - 8
+        pair_y1 = pair_y2 - 26
+        self.balance_modal_pair_rect = (b1_x1, pair_y1, mx2 - 20, pair_y2)
+        self.canvas.create_rectangle(b1_x1, pair_y1, mx2 - 20, pair_y2,
+                                     fill=theme.ACCENT_DEEP,
+                                     outline=theme.ACCENT_LINE)
+        self.canvas.create_text((b1_x1 + mx2 - 20) // 2,
+                                (pair_y1 + pair_y2) // 2,
+                                text="Pair board over Bluetooth  ·  hold SYNC first",
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 8, "bold"))
 
         # Button 1: Tare Zero
         self.balance_modal_tare_rect = (b1_x1, hw_y1, b1_x2, hw_y2)
