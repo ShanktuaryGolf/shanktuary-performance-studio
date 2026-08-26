@@ -23,6 +23,7 @@ dependency or a framework change.
 | Swing Lab | `view_lab.png` | mockup |
 | Setup / Hardware | `view_setup.png` | mockup |
 | Tools menu | `view_tools.png` | mockup |
+| Shot library (open / collapsed) | `shot_library.png`, `shot_library_collapsed.png` | mockup |
 
 Shipped so far: `theme.py` (design tokens) and `draw_nav_rail()` (the left
 rail, live on all views).
@@ -142,3 +143,23 @@ vs the literal URL for copy actions — with a matching glyph, so open-vs-copy
 is scannable instead of read word by word. The Nova host line becomes a
 hardware status block with live dots covering both Nova and the balance
 boards, and a route into Setup.
+
+## Shot library
+
+**The persistent shot library is how a user picks a shot, and it belongs on
+every view.** The first round of mockups dropped it, which would have left
+the Table as the only way to select a shot — a regression against the
+current app, where `draw_left_sidebar()` renders a scrollable card list on
+all views and `sidebar_shot_card_rects` handles the click.
+
+It sits between the nav rail and the content at 248px (narrower than the
+current 270px, since the rail now carries the branding). Each card shows
+shot number, club, carry, ball speed and time, with the selected card lifted
+and marked with an accent edge. Club filter chips sit above the list,
+matching the existing `club_filter`.
+
+Collapsing it leaves a 34px strip with a reopen chevron and the shot count,
+so the space is recoverable on smaller displays without losing the entry
+point. `shot_library.png` and `shot_library_collapsed.png` show the Quad
+view — the most space-hungry layout — in both states; the four club panels
+still render at full size with the library open.
