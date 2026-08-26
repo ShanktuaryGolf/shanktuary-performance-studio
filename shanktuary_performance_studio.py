@@ -2882,7 +2882,10 @@ class ShanktuaryApp:
         top_y = 52
         bar_h = int(56 * t_scale)
         bot_y = top_y + bar_h
-        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, bot_y, fill="#15171F", outline="#232632")
+        # Borderless strip: the design language groups with whitespace and a
+        # single hairline, not boxes and per-column dividers.
+        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, bot_y, fill=theme.BG, outline="")
+        self.canvas.create_line(offset_x, bot_y, offset_x + avail_w, bot_y, fill=theme.HAIRLINE)
 
         off_abs = abs(offline)
         off_dir = "L" if offline < 0 else "R"
@@ -2891,32 +2894,37 @@ class ShanktuaryApp:
         # Club speed and smash factor are DERIVED from ball data by OGC, never
         # measured. When the COR clamp saturates they collapse to a constant, so
         # grey them out rather than presenting a boundary artifact as a reading.
-        derived_col = "#7E8496" if smash_clamped else "#FFFFFF"
-        smash_col = "#7E8496" if smash_clamped else "#00E5FF"
+        derived_col = theme.MUTED if smash_clamped else theme.TEXT
+        smash_col = theme.MUTED if smash_clamped else theme.TEXT
         club_speed_val = "-- MPH" if smash_clamped else f"{club_speed:.1f} MPH"
         smash_val = "--" if smash_clamped else f"{smash:.2f}"
 
+        # One accent (carry -- the number people look at first), neutrals for
+        # everything else, and semantic colour ONLY where it means something:
+        # offline warns/alerts by magnitude, derived values stay muted.
         metrics = [
-            ("BALL SPEED", f"{ball_speed:.1f} MPH", "#FFFFFF"),
+            ("BALL SPEED", f"{ball_speed:.1f} MPH", theme.TEXT),
             ("CLUB SPEED", club_speed_val, derived_col),
             ("SMASH FACTOR", smash_val, smash_col),
-            ("CARRY", f"{carry:.1f} YDS", "#00FF66"),
-            ("TOTAL", f"{total:.1f} YDS", "#FFFFFF"),
-            ("OFFLINE", off_str, "#00E5FF" if off_abs <= 4.0 else ("#FFEA00" if off_abs <= 12.0 else "#FF4081")),
-            ("HANG TIME", f"{hang_time:.1f} SEC", "#A0A5B5"),
-            ("EFFICIENCY", f"{eff_pct:.0f}%", "#00E5FF")
+            ("CARRY", f"{carry:.1f} YDS", theme.ACCENT_TEXT),
+            ("TOTAL", f"{total:.1f} YDS", theme.TEXT),
+            ("OFFLINE", off_str, theme.TEXT if off_abs <= 4.0 else (theme.WARN if off_abs <= 12.0 else theme.DANGER)),
+            ("HANG TIME", f"{hang_time:.1f} SEC", theme.TEXT_2),
+            ("EFFICIENCY", f"{eff_pct:.0f}%", theme.TEXT_2)
         ]
 
         lbl_font = ("Helvetica", max(8, int(9 * t_scale)), "bold")
         val_font = ("Consolas", max(11, int(15 * t_scale)), "bold")
 
         col_w = avail_w / len(metrics)
+        # Left-aligned label above value, so the eye tracks a column.
+        pad = int(18 * t_scale)
         for i, (label, val, val_col) in enumerate(metrics):
-            cx = int(offset_x + i * col_w + col_w / 2)
-            self.canvas.create_text(cx, top_y + int(16 * t_scale), text=label, fill="#7E8496", font=lbl_font)
-            self.canvas.create_text(cx, top_y + int(37 * t_scale), text=val, fill=val_col, font=val_font)
-            if i < len(metrics) - 1:
-                self.canvas.create_line(int(offset_x + (i + 1) * col_w), top_y + 10, int(offset_x + (i + 1) * col_w), bot_y - 10, fill="#232632")
+            lx = int(offset_x + i * col_w) + pad
+            self.canvas.create_text(lx, top_y + int(15 * t_scale), text=label,
+                                    fill=theme.TEXT_3, font=lbl_font, anchor="w")
+            self.canvas.create_text(lx, top_y + int(38 * t_scale), text=val,
+                                    fill=val_col, font=val_font, anchor="w")
 
     def draw_club_dropdown(self, w, h):
         box_w = 180
@@ -3215,8 +3223,8 @@ class ShanktuaryApp:
         ground_y = h - 25
 
         # 1. Sky Gradient Background
-        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, horizon_y, fill="#0B0F19", outline="")
-        self.canvas.create_rectangle(offset_x, horizon_y - 2, offset_x + avail_w, horizon_y + 2, fill="#182338", outline="")
+        self.canvas.create_rectangle(offset_x, top_y, offset_x + avail_w, horizon_y, fill=theme.BG, outline="")
+        self.canvas.create_rectangle(offset_x, horizon_y - 2, offset_x + avail_w, horizon_y + 2, fill=theme.HAIRLINE, outline="")
 
         # Distant Mountain Silhouettes
         mtn_pts = [
@@ -3228,10 +3236,10 @@ class ShanktuaryApp:
             offset_x + int(avail_w * 0.88), horizon_y - 30,
             offset_x + avail_w, horizon_y
         ]
-        self.canvas.create_polygon(mtn_pts, fill="#0F1624", outline="#192336")
+        self.canvas.create_polygon(mtn_pts, fill=theme.RAIL, outline=theme.HAIRLINE)
 
         # 2. Ground & Perspective Fairway
-        self.canvas.create_rectangle(offset_x, horizon_y, offset_x + avail_w, h, fill="#09140C", outline="")
+        self.canvas.create_rectangle(offset_x, horizon_y, offset_x + avail_w, h, fill="#0B120E", outline="")
 
         fx1 = offset_x + int(avail_w * 0.32)
         fx2 = offset_x + int(avail_w * 0.68)
@@ -3239,12 +3247,12 @@ class ShanktuaryApp:
         bx2 = offset_x + avail_w - 30
 
         fairway_poly = [fx1, horizon_y, fx2, horizon_y, bx2, ground_y, bx1, ground_y]
-        self.canvas.create_polygon(fairway_poly, fill="#122518", outline="#1D3E28", width=2)
+        self.canvas.create_polygon(fairway_poly, fill="#101A14", outline=theme.ACCENT_DEEP, width=2)
 
         # Center target line
         cx_top = (fx1 + fx2) // 2
         cx_bot = (bx1 + bx2) // 2
-        self.canvas.create_line(cx_bot, ground_y, cx_top, horizon_y, fill="#00FF66", width=2, dash=(6, 4))
+        self.canvas.create_line(cx_bot, ground_y, cx_top, horizon_y, fill=theme.GUIDE, width=1, dash=(6, 5))
 
         # Yardage Arcs & Pins
         yardages = [50, 100, 150, 200, 250, 300, 350]
@@ -3258,11 +3266,11 @@ class ShanktuaryApp:
             ax2 = cx_bot + int(w_at_y * 0.46)
             
             # Arc curve
-            self.canvas.create_line(ax1, arc_y, ax2, arc_y, fill="#23422C", width=1, dash=(3, 3))
+            self.canvas.create_line(ax1, arc_y, ax2, arc_y, fill="#1B2620", width=1, dash=(3, 4))
             
             # Distance Signboard
-            self.canvas.create_rectangle(cx_bot - 18, arc_y - 8, cx_bot + 18, arc_y + 8, fill="#0E2114", outline="#00FF66" if yds == 150 else "#254830")
-            self.canvas.create_text(cx_bot, arc_y, text=str(yds), fill="#00FF66" if yds == 150 else "#8E9F94", font=("Consolas", 8, "bold"))
+            self.canvas.create_rectangle(cx_bot - 18, arc_y - 8, cx_bot + 18, arc_y + 8, fill=theme.SURFACE, outline=theme.ACCENT_LINE if yds == 150 else theme.HAIRLINE)
+            self.canvas.create_text(cx_bot, arc_y, text=str(yds), fill=theme.ACCENT_TEXT if yds == 150 else theme.TEXT_3, font=("Helvetica", 8, "bold"))
 
             # Pin Flag
             if yds in pin_colors:
@@ -3295,7 +3303,7 @@ class ShanktuaryApp:
                     ty = gy - int(calt * 3.6 * (1.0 - 0.45 * gfrac))
                     past_pts.extend([gx, ty])
                 if len(past_pts) >= 4:
-                    self.canvas.create_line(past_pts, fill="#244B36", width=1, smooth=True)
+                    self.canvas.create_line(past_pts, fill="#232A26", width=1, smooth=True)
 
         # Draw Active Shot Tracer & Curtain
         if carry_yds > 0:
@@ -3331,36 +3339,34 @@ class ShanktuaryApp:
             for p in reversed(ground_pts):
                 curtain_poly.extend([p[0], p[1]])
             if len(curtain_poly) >= 6:
-                self.canvas.create_polygon(curtain_poly, fill="#00E5FF", outline="", stipple="gray25")
+                self.canvas.create_polygon(curtain_poly, fill=theme.ACCENT, outline="", stipple="gray25")
 
             # Ground landing path
             flat_pts = []
             for p in ground_pts:
                 flat_pts.extend([p[0], p[1]])
-            self.canvas.create_line(flat_pts, fill="#008855", width=2, dash=(4, 2))
+            self.canvas.create_line(flat_pts, fill=theme.ACCENT_DEEP, width=2, dash=(4, 3))
 
             # Neon flight tracer line
             flight_pts = []
             for p in traj_pts:
                 flight_pts.extend([p[0], p[1]])
-            self.canvas.create_line(flight_pts, fill="#00FF66", width=3, smooth=True)
+            self.canvas.create_line(flight_pts, fill=theme.ACCENT_LINE, width=3, smooth=True)
 
             # Landing impact circle
             lx, ly = ground_pts[-1]
-            self.canvas.create_oval(lx - 12, ly - 6, lx + 12, ly + 6, fill="", outline="#00FF66", width=2)
-            self.canvas.create_oval(lx - 4, ly - 2, lx + 4, ly + 2, fill="#00FF66", outline="")
+            self.canvas.create_oval(lx - 12, ly - 6, lx + 12, ly + 6, fill="", outline=theme.ACCENT_LINE, width=2)
+            self.canvas.create_oval(lx - 4, ly - 2, lx + 4, ly + 2, fill=theme.ACCENT, outline="")
             
             # Carry Flag Tag
-            self.canvas.create_rectangle(lx - 34, ly - 28, lx + 34, ly - 10, fill="#0C2515", outline="#00FF66", width=2)
-            self.canvas.create_text(lx, ly - 19, text=f"{carry_yds:.1f} YDS", fill="#00FF66", font=("Consolas", 8, "bold"))
+            self.canvas.create_rectangle(lx - 34, ly - 28, lx + 34, ly - 10, fill=theme.SURFACE, outline=theme.ACCENT_LINE, width=1)
+            self.canvas.create_text(lx, ly - 19, text=f"{carry_yds:.1f} YDS", fill=theme.ACCENT_TEXT, font=("Helvetica", 8, "bold"))
 
             # Floating Apex Badge
-            if apex_pt:
-                ax, ay, a_val = apex_pt
-                self.canvas.create_rectangle(ax - 32, ay - 20, ax + 32, ay - 4, fill="#0E2838", outline="#00E5FF")
-                self.canvas.create_text(ax, ay - 12, text=f"▲ {a_val:.1f} yds", fill="#00E5FF", font=("Consolas", 8, "bold"))
+            # Apex is already in the top metric strip; labelling it on the
+            # arc as well is redundant and crowds the flight path.
         else:
-            self.canvas.create_text(cx_bot, horizon_y + 80, text="READY FOR SHOT", fill="#1C3827", font=("Helvetica", 24, "bold"))
+            self.canvas.create_text(cx_bot, horizon_y + 80, text="READY FOR SHOT", fill="#1D2621", font=("Helvetica", 22))
 
         # 4. Top Floating HUD Tiles
         hud_h = 48
@@ -3370,24 +3376,38 @@ class ShanktuaryApp:
         off_dir = "L" if offline_yds < 0 else "R"
         off_str = f"{abs(offline_yds):.1f} {off_dir} YDS" if abs(offline_yds) > 0.1 else "0.0 STRAIGHT"
 
+        # Club speed is derived from ball data by OpenGolfCoach and collapses
+        # to a constant when its model saturates -- mute it rather than
+        # present a constant as a measurement.
+        _sc = self.compute_smash_confidence(
+            (self.current_shot or {}).get("ball_speed_meters_per_second"),
+            (self.current_shot or {}).get("vertical_launch_angle_degrees"),
+            (self.current_shot or {}).get("total_spin_rpm"),
+        )["clamped"] if self.current_shot else False
+        cs_val = "-- MPH" if _sc else f"{club_speed:.1f} MPH"
+
         hud_cards = [
-            ("CARRY", f"{carry_yds:.1f} YDS", "#00FF66"),
-            ("TOTAL", f"{total_yds:.1f} YDS", "#FFFFFF"),
-            ("BALL SPEED", f"{ball_speed:.1f} MPH", "#FFFFFF"),
-            ("CLUB SPEED", f"{club_speed:.1f} MPH", "#FFFFFF"),
-            ("LAUNCH", f"{vert_launch:.1f}°", "#00E5FF"),
-            ("TOTAL SPIN", f"{int(total_spin)} RPM", "#FFEA00"),
-            ("APEX", f"{apex_yds:.1f} YDS", "#00E5FF"),
-            ("OFFLINE", off_str, "#00E5FF" if abs(offline_yds) <= 5.0 else "#FF4081")
+            ("CARRY", f"{carry_yds:.1f} YDS", theme.ACCENT_TEXT),
+            ("TOTAL", f"{total_yds:.1f} YDS", theme.TEXT),
+            ("BALL SPEED", f"{ball_speed:.1f} MPH", theme.TEXT),
+            ("CLUB SPEED", cs_val, theme.MUTED if _sc else theme.TEXT),
+            ("LAUNCH", f"{vert_launch:.1f}°", theme.TEXT),
+            ("TOTAL SPIN", f"{int(total_spin)} RPM", theme.TEXT),
+            ("APEX", f"{apex_yds:.1f} YDS", theme.TEXT),
+            ("OFFLINE", off_str, theme.TEXT if abs(offline_yds) <= 5.0 else theme.WARN)
         ]
         
+        # Borderless, left-aligned: label small and quiet above the value.
         card_w = (avail_w - 30) // len(hud_cards)
+        self.canvas.create_line(offset_x, hud_y2, offset_x + avail_w, hud_y2,
+                                fill=theme.HAIRLINE)
         for i, (h_title, h_val, h_col) in enumerate(hud_cards):
-            hx1 = offset_x + 15 + i * card_w
-            hx2 = hx1 + card_w - 6
-            self.canvas.create_rectangle(hx1, hud_y1, hx2, hud_y2, fill="#121622", outline="#242B3B")
-            self.canvas.create_text((hx1 + hx2) // 2, hud_y1 + 13, text=h_title, fill="#7E8799", font=("Helvetica", 7, "bold"))
-            self.canvas.create_text((hx1 + hx2) // 2, hud_y1 + 33, text=h_val, fill=h_col, font=("Consolas", 10, "bold"))
+            hx1 = offset_x + 18 + i * card_w
+            self.canvas.create_text(hx1, hud_y1 + 12, text=h_title,
+                                    fill=theme.TEXT_3,
+                                    font=("Helvetica", 7, "bold"), anchor="w")
+            self.canvas.create_text(hx1, hud_y1 + 34, text=h_val, fill=h_col,
+                                    font=("Helvetica", 13), anchor="w")
 
         # 5. WebGPU Launch Button (Bottom Right)
         btn_w, btn_h = 240, 32
@@ -3396,8 +3416,8 @@ class ShanktuaryApp:
         by2 = h - 12
         by1 = by2 - btn_h
         self.range_launch_web_rect = (bx1, by1, bx2, by2)
-        self.canvas.create_rectangle(bx1, by1, bx2, by2, fill="#0E2838", outline="#00E5FF", width=2)
-        self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="⛳ Open 3D WebGPU Range (/range) ↗", fill="#00E5FF", font=("Helvetica", 8, "bold"))
+        self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.ACCENT, outline="")
+        self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="Open 3D WebGPU Range  ↗", fill="#EAF5EE", font=("Helvetica", 9, "bold"))
 
     def draw_dispersion_and_gapping(self, avail_w, h, offset_x=0):
         self.dispersion_club_chip_rects.clear()
