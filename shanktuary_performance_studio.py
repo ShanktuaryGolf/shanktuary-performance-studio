@@ -4072,18 +4072,24 @@ class ShanktuaryApp:
                                       font=("Helvetica", 19, "bold"), anchor="w")
         hbb = self.canvas.bbox(hid)
         hx = (hbb[2] + 10) if hbb else (x0 + 90)
-        self.canvas.create_text(hx, y + 16, text=f"of {n}", fill=theme.TEXT_3,
-                                font=("Helvetica", 10), anchor="w")
+        oid = self.canvas.create_text(hx, y + 16, text=f"of {n}",
+                                      fill=theme.TEXT_3,
+                                      font=("Helvetica", 10), anchor="w")
 
-        # shot shape as a quiet chip
+        # Shot shape as a quiet chip. Measure the "of N" text rather than
+        # assuming a width -- a hardcoded offset overlaps as soon as the
+        # shot count reaches two digits.
         if shot_name:
-            cw = len(shot_name) * 6 + 24
-            cx_ = hx + 34
-            self.canvas.create_rectangle(cx_, y + 5, cx_ + cw, y + 25,
-                                         fill=theme.SURFACE_2, outline="")
-            self.canvas.create_text(cx_ + cw / 2, y + 15, text=shot_name,
-                                    fill=theme.TEXT_2, font=("Helvetica", 9),
-                                    anchor="center")
+            obb = self.canvas.bbox(oid)
+            chip_x = (obb[2] + 14) if obb else (hx + 46)
+            tid = self.canvas.create_text(chip_x + 12, y + 15, text=shot_name,
+                                          fill=theme.TEXT_2,
+                                          font=("Helvetica", 9), anchor="w")
+            tbb = self.canvas.bbox(tid)
+            if tbb:
+                self.canvas.create_rectangle(chip_x, y + 4, tbb[2] + 12, y + 26,
+                                             fill=theme.SURFACE_2, outline="")
+                self.canvas.tag_raise(tid)
 
         # prev / next shot
         for i, (glyph, delta) in enumerate((("‹", -1), ("›", 1))):
@@ -4256,28 +4262,45 @@ class ShanktuaryApp:
 
         # session summary card sits to the right of the bars
         sm_x = x0 + bars_w + 24
-        self.canvas.create_rectangle(sm_x, y - 4, x1, y + recent_h - 14,
+        sm_y1, sm_y2 = y - 4, y + recent_h - 14
+        sm_h = sm_y2 - sm_y1
+        self.canvas.create_rectangle(sm_x, sm_y1, x1, sm_y2,
                                      fill=theme.SURFACE, outline="")
-        self.canvas.create_text(sm_x + 18, y + 12, text="SESSION",
+        self.canvas.create_text(sm_x + 18, sm_y1 + 16, text="SESSION",
                                 fill=theme.TEXT_3, font=("Helvetica", 8),
                                 anchor="w")
+        self.canvas.create_text(x1 - 18, sm_y1 + 16, text=f"{n} shots",
+                                fill=theme.TEXT_3, font=("Helvetica", 8),
+                                anchor="e")
+
         avgs = self.calculate_session_averages()
         disp = self._session_dispersion_yds()
         sm = [("AVG CARRY", f"{avgs.get('carry', 0.0):.1f}" if avgs else "--", "yds"),
               ("BEST", f"{max(carries):.1f}" if carries else "--", "yds"),
               ("DISPERSION", f"{disp:.1f}" if disp is not None else "--", "yds")]
+
+        # Fill the box rather than clustering in its top third: the value row
+        # is centred in the space under the title, and the type scales with
+        # the box so a taller card gets bigger numbers, not more blank space.
+        body_top = sm_y1 + 30
+        body_h = sm_y2 - body_top
+        val_size = int(max(21, min(46, body_h * 0.42)))
+        lab_y = body_top + body_h * 0.30
+        val_y = body_top + body_h * 0.62
+
         inner = (x1 - sm_x - 36) / len(sm)
         for i, (lb, v, u) in enumerate(sm):
             cxp = sm_x + 18 + i * inner
-            self.canvas.create_text(cxp, y + 36, text=lb, fill=theme.TEXT_3,
+            self.canvas.create_text(cxp, lab_y, text=lb, fill=theme.TEXT_3,
                                     font=("Helvetica", 8), anchor="w")
-            vid2 = self.canvas.create_text(cxp, y + 60, text=v, fill=theme.TEXT,
-                                           font=("Helvetica", 21), anchor="w")
+            vid2 = self.canvas.create_text(cxp, val_y, text=v, fill=theme.TEXT,
+                                           font=("Helvetica", val_size),
+                                           anchor="w")
             bb2 = self.canvas.bbox(vid2)
             if bb2:
-                self.canvas.create_text(bb2[2] + 5, y + 66, text=u,
-                                        fill=theme.TEXT_3,
-                                        font=("Helvetica", 8), anchor="w")
+                self.canvas.create_text(bb2[2] + 6, val_y + val_size * 0.28,
+                                        text=u, fill=theme.TEXT_3,
+                                        font=("Helvetica", 9), anchor="w")
         y += recent_h + 2
 
         # ---- bottom band: dispersion + tendencies --------------------------
