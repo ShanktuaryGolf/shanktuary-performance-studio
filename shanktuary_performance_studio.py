@@ -4742,19 +4742,31 @@ class ShanktuaryApp:
         cap_f = (theme.ui_font(), max(7, int(8 * font_scale)))
         val_f = (theme.ui_font(), max(9, int(12 * font_scale)))
 
-        # anchor="w" centres text VERTICALLY on its y, so each bbox extends
-        # +-half its height. The gap therefore needs half the caption plus
-        # half the value, not the nominal point sizes: an 8pt caption renders
-        # ~29px tall and a 12pt value ~45px, i.e. 14.5 + 22.5 = 37px minimum.
-        _PX_PER_PT = 3.7
-        annot_gap = int((cap_f[1] + val_f[1]) * _PX_PER_PT * 0.5) + 5
+        # Anchor the pair from its TOP ("nw"/"ne") rather than its vertical
+        # centre ("w"/"e"). With centre anchoring the gap has to cover half of
+        # each item's height, which forces the caption and value apart; the
+        # concept has them tight, as one unit. Top-anchoring makes the gap
+        # simply the caption's line height.
+        try:
+            import tkinter.font as _tkf
+            _cap_line = _tkf.Font(family=cap_f[0], size=cap_f[1]).metrics("linespace")
+        except Exception:
+            _cap_line = int(cap_f[1] * 1.4)
+        try:
+            _val_line = _tkf.Font(family=val_f[0], size=val_f[1]).metrics("linespace")
+        except Exception:
+            _val_line = int(val_f[1] * 1.4)
+        annot_gap = _cap_line + 1
+        # Height of one caption+value unit, for stacking consecutive pairs.
+        pair_h = annot_gap + _val_line
 
         def annot(ax, ay, cap, val, anchor="w", col=None):
+            a = "ne" if anchor == "e" else "nw"
             self.canvas.create_text(ax, ay, text=cap, fill=theme.TEXT_3,
-                                    font=cap_f, anchor=anchor)
+                                    font=cap_f, anchor=a)
             self.canvas.create_text(ax, ay + annot_gap, text=val,
                                     fill=col or theme.TEXT, font=val_f,
-                                    anchor=anchor)
+                                    anchor=a)
 
         def panel_cap(px, py, text, tag=None, tag_col=None):
             cid = self.canvas.create_text(px, py, text=text, fill=theme.TEXT_3,
@@ -4781,7 +4793,7 @@ class ShanktuaryApp:
         path_val = f"{abs(club_path):.1f}° " + (
             ("in-to-out" if club_path < 0 else "out-to-in") if self.is_left_handed
             else ("in-to-out" if club_path > 0 else "out-to-in"))
-        annot(gut_l, q1_top + int(56 * font_scale), "CLUB PATH", path_val)
+        annot(gut_l, q1_top + int(34 * font_scale), "CLUB PATH", path_val)
         self.canvas.create_line(q1_cx - int(150 * scale), q1_cy, q1_cx + int(150 * scale), q1_cy, fill=theme.GUIDE, width=1, dash=(4, 4))
         
         overhead_h = int(140 * scale)
@@ -4801,11 +4813,12 @@ class ShanktuaryApp:
 
         # Keep clear of the next panel's caption: the value sits ~22px below
         # its own y, so the last row needs that much clearance from q1_bot.
-        annot(gut_l, q1_bot - int(112 * font_scale), "FACE TO PATH",
+        face_y = q1_bot - pair_h * 2 - int(14 * font_scale)
+        annot(gut_l, face_y, "FACE TO PATH",
               f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}")
-        annot(gut_l, q1_bot - int(50 * font_scale), "FACE TO TARGET",
+        annot(gut_l, face_y + pair_h, "FACE TO TARGET",
               f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}")
-        annot(gut_r, q1_cy + int(20 * font_scale), "SIDESPIN",
+        annot(gut_r, q1_cy + int(12 * font_scale), "SIDESPIN",
               f"{int(abs(sidespin))} rpm", anchor="e")
 
         # Quadrant 2 (Bottom-Left): Trajectory Arc
@@ -4818,12 +4831,12 @@ class ShanktuaryApp:
         bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
 
         panel_cap(gut_l, q2_top + int(16 * font_scale), "LAUNCH & LOFT")
-        annot(gut_l, q2_top + int(52 * font_scale), "LAUNCH ANGLE",
+        annot(gut_l, q2_top + int(34 * font_scale), "LAUNCH ANGLE",
               f"{vert_launch:.1f}°")
         _c = self.get_bag_club((self.current_shot or {}).get("club") or self.current_club) or {}
         _lf = float(_c.get("loft_deg") or 0.0)
         if _lf > 0:
-            annot(gut_l, q2_top + int(118 * font_scale), "STATIC LOFT",
+            annot(gut_l, q2_top + int(34 * font_scale) + pair_h, "STATIC LOFT",
                   f"{_lf:.1f}°")
         self.canvas.create_line(q2_cx - int(160 * scale), ground_y, q2_cx + int(160 * scale), ground_y, fill=theme.GUIDE, width=2, dash=(4, 4))
         
@@ -4846,9 +4859,9 @@ class ShanktuaryApp:
         ball_r2 = int(7 * scale)
         self.canvas.create_oval(q2_cx - side_offset_x - ball_r2, ground_y - ball_r2, q2_cx - side_offset_x + ball_r2, ground_y + ball_r2, fill=theme.TEXT)
 
-        annot(gut_r, q2_top + int(56 * font_scale), "BACKSPIN",
+        annot(gut_r, q2_top + int(34 * font_scale), "BACKSPIN",
               f"{int(backspin)} rpm", anchor="e")
-        annot(gut_r, q2_bot - int(46 * font_scale), "DESCENT",
+        annot(gut_r, q2_bot - pair_h - int(14 * font_scale), "DESCENT",
               f"{descent:.1f}°", anchor="e")
         # The Nova measures ball flight only -- say so rather than leave a gap.
         self.canvas.create_text(gut_l, q2_bot - int(14 * font_scale),
@@ -4890,11 +4903,12 @@ class ShanktuaryApp:
         spin_line1 = f"Spin Axis: {abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}   |   Sidespin: {int(sidespin)} rpm"
         spin_line2 = f"Total Spin: {int(total_spin)} rpm   |   Opt. Potential: {opt_max:.1f} YDS"
 
-        annot(gut_l3, q3_cy - int(30 * font_scale), "SPIN AXIS",
+        annot(gut_l3, q3_cy - int(34 * font_scale), "SPIN AXIS",
               f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}")
-        annot(gut_r3, q3_bot - int(96 * font_scale), "TOTAL SPIN",
+        spin_y = q3_bot - pair_h * 2 - int(14 * font_scale)
+        annot(gut_r3, spin_y, "TOTAL SPIN",
               f"{int(total_spin)} rpm", anchor="e")
-        annot(gut_r3, q3_bot - int(34 * font_scale), "BACKSPIN",
+        annot(gut_r3, spin_y + pair_h, "BACKSPIN",
               f"{int(backspin)} rpm", anchor="e")
 
         # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
@@ -5187,10 +5201,11 @@ class ShanktuaryApp:
                                          fill="#2A2118", outline="")
             self.canvas.tag_raise(chip_id)
 
-        annot(gut_l4, q4_top + int(52 * font_scale), "VERTICAL",
+        imp_y = q4_top + int(34 * font_scale)
+        annot(gut_l4, imp_y, "VERTICAL",
               v_text.split(" ", 1)[-1] if " " in v_text else v_text,
               col=v_badge_col)
-        annot(gut_l4, q4_top + int(118 * font_scale), "HORIZONTAL",
+        annot(gut_l4, imp_y + pair_h, "HORIZONTAL",
               h_text.split(" ", 1)[-1] if " " in h_text else h_text,
               col=h_badge_col)
 
