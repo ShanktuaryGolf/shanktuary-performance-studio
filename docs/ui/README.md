@@ -116,8 +116,20 @@ Lab via a small "⚙ Hardware" button, which is hard to find when the thing you
 are trying to do is connect a board for the first time. This promotes it to
 the rail's Setup slot and keeps every capability of the existing modal:
 single/dual mode toggle, Bluetooth pairing, the step-on left/right assignment
-wizard with live per-board kg, and tare. Nothing is removed — it is laid out
-rather than stacked in a modal.
+wizard with live per-board kg, 50/50 stance calibration, and tare. Nothing is
+removed — it is laid out rather than stacked in a modal.
+
+The two calibrations are distinct and the UI has to make that obvious:
+**tare** zeroes an *empty* board (step off first), while **50/50 stance
+calibration** corrects the left/right split while the user *stands in
+address*, solving boards that read unevenly against each other. The latter
+runs `start_stance_alignment(duration_sec=4.0)` and produces
+`balance_multiplier`, which is persisted — so the view shows the live
+countdown, a progress bar, and the applied multipliers.
+
+Note `src/processing/pressure/stance.py` (`StanceCalibrator`, shift-left
+then shift-right to measure stance *width*) is a third, separate thing and
+is currently not wired to any UI.
 
 ## Build order
 
