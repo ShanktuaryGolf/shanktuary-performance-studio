@@ -529,6 +529,11 @@ class ShanktuaryApp:
         self.balance_modal_tare_rect = None
         self.balance_modal_align_rect = None
         self.balance_modal_stance_rect = None
+        # Overview interactive regions
+        self.overview_viewall_rect = None
+        self.overview_prev_rect = None
+        self.overview_next_rect = None
+        self.overview_bar_rects = []
         self.balance_modal_sim_rect = None
         self.balance_modal_pair_rect = None
         self.balance_modal_copy_pin_rect = None
@@ -1711,6 +1716,18 @@ class ShanktuaryApp:
                     self.canvas.config(cursor="hand2")
                     return
 
+        # 1b. Overview interactive regions
+        if self.view_mode == 9:
+            for r in (self.overview_viewall_rect, self.overview_prev_rect,
+                      self.overview_next_rect):
+                if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                    self.canvas.config(cursor="hand2")
+                    return
+            for bx1, by1, bx2, by2, _ in self.overview_bar_rects:
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    self.canvas.config(cursor="hand2")
+                    return
+
         # 2. Sidebar Elements Hover
         if not self.sidebar_collapsed:
             if self.sidebar_toggle_rect and self.sidebar_toggle_rect[0] <= event.x <= self.sidebar_toggle_rect[2] and self.sidebar_toggle_rect[1] <= event.y <= self.sidebar_toggle_rect[3]:
@@ -2193,6 +2210,35 @@ class ShanktuaryApp:
                         self.current_shot = self.session_shots[idx]
                         self.draw_screen()
                         return
+
+        if self.view_mode == 9:
+            def _hit(r):
+                return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
+
+            if _hit(self.overview_viewall_rect):
+                # "View all" opens the full shot table.
+                self.view_mode = 4
+                self.draw_screen()
+                return
+            for rect, delta in ((self.overview_prev_rect, -1),
+                                (self.overview_next_rect, 1)):
+                if _hit(rect):
+                    cur = (self.selected_shot_index
+                           if self.selected_shot_index is not None
+                           else len(self.session_shots) - 1)
+                    tgt = cur + delta
+                    if 0 <= tgt < len(self.session_shots):
+                        self.selected_shot_index = tgt
+                        self.current_shot = self.session_shots[tgt]
+                        self.draw_screen()
+                    return
+            for bx1, by1, bx2, by2, idx in self.overview_bar_rects:
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    if 0 <= idx < len(self.session_shots):
+                        self.selected_shot_index = idx
+                        self.current_shot = self.session_shots[idx]
+                        self.draw_screen()
+                    return
 
         if self.view_mode == 4:
             # Checkbox click
@@ -4065,6 +4111,11 @@ class ShanktuaryApp:
         shots = self.session_shots
         n = len(shots)
 
+        self.overview_viewall_rect = None
+        self.overview_prev_rect = None
+        self.overview_next_rect = None
+        self.overview_bar_rects = []
+
         # ---- header -------------------------------------------------------
         idx = (self.selected_shot_index + 1) if self.selected_shot_index is not None else n
         hid = self.canvas.create_text(x0, y + 12, text=f"Shot {idx}",
@@ -4095,11 +4146,21 @@ class ShanktuaryApp:
         for i, (glyph, delta) in enumerate((("‹", -1), ("›", 1))):
             bx2 = x1 - (1 - i) * 34
             bx1 = bx2 - 28
+            # Grey the arrow out at the ends of the session.
+            tgt = (self.selected_shot_index if self.selected_shot_index is not None
+                   else n - 1) + delta
+            live = 0 <= tgt < n
             self.canvas.create_rectangle(bx1, y + 2, bx2, y + 28,
                                          fill=theme.SURFACE, outline="")
             self.canvas.create_text((bx1 + bx2) / 2, y + 15, text=glyph,
-                                    fill=theme.TEXT_2, font=(theme.ui_font(), 12),
+                                    fill=theme.TEXT_2 if live else theme.TEXT_3,
+                                    font=(theme.ui_font(), 12),
                                     anchor="center")
+            rect = (bx1, y + 2, bx2, y + 28) if live else None
+            if delta < 0:
+                self.overview_prev_rect = rect
+            else:
+                self.overview_next_rect = rect
         y += 40
         self.canvas.create_line(x0, y, x1, y, fill=theme.HAIRLINE)
         y += 18
@@ -4255,8 +4316,14 @@ class ShanktuaryApp:
         # ---- recent strip + session summary --------------------------------
         self.canvas.create_text(x0, y, text="RECENT", fill=theme.TEXT_3,
                                 font=(theme.ui_font(), 8), anchor="w")
-        self.canvas.create_text(x1, y, text="View all", fill=theme.TEXT_3,
-                                font=(theme.ui_font(), 8), anchor="e")
+        va = self.canvas.create_text(x1, y, text="View all",
+                                     fill=theme.TEXT_3,
+                                     font=(theme.ui_font(), 8), anchor="e")
+        vabb = self.canvas.bbox(va)
+        if vabb:
+            # Pad the hit area -- 8px text is a very small click target.
+            self.overview_viewall_rect = (vabb[0] - 8, vabb[1] - 6,
+                                          vabb[2] + 8, vabb[3] + 6)
         y += 14
 
         recent = shots[-5:]
@@ -4277,6 +4344,10 @@ class ShanktuaryApp:
                 # height is comparable across the strip.
                 bh = max(10, int(bar_span * (cv / mx)))
                 sel = (s is self.current_shot)
+                # Whole column is the hit target, not just the drawn bar --
+                # a 10px-tall bar is unclickable otherwise.
+                self.overview_bar_rects.append(
+                    (bx, y, bx + bw, base_y + 20, n - len(recent) + i))
                 self.canvas.create_rectangle(bx, base_y - bh, bx + bw, base_y,
                                              fill=theme.ACCENT if sel else theme.SURFACE_2,
                                              outline="")
