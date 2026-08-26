@@ -980,6 +980,7 @@ class ShanktuaryApp:
                 "avg_total": 0.0,
                 "avg_ball_speed": 0.0, "avg_club_speed": 0.0,
                 "avg_smash": 0.0,
+                "smash_clamped": True,
                 "avg_launch": 0.0,
                 "avg_spin": 0.0,
                 "avg_offline": 0.0
@@ -1012,7 +1013,17 @@ class ShanktuaryApp:
             "avg_smash": sum(smashes) / count,
             "avg_launch": sum(launches) / count,
             "avg_spin": sum(spins) / count,
-            "avg_offline": sum(offlines) / count
+            "avg_offline": sum(offlines) / count,
+            # True when every contributing shot had a saturated OGC smash --
+            # the average is then a constant, not a measurement.
+            "smash_clamped": all(
+                self.compute_smash_confidence(
+                    float(s.get("ball_speed_meters_per_second") or 0.0),
+                    s.get("vertical_launch_angle_degrees"),
+                    s.get("total_spin_rpm"),
+                ).get("clamped", True)
+                for s in shots
+            ) if shots else True,
         }
 
     def extract_shot_metrics(self, s):
@@ -5418,7 +5429,13 @@ class ShanktuaryApp:
 
             for c in cat_clubs:
                 c_name = c.get("name", "")
-                card_h = 62
+                # A club with no shots has nothing to show on lines 2-3, so it
+                # gets a compact row. With 15 bag clubs and typically 1-2 hit
+                # in a session, full-height empty cards pushed the clubs that
+                # DO have data off the bottom of the pane.
+                _has_data = self.get_bag_club_stats(
+                    c_name, scope=self.bag_scope)["shot_count"] > 0
+                card_h = 62 if _has_data else 30
                 cy1 = curr_y
                 cy2 = cy1 + card_h
 
@@ -5454,11 +5471,14 @@ class ShanktuaryApp:
                         badge_x2 = cx2 - 130
                         badge_x1 = badge_x2 - 54
                         # Selected club is a STATE, not a caution -- accent it.
-                        self.canvas.create_rectangle(badge_x1, cy1 + 4, badge_x2, cy1 + 19, fill=theme.ACCENT_DEEP, outline="")
-                        self.canvas.create_text((badge_x1 + badge_x2) // 2, cy1 + 11, text="ACTIVE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
+                        _by = cy1 + (card_h - 15) // 2 if card_h < 50 else cy1 + 4
+                        self.canvas.create_rectangle(badge_x1, _by, badge_x2, _by + 15, fill=theme.ACCENT_DEEP, outline="")
+                        self.canvas.create_text((badge_x1 + badge_x2) // 2, _by + 7, text="ACTIVE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
 
                     # Action buttons: Edit Specs, Move Up, Move Down
-                    btn_ey1 = cy1 + 6
+                    # Centre the buttons in the row so they line up on both
+                    # the full-height and compact variants.
+                    btn_ey1 = cy1 + (card_h - 20) // 2
                     btn_ey2 = btn_ey1 + 20
                     edit_x1 = cx2 - 120
                     edit_x2 = cx2 - 54
@@ -5481,15 +5501,37 @@ class ShanktuaryApp:
                     # Line 2 & 3: Performance stats
                     stats = self.get_bag_club_stats(c_name, scope=self.bag_scope)
                     if stats["shot_count"] > 0:
-                        carry_str = f"Carry: {stats['avg_carry']:.1f}y (±{stats['std_carry']:.1f}y)"
-                        tot_str = f"Total: {stats['avg_total']:.1f}y"
-                        cnt_str = f"{stats['shot_count']} shots"
-                        self.canvas.create_text(name_x, cy1 + 31, text=f"{carry_str}   |   {tot_str}   |   {cnt_str}", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
-
-                        sub_stats = f"Ball: {stats['avg_ball_speed']:.1f}mph  •  Smash: {stats['avg_smash']:.2f}  •  Launch: {stats['avg_launch']:.1f}°  •  Spin: {stats['avg_spin']:.0f}rpm"
-                        self.canvas.create_text(name_x, cy1 + 48, text=sub_stats, fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
-                    else:
-                        self.canvas.create_text(name_x, cy1 + 38, text="No shots recorded for this club in selected scope", fill=theme.TEXT_3, font=(theme.ui_font(), 8, "italic"), anchor="w")
+                        # Caption-above-value pairs, matching the rest of the
+                        # app, instead of a pipe-delimited run-on line.
+                        cells = [
+                            ("CARRY", f"{stats['avg_carry']:.1f} yds"),
+                            ("SPREAD", f"±{stats['std_carry']:.1f}"),
+                            ("TOTAL", f"{stats['avg_total']:.1f} yds"),
+                            ("BALL", f"{stats['avg_ball_speed']:.1f} mph"),
+                            ("LAUNCH", f"{stats['avg_launch']:.1f}°"),
+                            ("SPIN", f"{stats['avg_spin']:.0f} rpm"),
+                            ("SHOTS", f"{stats['shot_count']}"),
+                        ]
+                        # Smash is a constant wherever the OGC model saturates,
+                        # so print it only when it carries information.
+                        if not stats.get("smash_clamped", True):
+                            cells.insert(4, ("SMASH", f"{stats['avg_smash']:.2f}"))
+                        cw_ = 96
+                        for ci, (cl, cv) in enumerate(cells):
+                            cxp = name_x + ci * cw_
+                            if cxp + cw_ > edit_x1 - 8:
+                                break
+                            self.canvas.create_text(cxp, cy1 + 30, text=cl,
+                                                    fill=theme.TEXT_3,
+                                                    font=(theme.ui_font(), 7),
+                                                    anchor="nw")
+                            self.canvas.create_text(cxp, cy1 + 41, text=cv,
+                                                    fill=theme.TEXT,
+                                                    font=(theme.ui_font(), 11),
+                                                    anchor="nw")
+                    # No else-branch: an empty club is a compact row and the
+                    # absence of figures is the message. Repeating "no shots"
+                    # on 13 of 15 clubs is noise, not information.
 
                 curr_y += card_h + 5
 
@@ -5504,10 +5546,17 @@ class ShanktuaryApp:
         ladder_top = y1 + 44
         ladder_bot = y1 + h - 26
         ladder_h = ladder_bot - ladder_top
+        # Scale the axis to the data instead of a fixed 0-320. A bag where the
+        # longest club carries 57 yds otherwise draws every bar squashed into
+        # the bottom sixth of the pane with five empty gridlines above it.
+        _carries = [c["avg_carry"] for c in self.calculate_bag_gapping(
+            scope=self.bag_scope)["clubs"]] or [0.0]
+        _hi = max(_carries)
         min_yds = 0.0
-        max_yds = 320.0
+        max_yds = 320.0 if _hi > 260 else max(60.0, _hi * 1.25)
 
-        grid_steps = [50, 100, 150, 200, 250, 300]
+        _step = 50 if max_yds > 240 else (25 if max_yds > 120 else 10)
+        grid_steps = list(range(_step, int(max_yds) + 1, _step))
         for yds in grid_steps:
             gy = ladder_bot - int(((yds - min_yds) / (max_yds - min_yds)) * ladder_h)
             self.canvas.create_line(x1 + 65, gy, x1 + w - 20, gy, fill=theme.SURFACE_2, dash=(2, 4))
