@@ -21,6 +21,12 @@ import os
 import time
 import socket
 import base64
+
+# Stance-width calibration state machine (shift left, then right).
+from src.processing.pressure.stance import (
+    StanceCalibrator,
+    CalibrationState as StanceCalState,
+)
 import struct
 import sys
 from pathlib import Path
@@ -229,6 +235,12 @@ class PressureManager:
         self.assigned_right = None
         self.assignment_wizard = None
         self.balance_multiplier = [1.0, 1.0]
+        # Stance-width calibration (shift left, then right). Distinct from the
+        # 50/50 alignment above: that corrects an uneven left/right SPLIT,
+        # this measures the physical DISTANCE between the feet so CoP travel
+        # can be reported in mm instead of arbitrary units.
+        self.stance_cal = StanceCalibrator()
+        self.stance_width_mm = None
         self._alignment_active = False
         self._alignment_start_time = 0.0
         self._alignment_end_time = 0.0
@@ -379,6 +391,16 @@ class PressureManager:
                                 torque = self.torque_calc.update(cop) if self.torque_calc else 0.0
                                 phase = self.swing_det.update(cop).value if self.swing_det else "Address"
                                 frame = self.buffer.push(cop, torque=torque, phase=phase)
+                                # Drive the stance-width state machine while a
+                                # calibration is running.
+                                if self.stance_cal.state != StanceCalState.IDLE:
+                                    self.stance_cal.update(cop)
+                                    if self.stance_cal.state == StanceCalState.DONE:
+                                        w = self.stance_cal.stance_width_mm
+                                        if w is not None:
+                                            with self.lock:
+                                                self.stance_width_mm = round(w, 1)
+                                            self._save_calibration()
                                 with self.lock:
                                     self.latest_frame = frame
 
@@ -405,6 +427,7 @@ class PressureManager:
                 "assigned_left": str(self.assigned_left) if self.assigned_left else None,
                 "assigned_right": str(self.assigned_right) if self.assigned_right else None,
                 "balance_multiplier": self.balance_multiplier,
+                "stance_width_mm": self.stance_width_mm,
             }
             with open(fp, "w") as f:
                 json.dump(data, f, indent=2)
@@ -420,6 +443,8 @@ class PressureManager:
                     data = json.load(f)
                 if "balance_multiplier" in data and isinstance(data["balance_multiplier"], list) and len(data["balance_multiplier"]) == 2:
                     self.balance_multiplier = [float(data["balance_multiplier"][0]), float(data["balance_multiplier"][1])]
+                if data.get("stance_width_mm") is not None:
+                    self.stance_width_mm = float(data["stance_width_mm"])
                 if "board_mode" in data:
                     self.board_mode = data["board_mode"]
                 print(f"[+] Loaded balance calibration from {fp}: multipliers={self.balance_multiplier}")
@@ -523,6 +548,29 @@ class PressureManager:
         # not hold up the pressure worker or other /api/pressure/* handlers.
         obs_state.broadcast({"type": "pressure", "data": frame})
         return True
+
+    def start_stance_width_calibration(self):
+        """Begin the shift-left / shift-right stance-width measurement."""
+        with self.lock:
+            self.stance_cal.start()
+            self.stance_width_mm = None
+        return self.get_stance_width_status()
+
+    def cancel_stance_width_calibration(self):
+        with self.lock:
+            self.stance_cal.reset()
+        return self.get_stance_width_status()
+
+    def get_stance_width_status(self):
+        """State, instruction text and result for the stance-width flow."""
+        with self.lock:
+            st = self.stance_cal.state
+            return {
+                "state": st.name.lower(),
+                "active": st not in (StanceCalState.IDLE, StanceCalState.DONE),
+                "instruction": self.stance_cal.instruction,
+                "stance_width_mm": self.stance_width_mm,
+            }
 
     def _create_hardware_backend(self, device_path=None):
         """Create hardware backend appropriate for host OS (Evdev on Linux, Hid on Windows/macOS).
@@ -804,6 +852,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(wizard_status)
         elif parsed_path == "/api/pressure/align_stance":
             self.send_json(pressure_manager.get_alignment_status())
+        elif parsed_path == "/api/pressure/stance":
+            self.send_json(pressure_manager.get_stance_width_status())
         elif parsed_path.startswith("/assets/"):
             self.serve_static(assets_dir, parsed_path[len("/assets/"):])
         elif parsed_path.startswith("/range/"):
@@ -878,6 +928,19 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 pass
             res = pressure_manager.start_stance_alignment(duration_sec=dur)
             self.send_json(res)
+        elif parsed_path == "/api/pressure/stance":
+            body = self.read_post_body()
+            if body is None:
+                return
+            action = "start"
+            try:
+                action = str(json.loads(body).get("action", "start"))
+            except Exception:
+                pass
+            if action == "cancel":
+                self.send_json(pressure_manager.cancel_stance_width_calibration())
+            else:
+                self.send_json(pressure_manager.start_stance_width_calibration())
         elif parsed_path == "/api/pressure/simulator":
             body = self.read_post_body()
             if body is None:
