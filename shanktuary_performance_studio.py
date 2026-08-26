@@ -373,7 +373,10 @@ class ShanktuaryApp:
         self.root.title(f"Shanktuary Performance Studio {APP_VERSION} - Launch Monitor Suite")
         self.root.configure(bg=theme.BG)
         self.fullscreen = False
-        self.view_mode = 1  # 1: 4-Quad Studio, 2: Floor Divot Projector, 3: Performance Suite
+        # Landing view. Mode 9 is Overview -- the shot-at-a-glance summary.
+        # See theme.NAV_ITEMS for the full mode map; note mode 0 is the floor
+        # divot projector, not a content view.
+        self.view_mode = 9
 
         # Multi-Session & Shot Management (Nova & Uneekor style)
         self.sessions = [
@@ -548,6 +551,12 @@ class ShanktuaryApp:
 
         self.current_shot = None
         self.load_session_history()
+        # Select the most recent shot on launch. Without this the app starts
+        # with nothing selected, so Overview -- the landing view -- renders its
+        # empty state even when the session file holds shots.
+        if self.session_shots:
+            self.selected_shot_index = len(self.session_shots) - 1
+            self.current_shot = self.session_shots[self.selected_shot_index]
         self.root.after(100, self.poll_queue)
 
     def get_active_session(self):
