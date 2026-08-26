@@ -537,6 +537,9 @@ class ShanktuaryApp:
         self.overview_prev_rect = None
         self.overview_next_rect = None
         self.overview_bar_rects = []
+        # Cache for _text_width(): measuring is cheap but this runs per card
+        # per redraw, and the set of strings is small and repetitive.
+        self._text_w_cache = {}
         self.balance_modal_sim_rect = None
         self.balance_modal_pair_rect = None
         self.balance_modal_copy_pin_rect = None
@@ -786,6 +789,29 @@ class ShanktuaryApp:
             os.replace(tmp_path, SESSION_LOG_PATH)
         except Exception as e:
             print(f"[!] Error saving session: {e}")
+
+    def _text_width(self, text, font_spec):
+        """Measured pixel width of a string, cached.
+
+        Estimating from character count under-counts badly on a proportional
+        face -- "67.6 mph  ·  Straight Fade" measures 167px but a len*5
+        estimate gives 130px, so truncation never triggered and the text ran
+        under the right-aligned value beside it.
+        """
+        key = (text, font_spec)
+        cached = self._text_w_cache.get(key)
+        if cached is None:
+            try:
+                import tkinter.font as tkfont
+                fam = font_spec[0]
+                size = font_spec[1] if len(font_spec) > 1 else 10
+                weight = "bold" if "bold" in font_spec else "normal"
+                cached = tkfont.Font(family=fam, size=size,
+                                     weight=weight).measure(text)
+            except Exception:
+                cached = int(len(text) * size * 0.62)
+            self._text_w_cache[key] = cached
+        return cached
 
     def get_scaled_club_asset(self, path, target_h, mirror=False):
         key = (path, target_h, mirror)
@@ -2499,7 +2525,10 @@ class ShanktuaryApp:
         # 4. Shot Card Stream (y: 132 to h - 42)
         card_stream_y1 = 132
         card_stream_y2 = h - 42
-        card_h = 56
+        # 66 not 56: three 8-10pt lines in a real UI face measure ~17px each,
+        # so they baseline at 14/35/54 and the card needs descender room under
+        # the last one.
+        card_h = 66
         card_gap = 6
 
         self.sidebar_shot_card_rects.clear()
@@ -2541,17 +2570,29 @@ class ShanktuaryApp:
                 t_stamp = shot.get("timestamp", "--:--")
 
                 # Line 1: #N  [Club]  Carry
+                # Line spacing is 14/32/49 rather than 12/30/45: a real UI face
+                # renders taller than the Nimbus Sans fallback the app used to
+                # get, and the tighter values had the three lines touching.
                 num_txt = f"#{real_idx + 1}"
-                self.canvas.create_text(20, cy1 + 12, text=num_txt, fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 10), anchor="w")
-                self.canvas.create_text(56, cy1 + 13, text=c_tag, fill=theme.ACCENT_TEXT if is_selected else theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
-                self.canvas.create_text(sb_w - 20, cy1 + 12, text=f"{carry:.1f} yds", fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 11), anchor="e")
+                self.canvas.create_text(20, cy1 + 14, text=num_txt, fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 10), anchor="w")
+                self.canvas.create_text(58, cy1 + 15, text=c_tag, fill=theme.ACCENT_TEXT if is_selected else theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
+                self.canvas.create_text(sb_w - 20, cy1 + 14, text=f"{carry:.1f} yds", fill=theme.TEXT if is_selected else theme.TEXT_2, font=(theme.ui_font(), 11), anchor="e")
 
-                # Line 2: Speed & Shot Name
-                self.canvas.create_text(20, cy1 + 30, text=f"{bspeed:.1f} mph  ·  {s_name}", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
+                # Line 2: Speed & Shot Name. Clip the shape name to the card
+                # width -- "Straight Fade" plus the speed runs under the
+                # right-aligned carry figure on the line above.
+                sub2 = f"{bspeed:.1f} mph  ·  {s_name}"
+                sub_font = (theme.ui_font(), 8)
+                max_sub = sb_w - 40
+                if self._text_width(sub2, sub_font) > max_sub:
+                    while sub2 and self._text_width(sub2 + "…", sub_font) > max_sub:
+                        sub2 = sub2[:-1]
+                    sub2 += "…"
+                self.canvas.create_text(20, cy1 + 35, text=sub2, fill=theme.TEXT_3, font=sub_font, anchor="w")
 
                 # Line 3: Timestamp only -- smash is a constant when the OGC
                 # model saturates, so repeating it on every card is noise.
-                self.canvas.create_text(20, cy1 + 45, text=t_stamp, fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
+                self.canvas.create_text(20, cy1 + 54, text=t_stamp, fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
         # 5. Footer (y: h - 42 to h)
         clear_y1, clear_y2 = h - 38, h - 8
@@ -2940,9 +2981,11 @@ class ShanktuaryApp:
         pad = int(18 * t_scale)
         for i, (label, val, val_col) in enumerate(metrics):
             lx = int(offset_x + i * col_w) + pad
-            self.canvas.create_text(lx, top_y + int(15 * t_scale), text=label,
+            # 13 / 40 rather than 15 / 38: a real UI face is taller than the
+            # old fallback and the label's descenders touched the value's caps.
+            self.canvas.create_text(lx, top_y + int(13 * t_scale), text=label,
                                     fill=theme.TEXT_3, font=lbl_font, anchor="w")
-            self.canvas.create_text(lx, top_y + int(38 * t_scale), text=val,
+            self.canvas.create_text(lx, top_y + int(40 * t_scale), text=val,
                                     fill=val_col, font=val_font, anchor="w")
 
     def draw_club_dropdown(self, w, h):
@@ -4699,19 +4742,31 @@ class ShanktuaryApp:
         cap_f = (theme.ui_font(), max(7, int(8 * font_scale)))
         val_f = (theme.ui_font(), max(9, int(12 * font_scale)))
 
+        # anchor="w" centres text VERTICALLY on its y, so each bbox extends
+        # +-half its height. The gap therefore needs half the caption plus
+        # half the value, not the nominal point sizes: an 8pt caption renders
+        # ~29px tall and a 12pt value ~45px, i.e. 14.5 + 22.5 = 37px minimum.
+        _PX_PER_PT = 3.7
+        annot_gap = int((cap_f[1] + val_f[1]) * _PX_PER_PT * 0.5) + 5
+
         def annot(ax, ay, cap, val, anchor="w", col=None):
             self.canvas.create_text(ax, ay, text=cap, fill=theme.TEXT_3,
                                     font=cap_f, anchor=anchor)
-            self.canvas.create_text(ax, ay + int(15 * font_scale), text=val,
+            self.canvas.create_text(ax, ay + annot_gap, text=val,
                                     fill=col or theme.TEXT, font=val_f,
                                     anchor=anchor)
 
         def panel_cap(px, py, text, tag=None, tag_col=None):
-            self.canvas.create_text(px, py, text=text, fill=theme.TEXT_3,
-                                    font=cap_f, anchor="w")
+            cid = self.canvas.create_text(px, py, text=text, fill=theme.TEXT_3,
+                                          font=cap_f, anchor="w")
             if tag:
-                self.canvas.create_text(px + int(len(text) * 5.4 * font_scale) + 14,
-                                        py, text=tag,
+                # Measure, do not estimate from character count -- that
+                # under-counts on a proportional face and the tag lands on
+                # top of the caption.
+                cbb = self.canvas.bbox(cid)
+                tx = (cbb[2] + int(14 * font_scale)) if cbb else (
+                    px + int(len(text) * 6.2 * font_scale) + 14)
+                self.canvas.create_text(tx, py, text=tag,
                                         fill=tag_col or theme.TEXT_3,
                                         font=cap_f, anchor="w")
 
@@ -4744,9 +4799,11 @@ class ShanktuaryApp:
         ball_r = int(9 * scale)
         self.canvas.create_oval(q1_cx + ball_offset_x - ball_r, q1_cy - ball_r, q1_cx + ball_offset_x + ball_r, q1_cy + ball_r, fill=theme.TEXT, outline=theme.TEXT_2)
 
-        annot(gut_l, q1_bot - int(64 * font_scale), "FACE TO PATH",
+        # Keep clear of the next panel's caption: the value sits ~22px below
+        # its own y, so the last row needs that much clearance from q1_bot.
+        annot(gut_l, q1_bot - int(112 * font_scale), "FACE TO PATH",
               f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}")
-        annot(gut_l, q1_bot - int(26 * font_scale), "FACE TO TARGET",
+        annot(gut_l, q1_bot - int(50 * font_scale), "FACE TO TARGET",
               f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}")
         annot(gut_r, q1_cy + int(20 * font_scale), "SIDESPIN",
               f"{int(abs(sidespin))} rpm", anchor="e")
@@ -4761,12 +4818,12 @@ class ShanktuaryApp:
         bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
 
         panel_cap(gut_l, q2_top + int(16 * font_scale), "LAUNCH & LOFT")
-        annot(gut_l, q2_top + int(56 * font_scale), "LAUNCH ANGLE",
+        annot(gut_l, q2_top + int(52 * font_scale), "LAUNCH ANGLE",
               f"{vert_launch:.1f}°")
         _c = self.get_bag_club((self.current_shot or {}).get("club") or self.current_club) or {}
         _lf = float(_c.get("loft_deg") or 0.0)
         if _lf > 0:
-            annot(gut_l, q2_top + int(96 * font_scale), "STATIC LOFT",
+            annot(gut_l, q2_top + int(118 * font_scale), "STATIC LOFT",
                   f"{_lf:.1f}°")
         self.canvas.create_line(q2_cx - int(160 * scale), ground_y, q2_cx + int(160 * scale), ground_y, fill=theme.GUIDE, width=2, dash=(4, 4))
         
@@ -4835,9 +4892,9 @@ class ShanktuaryApp:
 
         annot(gut_l3, q3_cy - int(30 * font_scale), "SPIN AXIS",
               f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}")
-        annot(gut_r3, q3_bot - int(64 * font_scale), "TOTAL SPIN",
+        annot(gut_r3, q3_bot - int(96 * font_scale), "TOTAL SPIN",
               f"{int(total_spin)} rpm", anchor="e")
-        annot(gut_r3, q3_bot - int(26 * font_scale), "BACKSPIN",
+        annot(gut_r3, q3_bot - int(34 * font_scale), "BACKSPIN",
               f"{int(backspin)} rpm", anchor="e")
 
         # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
@@ -5109,21 +5166,31 @@ class ShanktuaryApp:
         # annotations -- the mockup has no outlined pills here.
         gut_l4 = offset_x + quad_w + int(18 * font_scale)
         cap_y4 = q4_top + int(16 * font_scale)
-        panel_cap(gut_l4, cap_y4, "IMPACT LOCATION")
-        chip_x = gut_l4 + int(96 * font_scale)
-        self.canvas.create_rectangle(chip_x, cap_y4 - int(9 * font_scale),
-                                     chip_x + int(64 * font_scale),
-                                     cap_y4 + int(9 * font_scale),
-                                     fill="#2A2118", outline="")
-        self.canvas.create_text(chip_x + int(32 * font_scale), cap_y4,
-                                text="ESTIMATE", fill=theme.WARN,
-                                font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"),
-                                anchor="center")
+        # Measure the caption rather than assuming its width: a fixed offset
+        # overlaps once the font or scale changes.
+        cap_id4 = self.canvas.create_text(gut_l4, cap_y4,
+                                          text="IMPACT LOCATION",
+                                          fill=theme.TEXT_3, font=cap_f,
+                                          anchor="w")
+        cap_bb4 = self.canvas.bbox(cap_id4)
+        chip_x = (cap_bb4[2] + int(12 * font_scale)) if cap_bb4 else (
+            gut_l4 + int(110 * font_scale))
+        chip_f = (theme.ui_font(), max(7, int(8 * font_scale)), "bold")
+        chip_id = self.canvas.create_text(chip_x + int(9 * font_scale), cap_y4,
+                                          text="ESTIMATE", fill=theme.WARN,
+                                          font=chip_f, anchor="w")
+        chip_bb = self.canvas.bbox(chip_id)
+        if chip_bb:
+            self.canvas.create_rectangle(chip_x, chip_bb[1] - int(4 * font_scale),
+                                         chip_bb[2] + int(9 * font_scale),
+                                         chip_bb[3] + int(4 * font_scale),
+                                         fill="#2A2118", outline="")
+            self.canvas.tag_raise(chip_id)
 
-        annot(gut_l4, q4_top + int(56 * font_scale), "VERTICAL",
+        annot(gut_l4, q4_top + int(52 * font_scale), "VERTICAL",
               v_text.split(" ", 1)[-1] if " " in v_text else v_text,
               col=v_badge_col)
-        annot(gut_l4, q4_top + int(96 * font_scale), "HORIZONTAL",
+        annot(gut_l4, q4_top + int(118 * font_scale), "HORIZONTAL",
               h_text.split(" ", 1)[-1] if " " in h_text else h_text,
               col=h_badge_col)
 
