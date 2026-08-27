@@ -3809,9 +3809,14 @@ class ShanktuaryApp:
             self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill=theme.SURFACE_2, width=1, dash=(2, 2))
             self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # Y height grid lines
-        for hy in [0, 20, 40, 60]:
+        # Y height grid lines. Steps follow max_h_yds -- a fixed [0,20,40,60]
+        # against a small axis puts labels far above the plot, where they
+        # trail up the page over whatever is drawn above the chart.
+        _hstep = 20 if max_h_yds > 45 else (10 if max_h_yds > 22 else 5)
+        for hy in range(0, int(max_h_yds) + 1, _hstep):
             ty = base_y - int((hy / max_h_yds) * chart_h)
+            if ty < plot_y1 + 22 or ty > base_y:
+                continue
             self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill=theme.SURFACE_2, width=1, dash=(2, 2))
             self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
@@ -3868,10 +3873,18 @@ class ShanktuaryApp:
             self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill=theme.SURFACE_2, width=1, dash=(2, 4))
             self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # Concentric distance arcs
-        for yds in [50, 100, 150, 200, 250, 300, 350]:
+        # Concentric distance arcs. Step follows max_range_yds -- a fixed
+        # 50..350 list against a small axis draws arcs above the plot and
+        # stacks their labels up the left edge over the panel above.
+        # Pick the finest step that still yields at most 6 arcs, so the
+        # ladder stays legible whether the session is wedges or drivers.
+        _rstep = next((s for s in (5, 10, 20, 25, 50, 100)
+                       if max_range_yds / s <= 6), 100)
+        for yds in range(_rstep, int(max_range_yds) + 1, _rstep):
             frac = yds / max_range_yds
             arc_y = tee_y - int(frac * plot_h)
+            if arc_y < plot_y1 + 24 or arc_y > tee_y:
+                continue
             self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill=theme.SURFACE_2, width=1, dash=(3, 3))
             self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
@@ -6014,8 +6027,11 @@ class ShanktuaryApp:
                                         font=(theme.ui_font(), 7), anchor="center")
         y += hdr_h + 10
 
-        # B. Head-to-head matrix
-        matrix_h = 214
+        # B. Head-to-head matrix. Height comes from the row count, not a
+        # magic number: 214px across 7 rows plus a header and footer left
+        # ~9px per row, so 10pt figures overlapped their own gridlines.
+        _n_rows = 7
+        matrix_h = 38 + 22 + _n_rows * 26 + 22
         self._draw_fitting_h2h_matrix(cx0, y, cx1 - cx0, y + matrix_h,
                                       stats_by_club, session_clubs)
         y += matrix_h + 10
@@ -6078,10 +6094,18 @@ class ShanktuaryApp:
             self.canvas.create_line(lx, tee_y, lx, plot_y1 + 24, fill=theme.SURFACE_2, width=1, dash=(2, 4))
             self.canvas.create_text(lx, plot_y2 - 6, text=f"{abs(lat)}y{'L' if lat < 0 else 'R'}", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # Concentric distance arcs
-        for yds in [50, 100, 150, 200, 250, 300, 350]:
+        # Concentric distance arcs. Step follows max_range_yds -- a fixed
+        # 50..350 list against a small axis draws arcs above the plot and
+        # stacks their labels up the left edge over the panel above.
+        # Pick the finest step that still yields at most 6 arcs, so the
+        # ladder stays legible whether the session is wedges or drivers.
+        _rstep = next((s for s in (5, 10, 20, 25, 50, 100)
+                       if max_range_yds / s <= 6), 100)
+        for yds in range(_rstep, int(max_range_yds) + 1, _rstep):
             frac = yds / max_range_yds
             arc_y = tee_y - int(frac * plot_h)
+            if arc_y < plot_y1 + 24 or arc_y > tee_y:
+                continue
             self.canvas.create_line(plot_x1 + 10, arc_y, plot_x2 - 10, arc_y, fill=theme.SURFACE_2, width=1, dash=(3, 3))
             self.canvas.create_text(plot_x1 + 20, arc_y, text=f"{yds}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
@@ -6144,9 +6168,14 @@ class ShanktuaryApp:
             self.canvas.create_line(tx, plot_y1 + 24, tx, base_y, fill=theme.SURFACE_2, width=1, dash=(2, 2))
             self.canvas.create_text(tx, base_y + 10, text=str(t), fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # Y height grid lines
-        for hy in [0, 20, 40, 60]:
+        # Y height grid lines. Steps follow max_h_yds -- a fixed [0,20,40,60]
+        # against a small axis puts labels far above the plot, where they
+        # trail up the page over whatever is drawn above the chart.
+        _hstep = 20 if max_h_yds > 45 else (10 if max_h_yds > 22 else 5)
+        for hy in range(0, int(max_h_yds) + 1, _hstep):
             ty = base_y - int((hy / max_h_yds) * chart_h)
+            if ty < plot_y1 + 22 or ty > base_y:
+                continue
             self.canvas.create_line(margin_x, ty, margin_x + chart_w, ty, fill=theme.SURFACE_2, width=1, dash=(2, 2))
             self.canvas.create_text(margin_x - 14, ty, text=f"{hy}y", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
@@ -6243,7 +6272,8 @@ class ShanktuaryApp:
         ]
 
         ry = hdr_y + 22
-        row_h = (y1 - 12 - ry) / len(rows)
+        foot_y = y1 - 20          # reserved strip for the caveat line
+        row_h = (foot_y - 6 - ry) / len(rows)
         for label, key, fmt, better in rows:
             self.canvas.create_line(x0 + 18, ry, x1 - 18, ry,
                                     fill=theme.HAIRLINE)
@@ -6279,11 +6309,11 @@ class ShanktuaryApp:
                     font=(theme.ui_font(), 10), anchor="ne")
             ry += row_h
 
-        self.canvas.create_text(lab_x, y1 - 12,
+        self.canvas.create_text(lab_x, foot_y + 4,
                                 text="Smash and club speed excluded — "
                                      "OpenGolfCoach saturates at these speeds",
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="sw")
+                                anchor="nw")
 
     def _draw_fitting_recommendation(self, x0, y0, x1, y1, stats_by_club,
                                      session_clubs):
