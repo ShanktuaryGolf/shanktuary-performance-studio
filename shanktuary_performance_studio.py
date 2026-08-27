@@ -1615,7 +1615,11 @@ class ShanktuaryApp:
                     if len(self.swing_lab_history) > 200:
                         self.swing_lab_history.pop(0)
 
-                if self.view_mode == 8 or self.show_balance_hardware_modal:
+                # Views that render live pressure state need the repaint:
+                # Swing Lab (8), Setup (10) and the hardware modal. Without
+                # this the calibration countdown is drawn once and frozen.
+                if (self.view_mode in (8, 10)
+                        or self.show_balance_hardware_modal):
                     self.draw_screen()
         except Exception:
             pass
@@ -6820,6 +6824,9 @@ class ShanktuaryApp:
         al = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {}
         aligning = al.get("active", False)
         rem = al.get("remaining_sec", 0.0)
+        in_lead = al.get("in_lead_in", False)
+        prog = al.get("progress", 0.0)
+        al_msg = al.get("message", "")
 
         self.setup_align_rect = (rx0 + 18, by, rx1 - 18, by + 40)
         self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + 40,
@@ -6828,18 +6835,22 @@ class ShanktuaryApp:
         self.canvas.create_text(rx0 + 30, by + 8, text="50/50 Stance Calibration",
                                 fill=theme.ACCENT_TEXT if aligning else theme.TEXT,
                                 font=(theme.ui_font(), 9), anchor="nw")
-        self.canvas.create_text(rx0 + 30, by + 24,
-                                text="Stand in address, hold still for 4s",
-                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="nw")
+        sub_msg = (al_msg if aligning
+                   else "Stand in address, hold still for 4s")
+        self.canvas.create_text(rx0 + 30, by + 24, text=sub_msg,
+                                fill=theme.WARN if in_lead else theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="nw")
         if aligning:
             self.canvas.create_text(rx1 - 30, by + 12, text=f"{rem:.1f}s",
-                                    fill=theme.ACCENT_TEXT,
+                                    fill=theme.WARN if in_lead else theme.ACCENT_TEXT,
                                     font=(theme.ui_font(), 13), anchor="ne")
-            frac = max(0.0, min(1.0, 1.0 - (rem / 4.0)))
+            # progress covers the whole lead-in + sample sequence.
+            frac = max(0.0, min(1.0, float(prog)))
             self.canvas.create_rectangle(rx0 + 18, by + 37,
                                          rx0 + 18 + (rx1 - rx0 - 36) * frac,
-                                         by + 40, fill=theme.ACCENT, outline="")
+                                         by + 40,
+                                         fill=theme.WARN if in_lead else theme.ACCENT,
+                                         outline="")
         mult = getattr(obs_server.obs_state, "balance_multiplier", None) or [1.0, 1.0]
         try:
             self.canvas.create_text(rx0 + 18, by + 46,
