@@ -2199,6 +2199,10 @@ class ShanktuaryApp:
                         self.copy_to_clipboard(f"http://localhost:{obs_server.OBS_PORT}/divot")
                     elif action == "open_divot":
                         webbrowser.open(f"http://localhost:{obs_server.OBS_PORT}/divot")
+                    elif action == "copy_tiles_url":
+                        self.copy_to_clipboard(f"http://localhost:{obs_server.OBS_PORT}/tiles")
+                    elif action == "open_tiles":
+                        webbrowser.open(f"http://localhost:{obs_server.OBS_PORT}/tiles")
                     elif action == "open_range":
                         self.launch_3d_range()
                     elif action == "set_mode_2" or action == "set_mode_0":
@@ -3195,24 +3199,33 @@ class ShanktuaryApp:
         sections = [
             ("BROADCAST & OVERLAYS", [
                 ("open_config", "OBS Overlay Config", "opens /config in your browser", True),
-                ("copy_obs_url", "Copy Overlay URL", f"http://localhost:{port}", False),
+                ("copy_obs_url", "Copy OBS Overlay URL", f"http://localhost:{port}", False),
                 ("open_range", "Open 3D Range", "opens /range in your browser", False),
             ]),
             ("FLOOR PROJECTION", [
                 ("copy_divot_url", "Copy Virtual Divot URL", f"http://localhost:{port}/divot", False),
                 ("open_divot", "Open Virtual Divot", "opens /divot in your browser", False),
+                ("copy_tiles_url", "Copy Metric Tiles URL", f"http://localhost:{port}/tiles", False),
+                ("open_tiles", "Open Metric Tiles", "opens /tiles in your browser", False),
                 ("set_mode_2", "Switch to Divot Mode", "fullscreen floor projector", False),
             ]),
         ]
 
         item_h, sec_h, div_h = 46, 22, 20
-        n_items = sum(len(items) for _, items in sections)
-        box_h = (14 + len(sections) * sec_h + n_items * item_h
-                 + (len(sections) - 1) * div_h + 20 + 2 * 24 + 46 + 16)
-        y2 = y1 + box_h
+        pad_bottom = 16
 
-        self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        # The panel is drawn FIRST so it stacks directly behind this menu's
+        # own content and above the app screen beneath it. Its height is not
+        # known yet, so it is created at a placeholder size and resized with
+        # canvas.coords() once the layout walk below has run.
+        #
+        # Do not "draw it last and tag_lower" instead: tag_lower moves an item
+        # to the bottom of the WHOLE canvas display list, which puts the panel
+        # behind the app background and the menu renders transparent.
+        shadow = self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y1 + 4,
+                                              fill="#08090C", outline="")
+        panel = self.canvas.create_rectangle(x1, y1, x2, y1,
+                                             fill=theme.SURFACE, outline=theme.HAIRLINE)
 
         self.tools_menu_items.clear()
         curr_y = y1 + 16
@@ -3276,6 +3289,12 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=theme.SURFACE_2, outline="")
         self.canvas.create_text((sb[0] + sb[2]) // 2, (sb[1] + sb[3]) // 2, text="Open Setup",
                                 fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
+
+        # Panel wraps whatever the walk above produced, with real padding
+        # below the last element. Resized in place -- stacking already correct.
+        y2 = sb[3] + pad_bottom
+        self.canvas.coords(panel, x1, y1, x2, y2)
+        self.canvas.coords(shadow, x1 + 4, y1 + 4, x2 + 4, y2 + 4)
 
 
     def draw_screen(self):

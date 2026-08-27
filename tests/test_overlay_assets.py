@@ -154,3 +154,183 @@ def test_rotation_round_trips(overlay):
         "rotation must default to 0 so layouts saved before it existed "
         "still load"
     )
+
+
+def test_rotate_control_lives_in_the_toolbar(overlay):
+    """A rotate button on the widget rotates with it -- unusable at 180."""
+    assert "spsRotateSelected" in overlay
+    assert "spsSelectWidget" in overlay
+    assert 'id="rotateLeftBtn"' in overlay
+    assert 'id="rotateRightBtn"' in overlay
+    assert "spsInstallRotateControls" not in overlay, (
+        "the per-widget rotate cluster is back; it rotates with the widget"
+    )
+
+    # The control must sit inside the fixed edit toolbar, not a widget.
+    toolbar = re.search(
+        r'<div class="edit-toolbar">(.*?)</div>\s*<!-- All 5 Visual Widgets -->',
+        overlay,
+        re.S,
+    )
+    assert toolbar, "edit toolbar block not found"
+    assert 'id="rotateLeftBtn"' in toolbar.group(1), (
+        "rotate control is not in the edit toolbar"
+    )
+
+
+# --- virtual divot ---------------------------------------------------------
+
+def test_divot_is_not_the_old_polygon(overlay):
+    """The 6-point polygon read as an abstract shape, not a hole."""
+    assert "const w = 36, h = 120;" not in overlay, (
+        "the old 6-point divot polygon is back"
+    )
+    assert "function spsDivotOutline" in overlay
+    assert "function spsDivotEnv" in overlay
+
+
+def test_divot_is_blunt_at_both_ends(overlay):
+    """Two pointed ends on a long thin shape is the anatomical read.
+
+    A real iron divot does not taper to a point at the ball -- the club is
+    already in the ground -- so both ends must keep real width.
+    """
+    env = re.search(r"function spsDivotEnv\(t\) \{(.*?)\n    \}", overlay, re.S)
+    assert env, "spsDivotEnv not found"
+    body = env.group(1)
+    assert "0.78 + 0.22" in body, (
+        "entry no longer starts blunt; it will taper to a point"
+    )
+    assert "1.0 - 0.18" in body, "exit no longer stays blunt"
+
+
+def test_divot_has_no_mirror_line(overlay):
+    """Lateral curve + unequal banks are what break the symmetry."""
+    out = re.search(r"function spsDivotOutline\(.*?\n    \}", overlay, re.S)
+    assert out, "spsDivotOutline not found"
+    body = out.group(0)
+    assert "drift" in body, "lateral curve removed -- shape becomes symmetric"
+    assert "1.08" in body and "0.80" in body, (
+        "the two banks are equal again, restoring the mirror line"
+    )
+
+
+def test_divot_aspect_stays_broad(overlay):
+    """Long and thin reads anatomical; real divots are ~2:1."""
+    mL = re.search(r"SPS_DIVOT_L = (\d+)", overlay)
+    mW = re.search(r"SPS_DIVOT_W = (\d+)", overlay)
+    assert mL and mW, "divot dimension constants not found"
+    L, W = int(mL.group(1)), int(mW.group(1))
+    assert 1.3 <= L / W <= 2.4, (
+        f"divot aspect {L/W:.2f}:1 is outside the 1.3-2.4 range; too thin "
+        "reads as an almond, too wide stops reading as a divot"
+    )
+
+
+def test_divot_shape_is_not_scaled_by_measurements(overlay):
+    """Nova measures club path only -- not divot depth, length or width.
+
+    Sizing the divot by ball speed or launch angle would present an
+    invented measurement as if observed.
+    """
+    fn = re.search(r"function drawDivot\(shot\) \{(.*?)\n    \}\n", overlay, re.S)
+    assert fn, "drawDivot not found"
+    body = fn.group(1)
+    for forbidden in ("ball_speed", "total_spin", "vertical_launch",
+                      "carry_distance", "smash"):
+        assert forbidden not in body, (
+            f"divot geometry is keyed off {forbidden}; the Nova does not "
+            "measure divot size, so this invents data"
+        )
+    assert "SPS_DIVOT_L" in body and "SPS_DIVOT_W" in body, (
+        "divot dimensions must come from the constants, not per-shot values"
+    )
+
+
+def test_divot_scale_is_derived_from_measured_extent(overlay):
+    """The divot is drawn FORWARD of the ball, not centred on it.
+
+    So it occupies one half of the canvas. Scaling it with the guides'
+    centred divisor (min/220) ran it off the widget by ~60px at 250px.
+    Scale must come from the measured extent instead.
+    """
+    fn = re.search(r"function drawDivot\(shot\) \{(.*?)\n    \}\n", overlay, re.S)
+    assert fn, "drawDivot not found"
+    body = fn.group(1)
+
+    assert "function spsDivotExtent" in overlay, (
+        "the measured-extent helper is gone; a fixed divisor will overflow "
+        "the widget as soon as the shape changes"
+    )
+    assert "spsDivotExtent()" in body, (
+        "drawDivot no longer derives its scale from the measured extent"
+    )
+    # The divot transform must not reuse the guides' centred scale.
+    divot_block = body.split("ctx.rotate(rad);")[1]
+    assert "ctx.scale(scale, scale)" not in divot_block, (
+        "divot is using the guides' centred scale again -- it assumes the "
+        "shape straddles the origin and will overflow"
+    )
+
+
+def test_divot_extent_covers_fringe_and_debris(overlay):
+    """Extent must include the overhanging parts, not just the outline.
+
+    Fringe tufts and forward-thrown debris reach past the rim; measuring
+    only the outline would still clip them.
+    """
+    ext = re.search(r"function spsDivotExtent\(\) \{(.*?)\n    \}", overlay, re.S)
+    assert ext, "spsDivotExtent not found"
+    body = ext.group(1)
+    assert "spsDivotOutline" in body, "extent ignores the outline"
+    assert "1.6 + 3.6 * t" in body, "extent ignores the fringe tufts"
+    assert "- t * 40" in body, "extent ignores the forward debris spray"
+
+
+def test_divot_edge_is_deterministic(overlay):
+    """A random edge would crawl between frames on a projector."""
+    assert "Math.random" not in overlay.split("function drawDivot")[1][:6000], (
+        "divot uses Math.random; the edge will crawl every repaint"
+    )
+    assert "function spsDivotNoise" in overlay
+
+
+def test_projector_roles_are_distinct(overlay):
+    """/divot and /tiles are separate windows aimed at separate surfaces."""
+    assert "SPS_PROJECTOR_ROLE" in overlay
+    assert "function spsRoleAllowsWidget" in overlay
+
+    role = re.search(r"const SPS_PROJECTOR_ROLE = \(\(\) => \{(.*?)\}\)\(\);",
+                     overlay, re.S)
+    assert role, "projector role resolver not found"
+    body = role.group(1)
+    assert "'/divot'" in body and "return 'divot'" in body
+    assert "'/tiles'" in body and "return 'tiles'" in body
+    assert "'/projector'" in body, "/projector must stay an alias for setups"
+
+
+def test_role_gate_survives_the_layout_fetch(overlay):
+    """The scattered-tiles bug: applyLayoutConfig re-showed everything.
+
+    The role must be consulted where display is decided, not applied once
+    at startup -- the layout fetch resolves later and would overwrite it.
+    """
+    apply_fn = re.search(
+        r"function applyLayoutConfig\(\) \{(.*?)\n    \}", overlay, re.S)
+    assert apply_fn, "applyLayoutConfig not found"
+    assert "spsRoleAllowsWidget" in apply_fn.group(1), (
+        "applyLayoutConfig ignores the projector role, so /divot and /tiles "
+        "will both show whatever the saved layout left visible"
+    )
+
+
+def test_role_gate_does_not_rewrite_saved_visibility(overlay):
+    """Viewing /tiles must not persist the divot as hidden."""
+    apply_fn = re.search(
+        r"function applyLayoutConfig\(\) \{(.*?)\n    \}", overlay, re.S)
+    assert apply_fn, "applyLayoutConfig not found"
+    body = apply_fn.group(1)
+    assert "const isVis = cfg.visible !== false;" in body, (
+        "data-visible must reflect the user's saved intent, not the role"
+    )
+    assert "showHere" in body, "role gate must be a separate display decision"

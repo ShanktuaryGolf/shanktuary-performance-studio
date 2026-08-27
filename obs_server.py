@@ -7,6 +7,8 @@ Based on the proven architecture from ShanktuaryGolf/SwingLab:
   - Serves http://localhost:9321         -> Transparent OBS Browser Source Overlay (overlay.html)
   - Serves http://localhost:9321?edit=true-> Interactive Drag, Drop & Resize Widget Canvas Editor
   - Serves http://localhost:9321?mode=projector -> Fullscreen Floor Projector Mat Mode
+  - Serves http://localhost:9321/divot    -> Floor projector: fullscreen divot target only
+  - Serves http://localhost:9321/tiles    -> Floor projector: placed metric cards only
   - Serves http://localhost:9321/config   -> Interactive Web Configurator UI (config.html)
   - Serves /api/layout                   -> GET/POST saved layout preferences, widget positions, and divot physical calibration
   - Serves /api/shot                     -> GET last shot payload
@@ -808,7 +810,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.handle_websocket()
             return
 
-        if parsed_path in ["/", "/overlay", "/divot", "/projector"]:
+        # All of these serve the same document; overlay.html branches on the
+        # path to pick its projector role. /divot is the fullscreen divot
+        # target, /tiles is the placed metric cards -- two separate windows
+        # so each can be aimed at its own surface. /projector aliases /divot.
+        if parsed_path in ["/", "/overlay", "/divot", "/projector", "/tiles"]:
             self.serve_file(assets_dir / "overlay.html", "text/html; charset=utf-8")
         elif parsed_path in ["/config", "/config.html"]:
             self.serve_file(assets_dir / "config.html", "text/html; charset=utf-8")
