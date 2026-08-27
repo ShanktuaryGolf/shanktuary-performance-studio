@@ -1379,6 +1379,13 @@ class ShanktuaryApp:
         if clean_name:
             if clean_name not in self.clubs:
                 self.clubs.append(clean_name)
+            # Also add it to the bag. Appending to self.clubs alone only
+            # creates a selectable NAME -- the club had no loft, lie or
+            # category, so strike scoring fell back to defaults and the club
+            # disappeared on restart because the bag is what gets persisted.
+            is_new_to_bag = self.get_bag_club(clean_name) is None
+            if is_new_to_bag:
+                self.add_club_to_bag(clean_name)
             self.current_club = clean_name
             self.show_club_menu = False
             self.show_custom_club_modal = False
@@ -1386,6 +1393,10 @@ class ShanktuaryApp:
             self.copy_feedback = f"✓ Added & Selected '{clean_name}'"
             self.root.after(2500, self.clear_copy_feedback)
             self.draw_screen()
+            # A club with no loft scores strikes against a 0 degree face, so
+            # send the user straight to the spec editor to fill it in.
+            if is_new_to_bag:
+                self.open_club_spec_editor(clean_name)
 
     def open_club_spec_editor(self, club_name=None):
         self.show_club_menu = False
