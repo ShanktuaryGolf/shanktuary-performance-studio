@@ -5954,20 +5954,7 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(add_x1, bar_y1 + 7, add_x2, bar_y2 - 7, fill=theme.ACCENT_DEEP, outline=theme.ACCENT_TEXT, width=1)
         self.canvas.create_text((add_x1 + add_x2) // 2, (bar_y1 + bar_y2) // 2, text="+ New Club", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="center")
 
-        # 3. Dual-Pane Dimensions & Splitter
-        content_top = bar_y2 + 8
-        content_h = bot_y - content_top
-        plot_w = int(avail_w * self.fitting_splitter_ratio)
-        plot_w = max(260, min(avail_w - 240, plot_w))
-
-        split_x1 = offset_x + plot_w + 3
-        split_x2 = split_x1 + 8
-        self.fitting_splitter_rect = (split_x1 - 4, content_top, split_x2 + 4, bot_y)
-
-        gap_x1 = split_x2 + 6
-        gap_w = (offset_x + avail_w) - gap_x1 - 12
-
-        # Calculate fitting stats for all competitor clubs
+        # 3. Stats for every competitor club
         stats_by_club = {}
         grouped_shots = {}
         for c_name in session_clubs:
@@ -5978,25 +5965,81 @@ class ShanktuaryApp:
             if c_items:
                 grouped_shots[c_name] = c_items
 
-        chart_top = content_top
-        chart_h = bot_y - chart_top
-        plot_x1 = offset_x + 10
-        plot_x2 = offset_x + plot_w
-        max_x_yds = 350.0
-        max_h_yds = 60.0
+        # --- Stacked layout, per docs/ui/view_fit.png: club header cards,
+        # --- then the stat matrix, then chart + recommendation on one row.
+        cx0 = offset_x + 10
+        cx1 = offset_x + avail_w - 10
+        y = bar_y2 + 10
 
-        # Draw Left Pane Overlaid Charts
-        self._draw_fitting_overlaid_charts(plot_x1, chart_top, plot_x2, bot_y, max_x_yds, max_h_yds, stats_by_club, grouped_shots)
+        # A. Club header cards -- baseline first, then the comparison clubs
+        cmp_clubs = [c for c in session_clubs if c in stats_by_club][:3]
+        if self.fitting_baseline_club in cmp_clubs:
+            cmp_clubs.remove(self.fitting_baseline_club)
+            cmp_clubs.insert(0, self.fitting_baseline_club)
+        hdr_h = 78
+        if cmp_clubs:
+            hw_ = (cx1 - cx0 - 10 * (len(cmp_clubs) - 1)) / len(cmp_clubs)
+            for i, c_name in enumerate(cmp_clubs):
+                hx0 = cx0 + i * (hw_ + 10)
+                hx1 = hx0 + hw_
+                st = stats_by_club[c_name]
+                is_base = (c_name == self.fitting_baseline_club)
+                self.canvas.create_rectangle(hx0, y, hx1, y + hdr_h,
+                                             fill=theme.SURFACE, outline="")
+                # Accent rule on top, in the club's series colour.
+                self.canvas.create_rectangle(hx0, y, hx1, y + 3,
+                                             fill=self.get_club_color(c_name),
+                                             outline="")
+                self.canvas.create_text(hx0 + 18, y + 18, text=c_name,
+                                        fill=theme.TEXT,
+                                        font=(theme.ui_font(), 19), anchor="nw")
+                spec = self.get_bag_club(c_name) or {}
+                bits = [b for b in (spec.get("brand"), spec.get("model")) if b]
+                loft = spec.get("loft_deg")
+                sub = " ".join(bits) if bits else "—"
+                if loft:
+                    sub += f" · {float(loft):.1f}°"
+                self.canvas.create_text(hx0 + 18, y + 48, text=sub,
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 8), anchor="nw")
+                self.canvas.create_text(hx0 + 18, y + 61,
+                                        text=f"{st['count']} shots",
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 8), anchor="nw")
+                tag = "BASE" if is_base else "TEST"
+                self.canvas.create_rectangle(hx1 - 62, y + 14, hx1 - 18, y + 30,
+                                             fill=theme.SURFACE_2, outline="")
+                self.canvas.create_text(hx1 - 40, y + 22, text=tag,
+                                        fill=theme.ACCENT_TEXT if is_base else theme.TEXT_3,
+                                        font=(theme.ui_font(), 7), anchor="center")
+        y += hdr_h + 10
 
-        # Draw Splitter Handle
-        is_dragging = self.fitting_splitter_dragging
-        self.canvas.create_rectangle(split_x1, content_top, split_x2, bot_y, fill=theme.ACCENT_TEXT if is_dragging else theme.SURFACE, outline=theme.ACCENT_TEXT if is_dragging else theme.HAIRLINE)
-        mid_y = (content_top + bot_y) // 2
-        for dy in [-16, -8, 0, 8, 16]:
-            self.canvas.create_line(split_x1 + 2, mid_y + dy, split_x2 - 2, mid_y + dy, fill=theme.TEXT if is_dragging else theme.TEXT_3, width=1)
+        # B. Head-to-head matrix
+        matrix_h = 214
+        self._draw_fitting_h2h_matrix(cx0, y, cx1 - cx0, y + matrix_h,
+                                      stats_by_club, session_clubs)
+        y += matrix_h + 10
 
-        # Draw Right Pane Head-to-Head Delta Matrix & Best Fit Summary
-        self._draw_fitting_h2h_matrix(gap_x1, content_top, gap_w, bot_y, stats_by_club, session_clubs)
+        # C. Chart + recommendation
+        chart_x1 = cx0
+        chart_x2 = cx0 + (cx1 - cx0) * 0.63
+        rec_x1 = chart_x2 + 10
+        self.fitting_splitter_rect = None
+        # Scale the range axis to the data. A fixed 350 yds squashes a
+        # wedge session into the left corner of the plot.
+        _max_carry = max((st.get("max_carry", 0.0)
+                          for st in stats_by_club.values()), default=0.0)
+        _axis = 350.0 if _max_carry > 280 else max(60.0, _max_carry * 1.30)
+        # Height axis too: apex is reported in feet, so a 60 yd ceiling
+        # leaves a 24 ft flight hugging the baseline.
+        _max_apex_ft = max((st.get("avg_apex_ft", 0.0)
+                            for st in stats_by_club.values()), default=0.0)
+        _h_axis = max(10.0, (_max_apex_ft / 3.0) * 1.45)
+        self._draw_fitting_overlaid_charts(chart_x1, y, chart_x2, bot_y,
+                                           _axis, _h_axis, stats_by_club,
+                                           grouped_shots)
+        self._draw_fitting_recommendation(rec_x1, y, cx1, bot_y,
+                                          stats_by_club, session_clubs)
 
     def _draw_fitting_overlaid_charts(self, plot_x1, plot_y1, plot_x2, plot_y2, max_x_yds, max_h_yds, stats_by_club, grouped_shots):
         content_h = plot_y2 - plot_y1
@@ -6144,116 +6187,153 @@ class ShanktuaryApp:
             land_x = margin_x + int((avg_c / max_x_yds) * chart_w)
             self.canvas.create_oval(land_x - 4, base_y - 4, land_x + 4, base_y + 4, fill=c_color, outline=theme.TEXT)
 
-    def _draw_fitting_h2h_matrix(self, gap_x1, top_y, gap_w, bot_y, stats_by_club, session_clubs):
-        self.canvas.create_rectangle(gap_x1, top_y, gap_x1 + gap_w, bot_y, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(gap_x1 + 14, top_y + 16, text="HEAD-TO-HEAD STAT MATRIX & DELTAS", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+    def _draw_fitting_h2h_matrix(self, x0, y0, w, y1, stats_by_club, session_clubs):
+        """Row-per-stat comparison table, per docs/ui/view_fit.png.
 
-        baseline_name = self.fitting_baseline_club or (session_clubs[0] if session_clubs else None)
-        base_st = stats_by_club.get(baseline_name)
+        One row per metric with a column per club and a delta column, rather
+        than a stacked block per club -- the point of a fitting view is
+        comparing the same metric across clubs, which reads across a row.
+        """
+        x1 = x0 + w
+        self.canvas.create_rectangle(x0, y0, x1, y1, fill=theme.SURFACE,
+                                     outline="")
+        self.canvas.create_text(x0 + 18, y0 + 14, text="HEAD-TO-HEAD STAT MATRIX",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                                anchor="nw")
 
-        if not stats_by_club or len(stats_by_club) == 0:
-            self.canvas.create_text(gap_x1 + gap_w // 2, top_y + 160, text="No competitor clubs recorded.\nHit shots or select clubs from the top bar to compare.", fill=theme.TEXT_3, font=(theme.ui_font(), 10), justify="center")
+        baseline = self.fitting_baseline_club or (session_clubs[0] if session_clubs else None)
+        base_st = stats_by_club.get(baseline)
+
+        if not stats_by_club:
+            self.canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2,
+                                    text="No clubs with shots in this session",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 10), anchor="center")
             return
 
-        # Baseline indicator strip
-        base_text = f"Baseline Club: {baseline_name}" if baseline_name else "Baseline"
-        self.canvas.create_text(gap_x1 + gap_w - 14, top_y + 16, text=base_text, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="e")
+        cols = [c for c in session_clubs if c in stats_by_club][:3]
+        if baseline in cols:
+            cols.remove(baseline)
+            cols.insert(0, baseline)
 
-        clubs_to_render = [c for c in session_clubs if c in stats_by_club]
-        if not clubs_to_render:
+        # Column geometry: label gutter, one column per club, delta on the right.
+        lab_x = x0 + 18
+        delta_x = x1 - 18
+        first_col = x0 + w * 0.34
+        col_span = (delta_x - 90 - first_col) / max(1, len(cols))
+
+        hdr_y = y0 + 38
+        for i, c in enumerate(cols):
+            self.canvas.create_text(first_col + i * col_span, hdr_y, text=c,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="nw")
+        if len(cols) >= 2:
+            self.canvas.create_text(delta_x, hdr_y, text="DELTA",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="ne")
+
+        rows = [
+            ("Avg carry",  "avg_carry",  "{:.1f}",  1),
+            ("Avg total",  "avg_total",  "{:.1f}",  1),
+            ("Ball speed", "avg_ball_speed", "{:.1f}", 1),
+            ("Launch",     "avg_launch", "{:.1f}°", 1),
+            ("Spin",       "avg_spin",   "{:.0f}",  -1),
+            ("Dispersion", "std_carry",  "±{:.1f}", -1),
+            ("Club speed", None,         "--",       0),
+        ]
+
+        ry = hdr_y + 22
+        row_h = (y1 - 12 - ry) / len(rows)
+        for label, key, fmt, better in rows:
+            self.canvas.create_line(x0 + 18, ry, x1 - 18, ry,
+                                    fill=theme.HAIRLINE)
+            ty = ry + row_h * 0.5 - 7
+            muted = key is None
+            self.canvas.create_text(lab_x, ty, text=label,
+                                    fill=theme.TEXT_3 if muted else theme.TEXT_2,
+                                    font=(theme.ui_font(), 9), anchor="nw")
+            vals = []
+            for i, c in enumerate(cols):
+                st = stats_by_club[c]
+                if muted:
+                    txt = "--"
+                else:
+                    v = float(st.get(key, 0.0) or 0.0)
+                    vals.append(v)
+                    txt = fmt.format(v)
+                self.canvas.create_text(first_col + i * col_span, ty, text=txt,
+                                        fill=theme.TEXT_3 if muted else theme.TEXT,
+                                        font=(theme.ui_font(), 10), anchor="nw")
+            # Delta against the baseline, coloured by whether it is an
+            # improvement -- for spin and dispersion, lower is better.
+            if muted or len(vals) < 2:
+                self.canvas.create_text(delta_x, ty, text="--",
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 10), anchor="ne")
+            else:
+                d = vals[1] - vals[0]
+                good = (d * better) > 0
+                self.canvas.create_text(
+                    delta_x, ty, text=f"{d:+.1f}" if abs(d) < 1000 else f"{d:+.0f}",
+                    fill=theme.ACCENT_TEXT if good else theme.WARN,
+                    font=(theme.ui_font(), 10), anchor="ne")
+            ry += row_h
+
+        self.canvas.create_text(lab_x, y1 - 12,
+                                text="Smash and club speed excluded — "
+                                     "OpenGolfCoach saturates at these speeds",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="sw")
+
+    def _draw_fitting_recommendation(self, x0, y0, x1, y1, stats_by_club,
+                                     session_clubs):
+        """Which club won, and on what evidence."""
+        self.canvas.create_rectangle(x0, y0, x1, y1, fill=theme.SURFACE,
+                                     outline="")
+        self.canvas.create_text(x0 + 18, y0 + 14, text="RECOMMENDATION",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                                anchor="nw")
+
+        ranked = sorted(stats_by_club.items(),
+                        key=lambda kv: kv[1].get("avg_carry", 0.0),
+                        reverse=True)
+        if not ranked:
+            self.canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2,
+                                    text="Hit shots with two clubs to compare",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 9), anchor="center")
             return
 
-        # Side-by-side club columns
-        num_clubs = min(3, len(clubs_to_render))
-        card_w = (gap_w - 20 - (num_clubs - 1) * 10) // num_clubs
-        card_start_y = top_y + 34
-        card_h = max(240, bot_y - card_start_y - 85)
+        win_name, win_st = ranked[0]
+        self.canvas.create_text(x0 + 18, y0 + 40, text=win_name,
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 26), anchor="nw")
 
-        for col_i, c_name in enumerate(clubs_to_render[:num_clubs]):
-            st = stats_by_club[c_name]
-            cx1 = gap_x1 + 10 + col_i * (card_w + 10)
-            cx2 = cx1 + card_w
-            cy1 = card_start_y
-            cy2 = cy1 + card_h
-            c_color = st["color"]
-            is_base = (c_name == baseline_name)
+        ly = y0 + 84
+        if len(ranked) >= 2:
+            _, other = ranked[1]
+            d_carry = win_st.get("avg_carry", 0.0) - other.get("avg_carry", 0.0)
+            d_disp = win_st.get("std_carry", 0.0) - other.get("std_carry", 0.0)
+            tighter = "tighter to target" if d_disp <= 0 else "wider dispersion"
+            for line in (f"+{d_carry:.1f} yds carry, {tighter}",
+                         f"{'at the cost of' if d_disp > 0 else 'and'} "
+                         f"{abs(d_disp):.1f} yds dispersion"):
+                self.canvas.create_text(x0 + 18, ly, text=line,
+                                        fill=theme.TEXT_2,
+                                        font=(theme.ui_font(), 9), anchor="nw")
+                ly += 18
+        else:
+            self.canvas.create_text(x0 + 18, ly,
+                                    text="Only one club has shots this session",
+                                    fill=theme.TEXT_2,
+                                    font=(theme.ui_font(), 9), anchor="nw")
+            ly += 18
 
-            # Club Card Container
-            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=theme.SURFACE, outline=c_color if is_base else theme.HAIRLINE, width=2 if is_base else 1)
-            # Top Club Name Banner
-            self.canvas.create_rectangle(cx1, cy1, cx2, cy1 + 24, fill=theme.SURFACE_2, outline="")
-            self.canvas.create_rectangle(cx1, cy1, cx1 + 5, cy1 + 24, fill=c_color, outline="")
-            self.canvas.create_text(cx1 + 12, cy1 + 12, text=c_name, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
-            self.canvas.create_text(cx2 - 8, cy1 + 12, text=f"{st['count']} shots", fill=theme.TEXT_2, font=(theme.ui_font(), 7), anchor="e")
-
-            # Metrics with Deltas vs Baseline
-            metrics = [
-                ("Carry", f"{st['avg_carry']:.1f} yds", st['avg_carry'] - (base_st['avg_carry'] if base_st else st['avg_carry']), "yds", True),
-                ("Total", f"{st['avg_total']:.1f} yds", st['avg_total'] - (base_st['avg_total'] if base_st else st['avg_total']), "yds", True),
-                ("Ball Speed", f"{st['avg_ball_speed']:.1f} mph", st['avg_ball_speed'] - (base_st['avg_ball_speed'] if base_st else st['avg_ball_speed']), "mph", True),
-                # Smash is an OpenGolfCoach derivation of ball speed and is a
-                # constant whenever its model saturates, so a smash "delta"
-                # between two clubs would be pure noise dressed as a finding.
-                ("Smash", "--" if st.get('smash_clamped') else f"{st['avg_smash']:.2f}",
-                 0.0 if st.get('smash_clamped') else st['avg_smash'] - (base_st['avg_smash'] if base_st else st['avg_smash']), "", True),
-                ("Launch", f"{st['avg_launch']:.1f}°", st['avg_launch'] - (base_st['avg_launch'] if base_st else st['avg_launch']), "°", None),
-                ("Total Spin", f"{int(st['avg_spin'])} rpm", st['avg_spin'] - (base_st['avg_spin'] if base_st else st['avg_spin']), "rpm", None),
-                ("Apex", f"{st['avg_apex_ft']:.0f} ft", st['avg_apex_ft'] - (base_st['avg_apex_ft'] if base_st else st['avg_apex_ft']), "ft", None),
-                ("Closure Rate", f"{int(st['avg_closure_rate'])} °/s", st['avg_closure_rate'] - (base_st['avg_closure_rate'] if base_st else st['avg_closure_rate']), "°/s", None),
-                ("Dispersion (σ)", f"±{st['std_offline']:.1f}y", st['std_offline'] - (base_st['std_offline'] if base_st else st['std_offline']), "y", False),
-                ("Ellipse Area", f"{int(st['ellipse_area'])} yd²", st['ellipse_area'] - (base_st['ellipse_area'] if base_st else st['ellipse_area']), "yd²", False),
-            ]
-
-            row_y = cy1 + 32
-            row_h = (card_h - 40) // len(metrics)
-            for m_label, m_val, delta, unit, higher_is_better in metrics:
-                self.canvas.create_text(cx1 + 10, row_y + 4, text=m_label, fill=theme.TEXT_3, font=(theme.ui_font(), 7), anchor="w")
-                
-                # Primary Val
-                self.canvas.create_text(cx1 + card_w // 2 + 4, row_y + 4, text=m_val, fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
-
-                # Delta vs baseline (if not baseline itself)
-                if not is_base and base_st:
-                    if abs(delta) > 0.05:
-                        if higher_is_better is True:
-                            d_col = theme.ACCENT_TEXT if delta > 0 else theme.DANGER
-                        elif higher_is_better is False:
-                            d_col = theme.ACCENT_TEXT if delta < 0 else theme.DANGER # Lower dispersion is better
-                        else:
-                            d_col = theme.ACCENT_TEXT
-                        d_str = f"{delta:+.1f}{unit}" if isinstance(delta, float) else f"{int(delta):+d}{unit}"
-                    else:
-                        d_col = theme.TEXT_3
-                        d_str = "0.0"
-                    self.canvas.create_text(cx2 - 8, row_y + 4, text=d_str, fill=d_col, font=(theme.ui_font(), 7, "bold"), anchor="e")
-
-                row_y += row_h
-
-        # 5. Best Fit Summary Award Banner (Bottom of right pane)
-        summary_y1 = bot_y - 72
-        summary_y2 = bot_y - 8
-        self.canvas.create_rectangle(gap_x1 + 10, summary_y1, gap_x1 + gap_w - 10, summary_y2, fill=theme.BG, outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 14, text="FITTING WINNER & RECOMMENDATION", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
-
-        # Calculate winners
-        best_carry_club = max(clubs_to_render, key=lambda c: stats_by_club[c]["avg_carry"])
-        best_tight_club = min(clubs_to_render, key=lambda c: stats_by_club[c]["ellipse_area"])
-        # Only crown an efficiency winner when at least one club has a smash
-        # figure that is not the clamped constant; otherwise it ranks noise.
-        smash_usable = [c for c in clubs_to_render
-                        if not stats_by_club[c].get("smash_clamped")]
-        best_smash_club = (max(smash_usable, key=lambda c: stats_by_club[c]["avg_smash"])
-                           if smash_usable else None)
-
-        w1 = f"Longest Carry: {best_carry_club} ({stats_by_club[best_carry_club]['avg_carry']:.1f} yds)"
-        w2 = f"Tightest Dispersion: {best_tight_club} ({int(stats_by_club[best_tight_club]['ellipse_area'])} yd²)"
-        w3 = (f"Highest Efficiency: {best_smash_club} "
-              f"({stats_by_club[best_smash_club]['avg_smash']:.2f} smash)"
-              if best_smash_club else
-              "Efficiency: not comparable — smash estimate saturated")
-
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 34, text=f"• {w1}", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
-        self.canvas.create_text(gap_x1 + 20, summary_y1 + 50, text=f"• {w2}   |   • {w3}", fill=theme.TEXT, font=(theme.ui_font(), 8), anchor="w")
+        total = sum(s.get("count", 0) for s in stats_by_club.values())
+        self.canvas.create_text(x0 + 18, y1 - 16,
+                                text=f"Based on {total} shots — smash factor excluded",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="sw")
 
 
     def draw_swing_lab_viewport(self, avail_w, h, offset_x=0):
