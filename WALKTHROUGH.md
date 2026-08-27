@@ -5,7 +5,7 @@ The **WebGPU Photorealistic 3D Driving Range** is now fully implemented, tested,
 📁 **Local Workspace Directory:** `/home/sean/sps/`  
 🌿 **3D Driving Range URL:** [http://localhost:9321/range](http://localhost:9321/range)  
 📜 **Implementation Plan:** [docs/superpowers/plans/2026-08-20-webgpu-3d-driving-range.md](file:///home/sean/sps/docs/superpowers/plans/2026-08-20-webgpu-3d-driving-range.md)  
-📚 **3D Asset Credits & Licenses:** [ATTRIBUTIONS.md](file:///home/sean/sps/ATTRIBUTIONS.md)
+📚 **3D Asset Credits & Licenses:** see the License & Credits section of [README.md](README.md)
 
 ---
 

@@ -63,7 +63,7 @@ Shanktuary Performance Studio is a comprehensive launch monitor visualization, p
 
 - **Immersive 3D Physics:** Powered by the Minigames physics trajectory engine for realistic ball flight rendering.
 - **Dynamic Camera System:** Press `[V]` to cycle between multiple camera views (Follow, TV Tower, Behind).
-- **Credits:** See `ATTRIBUTIONS.md` for full engine and asset credits.
+- **Credits:** See the License & Credits section below for engine and asset credits.
 
 ---
 
@@ -98,3 +98,14 @@ python3 shanktuary_performance_studio.py
 ## 📄 License & Credits
 Developed by **Shanktuary Golf** for OpenLaunch Nova & OpenGolfCoach systems.  
 Distributed under the MIT License.
+
+### 3D asset attribution
+
+The WebGPU 3D Driving Range ships the following models under
+**CC-BY-4.0**, which requires that credit stay with the distributed work:
+
+* **"Pine tree"** — [Andriy Shekh](https://sketchfab.com/sheh5262) · [source](https://sketchfab.com/3d-models/pine-tree-e52769d653cd4e52a4acff3041961e65)
+* **"Wooden Sign With Roof"** — [KenVeel](https://sketchfab.com/KenVeel) · [source](https://sketchfab.com/3d-models/wooden-sign-with-roof-d3c14c892ce54564b7fde91c73896ca3)
+
+Rendering uses [three.js](https://threejs.org) (MIT).
+
