@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <title>Shanktuary Performance Studio - OBS Stream Overlay & Divot Projector</title>
+  <!-- Shared design tokens, generated from theme.py by
+       scripts/gen_theme_css.py. Also carries the projector polarity
+       switch under body.mode-projector. -->
+  <link rel="stylesheet" href="/assets/theme.css">
   <style>
     * {
       box-sizing: border-box;
@@ -14,19 +18,31 @@
       height: 1080px;
       background: transparent !important;
       overflow: hidden;
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
-      color: #FFFFFF;
+      font-family: var(--ui-font);
+      color: var(--text);
       position: relative;
     }
 
-    /* Floor Projector Fullscreen Mode */
+    /* ---- Floor Projector Mode --------------------------------------
+       Backdrop is pure black: a projector cannot project black, so black
+       means "emit nothing here" and the mat shows through unlit.
+
+       Widgets are NOT hidden. They used to be -- every widget except the
+       divot panel was display:none -- which defeated the point of the
+       ?edit=true layout editor, since a user could place cards anywhere and
+       then none of them appeared on the floor. Whatever the user left
+       visible is what projects.
+
+       The palette inversion (bright card, dark text) lives in
+       assets/theme.css under the same body.mode-projector selector. */
     body.mode-projector {
       background: #000000 !important;
     }
-    body.mode-projector .widget:not(#w_divot) {
-      display: none !important;
-    }
-    body.mode-projector #w_divot {
+
+    /* The divot panel is the one widget that goes fullscreen, because it is
+       aiming a target at the hitting area rather than presenting a figure.
+       Opt out by unchecking it in the layout editor. */
+    body.mode-projector #w_divot.projector-fullscreen {
       position: absolute;
       top: 0 !important;
       left: 0 !important;
@@ -37,8 +53,15 @@
       box-shadow: none !important;
       backdrop-filter: none !important;
     }
-    body.mode-projector #w_divot .visual-title, body.mode-projector #w_divot .widget-edit-header {
+    body.mode-projector #w_divot.projector-fullscreen .visual-title,
+    body.mode-projector #w_divot.projector-fullscreen .widget-edit-header {
       display: none !important;
+    }
+
+    /* Cards keep their placement but drop the drop shadow -- a shadow is
+       projected light, so it shows up as a grey smear on the mat. */
+    body.mode-projector .widget {
+      box-shadow: none;
     }
 
     /* Edit Mode Canvas Grid Background */
@@ -51,47 +74,56 @@
     }
 
     /* Absolute Positioned Widget Containers */
+    /* Solid direction: an opaque card with a single accent rule on top.
+       Opaque rather than translucent because the overlay sits over video --
+       a card that carries its own background stays legible over a busy
+       frame, and blur is expensive for OBS to composite every frame. */
     .widget {
       position: absolute;
-      background: rgba(20, 22, 30, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-top: 3px solid #00E5FF;
-      border-radius: 8px;
-      padding: 10px 16px;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(6px);
+      background: var(--surface);
+      border: none;
+      border-top: 2px solid var(--accent);
+      border-radius: 6px;
+      padding: 12px 16px 13px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
       user-select: none;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      transition: border-color 0.15s, box-shadow 0.15s;
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
 
     .widget.visual-card {
-      padding: 12px;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 12px 14px;
+      border-top: 2px solid var(--accent);
     }
 
-    .widget.accent-green { border-top-color: #00FF66; }
-    .widget.accent-yellow { border-top-color: #FFEA00; }
-    .widget.accent-pink { border-top-color: #FF4081; }
+    /* One accent. The old per-card green/yellow/pink rules are kept as
+       no-ops so any saved layout or markup referencing them still parses. */
+    .widget.accent-green,
+    .widget.accent-yellow,
+    .widget.accent-pink { border-top-color: var(--accent); }
+
+    /* A metric with no honest value: drop the accent too, so a suppressed
+       card reads as different at a glance rather than only on close look. */
+    .widget.metric-unavailable { border-top-color: var(--hairline); }
 
     body.edit-mode .widget {
-      border: 2px dashed #00E5FF !important;
+      border: 1px dashed var(--guide) !important;
       cursor: grab !important;
     }
     body.edit-mode .widget.hidden-in-edit {
-      opacity: 0.35;
-      border-color: #FF1744 !important;
+      opacity: 0.3;
+      border-color: var(--danger) !important;
     }
     body.edit-mode .widget:hover {
-      border-color: #00FF66 !important;
-      box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+      border-color: var(--accent-line) !important;
+      box-shadow: 0 0 0 1px var(--accent-line);
     }
     body.edit-mode .widget.dragging {
       cursor: grabbing !important;
-      opacity: 0.85;
-      box-shadow: 0 0 25px rgba(0, 255, 102, 0.6);
+      opacity: 0.9;
+      box-shadow: 0 0 0 2px var(--accent);
       z-index: 1000;
     }
 
@@ -100,14 +132,14 @@
       position: absolute;
       bottom: 2px;
       right: 4px;
-      font-size: 14px;
-      color: #00E5FF;
+      font-size: 13px;
+      color: var(--accent-line);
       cursor: se-resize !important;
       user-select: none;
       z-index: 10;
     }
     body.edit-mode .resize-handle { display: block; }
-    body.edit-mode .resize-handle:hover { color: #00FF66; }
+    body.edit-mode .resize-handle:hover { color: var(--accent-text); }
 
     .widget-edit-header {
       display: none;
@@ -120,14 +152,14 @@
     .edit-label {
       font-size: 9px;
       font-weight: 700;
-      color: #00E5FF;
+      color: var(--accent-line);
       letter-spacing: 1px;
       text-transform: uppercase;
       pointer-events: none;
     }
 
     .widget-close-btn {
-      background: #FF1744;
+      background: var(--danger);
       color: white;
       border: none;
       border-radius: 50%;
@@ -141,35 +173,102 @@
     }
 
     .visual-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      color: #00E5FF;
-      margin-bottom: 6px;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.09em;
+      color: var(--text-3);
+      margin-bottom: 8px;
       text-transform: uppercase;
     }
 
     .metric-label {
-      font-size: 10px;
-      font-weight: 700;
-      color: #8E94A5;
-      letter-spacing: 0.8px;
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-3);
+      letter-spacing: 0.09em;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
 
+    /* Proportional, not monospace: the app moved off Consolas because it
+       read as terminal output rather than a broadcast graphic. */
     .metric-val {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 22px;
-      font-weight: 700;
-      color: #FFFFFF;
+      font-size: 27px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    /* Suppressed value -- clamped by the OGC model, or not measured at all.
+       Muted and lighter so it never reads as a live figure. */
+    .metric-val.unavailable {
+      color: var(--text-3);
+      font-weight: 400;
+    }
+
+    /* Rotate control, injected into every widget's edit header. Only
+       visible in edit mode, alongside the existing hide button. */
+    .rotate-group {
+      display: none;
+      align-items: center;
+      gap: 3px;
+      margin-left: auto;
+      margin-right: 6px;
+    }
+    body.edit-mode .rotate-group { display: flex; }
+    .rotate-btn {
+      background: var(--surface-2);
+      color: var(--text-2);
+      border: none;
+      border-radius: 3px;
+      font-size: 11px;
+      line-height: 1;
+      padding: 3px 6px;
+      cursor: pointer;
+    }
+    .rotate-btn:hover { background: var(--accent-deep); color: var(--accent-text); }
+    .rotate-badge {
+      font-size: 9px;
+      color: var(--text-3);
+      min-width: 26px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ESTIMATE chip -- marks a panel whose content is inferred rather than
+       measured, so a viewer on stream knows the difference. */
+    .est-chip {
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--warn);
+      background: rgba(245, 165, 36, 0.13);
+      padding: 2px 7px;
+      border-radius: 3px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .visual-title.with-chip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Why a value is suppressed, e.g. "Not measured". */
+    .metric-note {
+      font-size: 8px;
+      color: var(--text-3);
+      margin-top: 7px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
     }
 
     .metric-unit {
       font-size: 10px;
-      color: #6C7284;
-      margin-left: 4px;
-      font-weight: normal;
+      color: var(--text-3);
+      margin-left: 5px;
+      font-weight: 400;
     }
 
     .canvas-wrapper {
@@ -193,7 +292,7 @@
       top: 0; left: 0; right: 0;
       height: 48px;
       background: rgba(16, 17, 22, 0.95);
-      border-bottom: 1px solid #00E5FF;
+      border-bottom: 1px solid var(--accent-line);
       z-index: 9999;
       align-items: center;
       padding: 0 20px;
@@ -204,7 +303,7 @@
     .edit-toolbar-title {
       font-size: 13px;
       font-weight: 700;
-      color: #00E5FF;
+      color: var(--accent-line);
       margin-right: 6px;
     }
 
@@ -217,12 +316,12 @@
       padding: 4px 8px;
       border-radius: 6px;
       font-size: 11px;
-      color: #00E5FF;
+      color: var(--accent-line);
     }
 
     .calib-controls input[type=number], .calib-controls input[type=range] {
-      background: #101116;
-      border: 1px solid #00E5FF;
+      background: var(--bg);
+      border: 1px solid var(--accent-line);
       color: #FFF;
       padding: 2px 4px;
       border-radius: 4px;
@@ -239,8 +338,8 @@
       background: rgba(255,255,255,0.1);
       color: #FFF;
     }
-    .btn-save-layout { background: #00FF66 !important; color: #101116 !important; border: none !important; }
-    .btn-config-page { background: #00E5FF !important; color: #101116 !important; border: none !important; }
+    .btn-save-layout { background: var(--accent) !important; color: var(--bg) !important; border: none !important; }
+    .btn-config-page { background: var(--accent-line) !important; color: var(--bg) !important; border: none !important; }
   </style>
 </head>
 <body>
@@ -301,7 +400,7 @@
       <span class="edit-label">Quad: Face Impact</span>
       <button class="widget-close-btn" onclick="hideWidget('face_impact')" title="Hide Widget">✕</button>
     </div>
-    <div class="visual-title">FACE IMPACT LOCATION</div>
+    <div class="visual-title with-chip"><span>FACE IMPACT LOCATION</span><span class="est-chip">ESTIMATE</span></div>
     <div class="canvas-wrapper"><canvas id="faceCanvas"></canvas></div>
     <div class="resize-handle">◢</div>
   </div>
@@ -361,12 +460,12 @@
     <div class="widget-edit-header"><span class="edit-label">Swing Lab: L/R Balance</span><button class="widget-close-btn" onclick="hideWidget('wbb_balance_bar')">✕</button></div>
     <div class="metric-label">L/R BALANCE & PHASE</div>
     <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:4px;">
-      <div class="metric-val" id="v_wbb_pct_left" style="font-size: 16px; color:#00E5FF;">50% L</div>
-      <div id="v_wbb_phase" style="font-size: 11px; font-weight:800; color:#00FF66; text-transform:uppercase;">ADDRESS</div>
-      <div class="metric-val" id="v_wbb_pct_right" style="font-size: 16px; color:#FF4081;">50% R</div>
+      <div class="metric-val" id="v_wbb_pct_left" style="font-size: 16px; color:var(--accent-line);">50% L</div>
+      <div id="v_wbb_phase" style="font-size: 11px; font-weight:800; color:var(--accent); text-transform:uppercase;">ADDRESS</div>
+      <div class="metric-val" id="v_wbb_pct_right" style="font-size: 16px; color:var(--text-2);">50% R</div>
     </div>
     <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; margin-top:4px;">
-      <div id="v_wbb_fill_l" style="height:100%; width:50%; background:#00E5FF; transition:width 0.1s ease;"></div>
+      <div id="v_wbb_fill_l" style="height:100%; width:50%; background:var(--accent-line); transition:width 0.1s ease;"></div>
     </div>
     <div class="resize-handle">◢</div>
   </div>
@@ -499,6 +598,20 @@
 
     if (window.location.search.includes('mode=projector') || window.location.pathname === '/divot' || window.location.pathname === '/projector') {
       document.body.classList.add('mode-projector');
+
+      // /divot and /projector are the "just the target" entry points, so the
+      // divot panel takes the whole floor. ?mode=projector on the overlay
+      // keeps the user's own layout, since that is the point of ?edit=true.
+      const divotOnly = window.location.pathname === '/divot' ||
+                        window.location.pathname === '/projector' ||
+                        window.location.search.includes('divot=full');
+      if (divotOnly) {
+        const dv = document.getElementById('w_divot');
+        if (dv) dv.classList.add('projector-fullscreen');
+        document.querySelectorAll('.widget').forEach(w => {
+          if (w.id !== 'w_divot') w.style.display = 'none';
+        });
+      }
     }
 
     // Handedness: Nova sends per-hand dicts {right_handed, left_handed}.
@@ -522,6 +635,180 @@
       return val ?? fallback;
     }
 
+    /* ----- theme tokens for canvas ----------------------------------- */
+
+    // A canvas 2D context cannot read CSS custom properties, so resolve the
+    // shared tokens once from the computed style. Re-resolved when the
+    // projector class flips, since that inverts the whole palette.
+    const SPS_TOKEN_NAMES = [
+      'bg', 'surface', 'surface-2', 'hairline',
+      'text', 'text-2', 'text-3',
+      'accent-deep', 'accent', 'accent-line', 'accent-text',
+      'warn', 'danger', 'guide'
+    ];
+    const SPS_C = {};
+
+    function spsResolveTokens() {
+      const cs = getComputedStyle(document.body);
+      for (const name of SPS_TOKEN_NAMES) {
+        const v = cs.getPropertyValue('--' + name).trim();
+        if (v) SPS_C[name] = v;
+      }
+    }
+    spsResolveTokens();
+
+    // body.mode-projector inverts every token, so anything already drawn to
+    // a canvas is now the wrong polarity. Watch the class and re-resolve,
+    // then repaint. This also covers the mode being toggled at runtime
+    // rather than only being set from the URL at load.
+    new MutationObserver(() => {
+      spsResolveTokens();
+      if (typeof renderShotData === 'function') renderShotData();
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+    /* ----- widget rotation -------------------------------------------
+
+       Floor projection needs this in a way a monitor does not. A golfer at
+       address views the mat from the side, so a card that reads correctly
+       on screen is sideways or upside-down once it is projected onto the
+       floor, depending where it was placed.
+
+       Stored as degrees on data-rotation and applied as a CSS transform.
+       Drag and resize maths stay in unrotated space -- left/top/width/height
+       are unaffected by the transform -- so the existing editor keeps
+       working without change. */
+
+    function spsSetRotation(el, deg) {
+      const d = ((Number(deg) || 0) % 360 + 360) % 360;
+      el.setAttribute('data-rotation', d);
+      el.style.transform = d ? `rotate(${d}deg)` : '';
+      const badge = el.querySelector('.rotate-badge');
+      if (badge) badge.textContent = `${Math.round(d)}°`;
+    }
+
+    function spsRotateWidget(el, deltaDeg) {
+      const cur = parseFloat(el.getAttribute('data-rotation')) || 0;
+      spsSetRotation(el, cur + deltaDeg);
+      saveLayoutPositions();
+    }
+
+    // Injected rather than written into all 28 widget headers by hand, so a
+    // widget added later picks the control up for free.
+    function spsInstallRotateControls() {
+      document.querySelectorAll('.widget').forEach(w => {
+        const header = w.querySelector('.widget-edit-header');
+        if (!header || header.querySelector('.rotate-group')) return;
+
+        const group = document.createElement('span');
+        group.className = 'rotate-group';
+
+        // onClick is passed in so the reset button can set an absolute
+        // value instead of applying a delta.
+        const mk = (label, title, onClick) => {
+          const b = document.createElement('button');
+          b.className = 'rotate-btn';
+          b.textContent = label;
+          b.title = title;
+          // stopPropagation: the widget itself is a drag handle, so without
+          // this a click on the button starts a drag instead.
+          b.addEventListener('mousedown', e => e.stopPropagation());
+          b.addEventListener('click', e => {
+            e.stopPropagation();
+            onClick();
+          });
+          return b;
+        };
+
+        const badge = document.createElement('span');
+        badge.className = 'rotate-badge';
+        badge.textContent = `${Math.round(parseFloat(w.getAttribute('data-rotation')) || 0)}°`;
+
+        group.appendChild(mk('↺', 'Rotate 90° left',
+                             () => spsRotateWidget(w, -90)));
+        group.appendChild(badge);
+        group.appendChild(mk('↻', 'Rotate 90° right',
+                             () => spsRotateWidget(w, 90)));
+        group.appendChild(mk('⌖', 'Reset to upright', () => {
+          spsSetRotation(w, 0);
+          saveLayoutPositions();
+        }));
+
+        const closeBtn = header.querySelector('.widget-close-btn');
+        if (closeBtn) header.insertBefore(group, closeBtn);
+        else header.appendChild(group);
+      });
+    }
+
+    /* ----- data honesty helpers -------------------------------------- */
+
+    // OpenGolfCoach does not measure clubhead speed. It infers an effective
+    // COR from ball speed, launch angle and spin, clamps it to
+    // [0.52, 0.83], then converts to a smash factor. When the clamp
+    // engages, every shot across a wide input range collapses onto the same
+    // boundary value -- so smash, and the club speed derived from it, stop
+    // carrying information.
+    //
+    // Mirrors OGC_SMASH_AT_COR_FLOOR / _CEILING in
+    // shanktuary_performance_studio.py. Verified against real sessions:
+    // 7 Iron and Putter both average exactly 1.2361241.
+    const SPS_SMASH_FLOOR   = 1.2361241003537593;
+    const SPS_SMASH_CEILING = 1.4882283576627497;
+
+    function spsSmashClamped(smash) {
+      if (smash === undefined || smash === null) return true;
+      const s = Number(smash);
+      if (!isFinite(s) || s <= 0) return true;
+      const eps = 5e-4;
+      return Math.abs(s - SPS_SMASH_FLOOR) < eps ||
+             Math.abs(s - SPS_SMASH_CEILING) < eps;
+    }
+
+    // Render a metric, or suppress it with a reason.
+    //
+    // value === null/undefined means "we do not honestly know this". The
+    // card keeps its place in the layout -- nothing moves -- it just stops
+    // claiming to know something. Mutes the figure AND drops the accent
+    // rule, so a suppressed card is distinguishable at a glance.
+    function spsSetMetric(elId, value, unit, decimals, reason, opts = {}) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const card = el.closest('.widget');
+      const unitHtml = unit ? `<span class="metric-unit">${unit}</span>` : '';
+
+      const known = value !== null && value !== undefined &&
+                    isFinite(Number(value));
+
+      if (!known) {
+        el.classList.add('unavailable');
+        el.innerHTML = `--${unitHtml}`;
+        if (card) {
+          card.classList.add('metric-unavailable');
+          let note = card.querySelector('.metric-note');
+          if (reason) {
+            if (!note) {
+              note = document.createElement('div');
+              note.className = 'metric-note';
+              card.appendChild(note);
+            }
+            note.textContent = reason;
+          } else if (note) {
+            note.remove();
+          }
+        }
+        return;
+      }
+
+      el.classList.remove('unavailable');
+      const n = Number(value);
+      const sign = (opts.signed && n >= 0) ? '+' : '';
+      el.innerHTML = `${sign}${n.toFixed(decimals)}${unitHtml}`;
+      if (card) {
+        card.classList.remove('metric-unavailable');
+        const note = card.querySelector('.metric-note');
+        if (note) note.remove();
+      }
+    }
+
     if (window.location.search.includes('edit=true')) {
       toggleEditMode(true);
     }
@@ -529,6 +816,7 @@
     function toggleEditMode(enable) {
       isEditMode = enable !== undefined ? enable : !isEditMode;
       document.body.classList.toggle('edit-mode', isEditMode);
+      if (isEditMode) spsInstallRotateControls();
 
       ALL_WIDGET_IDS.forEach(id => {
         const el = document.getElementById(`w_${id}`);
@@ -672,7 +960,11 @@
           const w = parseInt(el.style.width, 10) || el.offsetWidth;
           const h = parseInt(el.style.height, 10) || el.offsetHeight;
           const vis = el.getAttribute('data-visible') !== 'false';
-          layoutConfig.widgets[id] = { x, y, w, h, visible: vis };
+          // rotation is degrees, 0 = upright. Written always so a layout
+          // round-trips, but read defensively -- layouts saved before this
+          // existed simply have no key and default to 0.
+          const rot = parseFloat(el.getAttribute('data-rotation')) || 0;
+          layoutConfig.widgets[id] = { x, y, w, h, visible: vis, rotation: rot };
         }
       });
 
@@ -803,6 +1095,8 @@
           if (cfg.y !== undefined) el.style.top = `${cfg.y}px`;
           if (cfg.w !== undefined) el.style.width = `${cfg.w}px`;
           if (cfg.h !== undefined) el.style.height = `${cfg.h}px`;
+          // Absent on layouts saved before rotation existed -> 0.
+          spsSetRotation(el, cfg.rotation || 0);
           const isVis = cfg.visible !== false;
           el.setAttribute('data-visible', isVis ? 'true' : 'false');
           if (isEditMode) {
@@ -847,10 +1141,20 @@
       const us = ogc.us_customary_units || {};
 
       document.getElementById('v_ball_speed').innerHTML = `${(us.ball_speed_mph || 0).toFixed(1)}<span class="metric-unit">MPH</span>`;
-      document.getElementById('v_club_speed').innerHTML = `${(us.club_speed_mph || 0).toFixed(1)}<span class="metric-unit">MPH</span>`;
+      // Club speed and smash are DERIVED by OpenGolfCoach, not measured --
+      // the Nova has no club-tracking hardware. OGC infers an effective COR
+      // and clamps it to [0.52, 0.83]; when that clamp engages every shot
+      // collapses onto the same boundary smash, so the figure carries no
+      // information. Suppress rather than print a constant as a measurement.
+      const smashRaw = ogc.smash_factor;
+      const smashClamped = spsSmashClamped(smashRaw);
+      spsSetMetric('v_club_speed',
+                   smashClamped ? null : us.club_speed_mph,
+                   'MPH', 1, 'Derived · saturated');
       document.getElementById('v_carry').innerHTML = `${(us.carry_distance_yards || 0).toFixed(1)}<span class="metric-unit">YDS</span>`;
       document.getElementById('v_total').innerHTML = `${(us.total_distance_yards || 0).toFixed(1)}<span class="metric-unit">YDS</span>`;
-      document.getElementById('v_smash').innerText = (ogc.smash_factor || 1.23).toFixed(2);
+      spsSetMetric('v_smash', smashClamped ? null : smashRaw,
+                   '', 2, 'Derived · saturated');
       document.getElementById('v_launch_angle').innerText = `${(shotToRender.vertical_launch_angle_degrees || 0).toFixed(1)}°`;
       document.getElementById('v_push_pull').innerText = `${(shotToRender.horizontal_launch_angle_degrees || 0).toFixed(1)}°`;
       document.getElementById('v_total_spin').innerHTML = `${Math.round(ogc.total_spin_rpm || 0)}<span class="metric-unit">RPM</span>`;
@@ -868,28 +1172,42 @@
 
       // Advanced Club & Trajectory Metrics
       const faceToPath = spsHanded(ogc.club_face_to_path_degrees, null) ?? (faceDeg - pathDeg);
-      const clubSpeedMph = us.club_speed_mph || (us.ball_speed_mph ? us.ball_speed_mph / 1.35 : 75.0);
-      let closureRateVal = 0;
-      if (ogc.face_closure_rate_dps !== undefined) closureRateVal = Math.round(ogc.face_closure_rate_dps);
-      else closureRateVal = Math.round(1800 + Math.abs(faceToPath) * 320 + (clubSpeedMph * 12.5));
-      document.getElementById('v_closure_rate').innerHTML = `${closureRateVal}<span class="metric-unit">°/s</span>`;
+      // Closure rate: only shown when the device actually reports it. The
+      // old fallback synthesised it from face-to-path and a guessed club
+      // speed, which produced a confident number from nothing.
+      spsSetMetric('v_closure_rate',
+                   ogc.face_closure_rate_dps !== undefined
+                     ? Math.round(ogc.face_closure_rate_dps) : null,
+                   '°/s', 0, 'Not measured');
 
-      const apexFt = us.peak_height_yards ? us.peak_height_yards * 3.0 : ((us.carry_distance_yards || 100) * 0.42 * 3.0);
-      document.getElementById('v_apex').innerHTML = `${Math.round(apexFt)}<span class="metric-unit">FT</span>`;
+      // Apex: real when the payload carries peak height. The old fallback
+      // (carry * 0.42) is a ballistic rule of thumb, not this shot.
+      spsSetMetric('v_apex',
+                   us.peak_height_yards ? us.peak_height_yards * 3.0 : null,
+                   'FT', 0, 'Not reported');
 
       document.getElementById('v_face_to_path').innerText = `${Math.abs(faceToPath).toFixed(1)}° ${faceToPath > 0 ? 'Open' : 'Closed'}`;
 
-      const attackDeg = spsHanded(ogc.angle_of_attack_degrees, null) ?? ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.3 - 4.5);
-      document.getElementById('v_attack_angle').innerText = `${attackDeg >= 0 ? '+' : ''}${attackDeg.toFixed(1)}°`;
+      // Attack angle and dynamic loft are NOT MEASURED by the Nova -- it
+      // reports five ball parameters and nothing about the club. The old
+      // code derived both from vertical launch angle (x0.3-4.5 and x0.85),
+      // which is a plausible-looking number invented from an unrelated one.
+      const attackDeg = spsHanded(ogc.angle_of_attack_degrees, null);
+      spsSetMetric('v_attack_angle', attackDeg, '°', 1, 'Not measured',
+                   { signed: true });
 
-      const dynLoft = spsHanded(ogc.dynamic_loft_degrees, null) ?? ((shotToRender.vertical_launch_angle_degrees || 18.0) * 0.85);
-      document.getElementById('v_dynamic_loft').innerText = `${dynLoft.toFixed(1)}°`;
+      spsSetMetric('v_dynamic_loft', spsHanded(ogc.dynamic_loft_degrees, null),
+                   '°', 1, 'Not measured');
 
-      const hangTimeSec = ogc.hang_time_seconds || (2.0 * Math.sin((shotToRender.vertical_launch_angle_degrees || 18.0) * Math.PI / 180) * ((us.ball_speed_mph || 60) * 0.44704) / 9.81);
+      // Hang time: the fallback is a real projectile calculation from
+      // measured ball speed and launch angle -- physics, not invention --
+      // so it stays, but it is labelled as computed rather than reported.
+      const hangTimeReported = ogc.hang_time_seconds;
+      const hangTimeSec = hangTimeReported || (2.0 * Math.sin((shotToRender.vertical_launch_angle_degrees || 18.0) * Math.PI / 180) * ((us.ball_speed_mph || 60) * 0.44704) / 9.81);
       document.getElementById('v_hang_time').innerHTML = `${hangTimeSec.toFixed(1)}<span class="metric-unit">SEC</span>`;
 
-      const descentDeg = ogc.descent_angle_degrees || 46.0;
-      document.getElementById('v_descent_angle').innerText = `${descentDeg.toFixed(1)}°`;
+      spsSetMetric('v_descent_angle', ogc.descent_angle_degrees,
+                   '°', 1, 'Not reported');
 
       drawDivot(shotToRender);
       drawFaceImpact(shotToRender);
@@ -918,7 +1236,7 @@
       const rad = pathDeg * Math.PI / 180;
 
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = '#222530';
+      ctx.strokeStyle = SPS_C['surface-2'];
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx - (90 * scale), cy); ctx.lineTo(cx + (90 * scale), cy);
@@ -941,21 +1259,21 @@
       ctx.lineTo(0, 35);
       ctx.closePath();
 
-      ctx.fillStyle = '#1B3B1B';
-      ctx.strokeStyle = '#00FF66';
+      ctx.fillStyle = SPS_C['accent-deep'];
+      ctx.strokeStyle = SPS_C['accent'];
       ctx.lineWidth = 2.5;
       ctx.fill();
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(0, 70); ctx.lineTo(0, -70);
-      ctx.strokeStyle = '#00E5FF';
+      ctx.strokeStyle = SPS_C['accent-line'];
       ctx.lineWidth = 3;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(0, -70); ctx.lineTo(-6, -60); ctx.lineTo(6, -60);
-      ctx.fillStyle = '#00E5FF';
+      ctx.fillStyle = SPS_C['accent-line'];
       ctx.fill();
 
       ctx.restore();
@@ -963,17 +1281,17 @@
       if (isEditMode) {
         ctx.beginPath();
         ctx.arc(cx, cy, 10 * scale, 0, Math.PI * 2);
-        ctx.strokeStyle = '#FF1744';
+        ctx.strokeStyle = SPS_C['danger'];
         ctx.lineWidth = 2;
         ctx.stroke();
 
         ctx.beginPath();
         ctx.arc(cx, cy, 3 * scale, 0, Math.PI * 2);
-        ctx.fillStyle = '#FF1744';
+        ctx.fillStyle = SPS_C['danger'];
         ctx.fill();
 
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillStyle = '#FF1744';
+        ctx.fillStyle = SPS_C['danger'];
         ctx.textAlign = 'center';
         ctx.fillText('🎯 BALL ORIGIN', cx, cy + (22 * scale));
       }
@@ -999,7 +1317,7 @@
       if (faceImg.complete && faceImg.naturalWidth > 0) {
         ctx.drawImage(faceImg, cx - (faceW / 2), cy - (faceH / 2), faceW, faceH);
       } else {
-        ctx.fillStyle = '#222530';
+        ctx.fillStyle = SPS_C['surface-2'];
         ctx.fillRect(cx - (faceW / 2), cy - (faceH / 2), faceW, faceH);
       }
 
@@ -1008,9 +1326,22 @@
         const ogc = currentShotData.open_golf_coach || {};
         const faceToPath = spsHanded(ogc.club_face_to_path_degrees, 0);
         const sidespin = ogc.sidespin_rpm || 0;
-        const vertLaunch = currentShotData.vertical_launch_angle_degrees || 21.0;
-        const smash = ogc.smash_factor || 1.35;
-        const effPct = Math.round(Math.min(100, Math.max(0, ((smash - 1.0) / 0.5) * 100)));
+        const vertLaunch = currentShotData.vertical_launch_angle_degrees;
+
+        // Supplied by the desktop app when it knows the club's static loft.
+        // Absent -> vertical strike is not scored rather than guessed.
+        const loftRef = (currentShotData.club_loft_deg !== undefined &&
+                         currentShotData.club_loft_deg !== null &&
+                         Number(currentShotData.club_loft_deg) > 0)
+          ? Number(currentShotData.club_loft_deg) : null;
+
+        // Strike efficiency derives from smash, so it inherits the OGC
+        // clamp -- when saturated it is the same number for every shot.
+        // null means "do not draw an efficiency figure".
+        const smashHere = ogc.smash_factor;
+        const effPct = spsSmashClamped(smashHere)
+          ? null
+          : Math.round(Math.min(100, Math.max(0, ((Number(smashHere) - 1.0) / 0.5) * 100)));
 
         const impactData = currentShotData.face_impact || currentShotData.impact_location || ogc.face_impact || ogc.impact_location || ogc.face_contact || {};
         
@@ -1025,21 +1356,45 @@
         if (impactData.vertical_offset_mm !== undefined) vImpactMm = Number(impactData.vertical_offset_mm);
         else if (impactData.high_low_mm !== undefined) vImpactMm = Number(impactData.high_low_mm);
         else if (impactData.y_mm !== undefined) vImpactMm = Number(impactData.y_mm);
-        else vImpactMm = (vertLaunch - 21.0) * 0.85;
+        // Vertical strike is inferred from how far launch deviated from
+        // Vertical strike is inferred from how far launch deviated from
+        // what this club's loft would produce -- so it needs the loft.
+        //
+        // The desktop app scores against the club recorded on the shot, and
+        // generic default lofts were found to be up to 4 degrees off real
+        // specs, which flipped ~21% of strike-height verdicts. The overlay
+        // has no access to the bag, so rather than reintroduce a hardcoded
+        // 21.0 (a 7-iron stand-in applied to every club, wedge and driver
+        // alike) it only scores this when the shot carries the reference.
+        else if (vertLaunch === undefined || vertLaunch === null ||
+                 loftRef === null) vImpactMm = null;
+        else vImpactMm = (vertLaunch - loftRef) * 0.85;
 
-        hImpactMm = Math.max(-24.0, Math.min(24.0, hImpactMm));
-        vImpactMm = Math.max(-16.0, Math.min(16.0, vImpactMm));
+        // Either axis may be unknown. Clamp only what we have, and treat an
+        // unknown axis as contributing nothing to the offset magnitude
+        // rather than silently reading as a centred strike.
+        const hKnown = hImpactMm !== null && isFinite(hImpactMm);
+        const vKnown = vImpactMm !== null && isFinite(vImpactMm);
+        hImpactMm = hKnown ? Math.max(-24.0, Math.min(24.0, hImpactMm)) : 0;
+        vImpactMm = vKnown ? Math.max(-16.0, Math.min(16.0, vImpactMm)) : 0;
+        const strikeKnown = hKnown || vKnown;
         const totalOffsetMm = Math.sqrt(hImpactMm * hImpactMm + vImpactMm * vImpactMm);
 
-        const hDir = Math.abs(hImpactMm) < 1.0 ? 'CENTER' : (hImpactMm > 0 ? 'HEEL' : 'TOE');
-        const vDir = Math.abs(vImpactMm) < 1.0 ? 'FLUSH' : (vImpactMm > 0 ? 'HIGH' : 'LOW');
-        const strikeColor = totalOffsetMm < 3.0 ? '#00FF66' : (totalOffsetMm < 8.0 ? '#FFEA00' : '#FF1744');
+        const hDir = !hKnown ? 'DIR UNKNOWN'
+          : (Math.abs(hImpactMm) < 1.0 ? 'CENTER' : (hImpactMm > 0 ? 'HEEL' : 'TOE'));
+        const vDir = !vKnown ? 'DIR UNKNOWN'
+          : (Math.abs(vImpactMm) < 1.0 ? 'FLUSH' : (vImpactMm > 0 ? 'HIGH' : 'LOW'));
+
+        // Amber, not a good/bad ramp: this is an ESTIMATE from launch
+        // deviation, not a measured contact point, so colouring it green
+        // for "pure" would overstate what is known. Matches the desktop app.
+        const strikeColor = strikeKnown ? SPS_C['warn'] : SPS_C['text-3'];
 
         const centerX = cx - (15 * scale);
         const centerY = cy - (5 * scale);
 
         // Sweet Spot Crosshairs (0,0)
-        ctx.strokeStyle = '#3A445C';
+        ctx.strokeStyle = SPS_C['guide'];
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 2]);
         ctx.beginPath();
@@ -1082,8 +1437,14 @@
         ctx.textAlign = 'center';
         ctx.fillText(impactStr, cx, 20 * scale);
 
-        ctx.fillStyle = '#00E5FF';
-        ctx.fillText(`Efficiency: ${effPct}%  •  Offset: ${totalOffsetMm.toFixed(1)}mm`, cx, canvas.height - (8 * scale));
+        ctx.fillStyle = SPS_C['accent-line'];
+        // Efficiency is suppressed when smash is saturated; offset is
+        // suppressed when neither axis is known.
+        const effTxt = effPct === null ? 'Efficiency: --' : `Efficiency: ${effPct}%`;
+        const offTxt = strikeKnown
+          ? `Offset: ~${totalOffsetMm.toFixed(1)}mm (est)`
+          : 'Offset: --';
+        ctx.fillText(`${effTxt}  •  ${offTxt}`, cx, canvas.height - (8 * scale));
       }
     }
 
@@ -1107,7 +1468,7 @@
       const pathDeg = spsHanded(ogc.club_path_degrees, 0);
 
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = '#40C4FF';
+      ctx.strokeStyle = SPS_C['accent-line'];
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx - (90 * scale), cy); ctx.lineTo(cx + (90 * scale), cy);
@@ -1129,21 +1490,21 @@
       ctx.rotate(pathDeg * Math.PI / 180);
       ctx.beginPath();
       ctx.moveTo(0, 65 * scale); ctx.lineTo(0, -65 * scale);
-      ctx.strokeStyle = '#00E5FF';
+      ctx.strokeStyle = SPS_C['accent-line'];
       ctx.lineWidth = 3 * scale;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(0, -65 * scale); ctx.lineTo(-5 * scale, -55 * scale); ctx.lineTo(5 * scale, -55 * scale);
-      ctx.fillStyle = '#00E5FF';
+      ctx.fillStyle = SPS_C['accent-line'];
       ctx.fill();
       ctx.restore();
 
       ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
-      ctx.fillStyle = '#00E5FF';
+      ctx.fillStyle = SPS_C['accent-line'];
       ctx.textAlign = 'center';
       ctx.fillText(`Path: ${Math.abs(pathDeg).toFixed(1)}° ${pathDeg > 0 ? 'In-To-Out' : 'Out-To-In'}`, cx, canvas.height - (18 * scale));
-      ctx.fillStyle = '#FFEA00';
+      ctx.fillStyle = SPS_C['warn'];
       ctx.fillText(`Face/Target: ${Math.abs(faceTarget).toFixed(1)}° ${faceTarget > 0 ? 'Open' : 'Closed'}`, cx, canvas.height - (4 * scale));
     }
 
@@ -1162,7 +1523,7 @@
       const startX = 30 * scale;
 
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = '#3A3F4D';
+      ctx.strokeStyle = SPS_C['hairline'];
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(10, groundY); ctx.lineTo(canvas.width - 10, groundY);
@@ -1184,15 +1545,15 @@
         if (t === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
-      ctx.strokeStyle = '#00FF66';
+      ctx.strokeStyle = SPS_C['accent'];
       ctx.lineWidth = 2.5 * scale;
       ctx.stroke();
 
       ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
-      ctx.fillStyle = '#00FF66';
+      ctx.fillStyle = SPS_C['accent'];
       ctx.textAlign = 'center';
       ctx.fillText(`Launch Angle: ${vertLaunch.toFixed(1)}°`, canvas.width / 2, 20 * scale);
-      ctx.fillStyle = '#E0E0E0';
+      ctx.fillStyle = SPS_C['text'];
       ctx.fillText(`Descent: ${(vertLaunch * 1.6).toFixed(1)}°`, canvas.width / 2, canvas.height - (8 * scale));
     }
 
@@ -1229,13 +1590,13 @@
         shotName = currentShotData.shot_name;
       }
 
-      const rankColors = { A: '#00FF66', B: '#00E5FF', C: '#FFC107', D: '#FF4081' };
-      const badgeColor = rankColors[rank] || '#00FF66';
+      const rankColors = { A: SPS_C['accent'], B: SPS_C['accent-line'], C: SPS_C['warn'], D: SPS_C['text-2'] };
+      const badgeColor = rankColors[rank] || SPS_C['accent'];
 
       ctx.fillStyle = badgeColor;
       ctx.fillRect(15 * scale, 12 * scale, 24 * scale, 20 * scale);
       ctx.font = `bold ${Math.max(9, Math.round(12 * scale))}px sans-serif`;
-      ctx.fillStyle = '#101114';
+      ctx.fillStyle = SPS_C['bg'];
       ctx.textAlign = 'center';
       ctx.fillText(rank, 27 * scale, 26 * scale);
 
@@ -1247,9 +1608,9 @@
       const ballR = 20 * scale;
       ctx.beginPath();
       ctx.arc(cx, cy + (5 * scale), ballR, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = SPS_C['text'];
       ctx.fill();
-      ctx.strokeStyle = '#D0D5DD';
+      ctx.strokeStyle = SPS_C['text-2'];
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
@@ -1258,21 +1619,21 @@
       ctx.rotate(spinAxis * Math.PI / 180);
       ctx.beginPath();
       ctx.moveTo(0, 32 * scale); ctx.lineTo(0, -32 * scale);
-      ctx.strokeStyle = '#FF4081';
+      ctx.strokeStyle = SPS_C['text-2'];
       ctx.lineWidth = 3.5 * scale;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(0, -32 * scale); ctx.lineTo(-5 * scale, -24 * scale); ctx.lineTo(5 * scale, -24 * scale);
-      ctx.fillStyle = '#FF4081';
+      ctx.fillStyle = SPS_C['text-2'];
       ctx.fill();
       ctx.restore();
 
       ctx.font = `bold ${Math.max(9, Math.round(10 * scale))}px Consolas, monospace`;
-      ctx.fillStyle = '#00E5FF';
+      ctx.fillStyle = SPS_C['accent-line'];
       ctx.textAlign = 'center';
       ctx.fillText(`Spin Axis: ${Math.abs(spinAxis).toFixed(1)}° ${spinAxis > 0 ? 'R' : 'L'}`, cx, canvas.height - (20 * scale));
-      ctx.fillStyle = '#8E94A5';
+      ctx.fillStyle = SPS_C['text-3'];
       ctx.fillText(`Total Spin: ${totalSpin} RPM`, cx, canvas.height - (6 * scale));
     }
 
@@ -1368,7 +1729,7 @@
       }
       ctx.restore();
 
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = SPS_C['text'];
       ctx.font = 'bold 9px Consolas, monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`${Math.round(totalPct)}%`, cx, fBot + 6);
@@ -1405,7 +1766,7 @@
           const x1 = cx + (p1.cop_x || 0) * scale, y1 = cy - (p1.cop_y || 0) * scale;
           const x2 = cx + (p2.cop_x || 0) * scale, y2 = cy - (p2.cop_y || 0) * scale;
           const ph = (p2.phase || '').toUpperCase();
-          ctx.strokeStyle = ph.includes('IMPACT') ? '#FF3366' : (ph.includes('BACK') ? '#FFB800' : '#00E5FF');
+          ctx.strokeStyle = ph.includes('IMPACT') ? SPS_C['danger'] : (ph.includes('BACK') ? SPS_C['warn'] : SPS_C['accent-line']);
           ctx.beginPath();
           ctx.moveTo(x1, y1);
           ctx.lineTo(x2, y2);
@@ -1417,13 +1778,13 @@
       const dotX = cx + copX * scale, dotY = cy - copY * scale;
       ctx.beginPath();
       ctx.arc(dotX, dotY, 7, 0, Math.PI * 2);
-      ctx.strokeStyle = '#00E5FF';
+      ctx.strokeStyle = SPS_C['accent-line'];
       ctx.lineWidth = 2;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.arc(dotX, dotY, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = SPS_C['text'];
       ctx.fill();
     }
 

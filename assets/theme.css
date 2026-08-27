@@ -1,0 +1,51 @@
+/* GENERATED FILE -- do not edit by hand.
+ *
+ * Source: theme.py  ->  scripts/gen_theme_css.py
+ * Regenerate with:  python3 scripts/gen_theme_css.py
+ *
+ * Shared design tokens for the browser surfaces (overlay, configurator,
+ * floor projector). Mirrors the desktop app so both look like one product.
+ */
+
+:root {
+  --bg:            #0E1013;
+  --surface:       #16191E;
+  --surface-2:     #1D2127;
+  --hairline:      #252A32;
+  --text:          #F2F4F7;
+  --text-2:        #9BA3AF;
+  --text-3:        #646C79;
+  --accent-deep:   #22402C;
+  --accent:        #4C8C5E;
+  --accent-line:   #6FA880;
+  --accent-text:   #9CC9AC;
+  --warn:          #F5A524;
+  --danger:        #F04438;
+  --guide:         #3A424E;
+}
+
+/* Floor projector: inverted polarity. See scripts/gen_theme_css.py for why. */
+body.mode-projector {
+  --bg:          #000000;
+  --surface:     #F2F4F7;
+  --surface-2:   #E4E7EC;
+  --hairline:    #C4CAD3;
+  --text:        #0E1013;
+  --text-2:      #3A424E;
+  --text-3:      #646C79;
+  --accent-deep: #C9DDD0;
+  --accent:      #2F6640;
+  --accent-line: #22402C;
+  --accent-text: #1B3322;
+  --warn:        #8A5A00;
+  --danger:      #A11C11;
+  --guide:       #9BA3AF;
+}
+
+/* Typography. The desktop app resolves a real UI face at runtime because
+ * Tk silently falls back to Nimbus Sans when asked for "Helvetica"; the
+ * browser can just list a stack. */
+:root {
+  --ui-font: Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto,
+             'Helvetica Neue', Arial, sans-serif;
+}
