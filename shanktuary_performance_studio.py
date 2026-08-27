@@ -139,6 +139,10 @@ def infer_club_category(club_name):
         return "Hybrids & Utilities"
     elif any(w in name_lower for w in ["pw", "gw", "sw", "lw", "wedge", "°", "deg", "pitching", "gap", "sand", "lob"]):
         return "Wedges"
+    # Golfers name wedges by loft -- "60", "56", "52". A bare number in the
+    # wedge range is a wedge, not an iron.
+    elif name_lower.strip().rstrip("°").isdigit() and 44 <= int(name_lower.strip().rstrip("°")) <= 72:
+        return "Wedges"
     else:
         return "Irons"
 
@@ -447,6 +451,9 @@ class ShanktuaryApp:
 
         # In-Canvas Custom Club Modal State
         self.show_custom_club_modal = False
+        # Custom clubs found in the save file with no matching bag entry;
+        # adopted into the bag once it has loaded.
+        self._orphan_customs = []
         self.custom_club_input_text = ""
         self.custom_club_modal_box_rect = None
         self.custom_club_modal_add_rect = None
@@ -752,6 +759,16 @@ class ShanktuaryApp:
                 for c in data.get("custom_clubs", []):
                     if c and c not in self.clubs:
                         self.clubs.append(c)
+                # Adopt orphaned custom clubs into the bag. Before the bag
+                # existed -- and via the club dropdown until recently -- a
+                # custom club was only a name in custom_clubs. Those clubs
+                # never appeared in My Bag, had no loft or lie, and could not
+                # be removed because the delete button lives in the spec
+                # editor, which only opens for clubs that ARE in the bag.
+                self._orphan_customs = [
+                    c for c in data.get("custom_clubs", [])
+                    if c and self.get_bag_club(c) is None
+                ]
                 self.is_left_handed = bool(data.get("is_left_handed", False))
             if not self.bag:
                 self.init_default_bag()
@@ -766,6 +783,17 @@ class ShanktuaryApp:
                 c_name = club_item.get("name")
                 if c_name and c_name not in self.clubs:
                     self.clubs.append(c_name)
+            # Adopt the orphans found above, now that the bag is populated.
+            # add_club_to_bag() infers the category from the name; loft and
+            # lie stay 0.0 so the spec editor shows them as blank rather than
+            # inventing a number the user never entered.
+            for _orphan in getattr(self, "_orphan_customs", []):
+                if self.get_bag_club(_orphan) is None:
+                    self.add_club_to_bag(_orphan)
+            if getattr(self, "_orphan_customs", None):
+                print(f"[+] Adopted {len(self._orphan_customs)} custom club(s) "
+                      f"into My Bag: {', '.join(self._orphan_customs)}")
+            self._orphan_customs = []
         except Exception as e:
             print(f"[!] Error loading session history: {e}")
             # Preserve the unreadable file for recovery — the next save would
@@ -940,6 +968,12 @@ class ShanktuaryApp:
 
     def remove_club_from_bag(self, club_name):
         self.bag = [c for c in self.bag if c.get("name") != club_name]
+        # Also drop it from the selectable name list. These are separate
+        # stores -- a club added from the club dropdown used to land only in
+        # self.clubs, so removing the bag entry alone left the name behind in
+        # every dropdown with no way to clear it.
+        if club_name in self.clubs and club_name not in DEFAULT_CLUBS:
+            self.clubs.remove(club_name)
         if self.current_club == club_name:
             if self.bag:
                 self.current_club = self.bag[0].get("name", "Driver")
