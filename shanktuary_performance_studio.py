@@ -6422,8 +6422,16 @@ class ShanktuaryApp:
         bar_x1 = offset_x + 10
         bar_x2 = bar_x1 + bar_w
 
-        # 2. Top Toolbar
-        self.canvas.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        # 2. Header: page title, then a borderless metric strip, per
+        #    docs/ui/view_lab.png -- not a bordered toolbar of pills.
+        _tid = self.canvas.create_text(bar_x1 + 4, bar_y1 - 2, text="Swing Lab",
+                                       fill=theme.TEXT,
+                                       font=(theme.ui_font(), 17), anchor="nw")
+        _tbb = self.canvas.bbox(_tid)
+        self.canvas.create_text((_tbb[2] + 12) if _tbb else bar_x1 + 110,
+                                bar_y1 + 7, text="pressure & balance",
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 9), anchor="nw")
 
         # Get latest pressure sample
         latest = None
@@ -6431,53 +6439,56 @@ class ShanktuaryApp:
             latest = obs_server.pressure_manager.latest_frame
         if not latest and self.current_shot and self.current_shot.get("pressure_trace"):
             trace = self.current_shot["pressure_trace"]
-            if trace: latest = trace[-1]
+            if trace:
+                latest = trace[-1]
 
-        phase_str = latest.get("phase", "Address").upper() if latest else "READY"
-        total_kg = latest.get("total_kg", 80.0) if latest else 80.0
-        force_bw = latest.get("force_bw", 1.0) if latest else 1.0
+        phase_str = latest.get("phase", "Address").title() if latest else "Ready"
+        total_kg = latest.get("total_kg", 0.0) if latest else 0.0
+        force_bw = latest.get("force_bw", 0.0) if latest else 0.0
         pct_l = latest.get("pct_left", 50.0) if latest else 50.0
         pct_r = latest.get("pct_right", 50.0) if latest else 50.0
         torque_nm = latest.get("torque_nm", 0.0) if latest else 0.0
         cop_x = latest.get("cop_x", 0.0) if latest else 0.0
         cop_y = latest.get("cop_y", 0.0) if latest else 0.0
+        live = latest is not None
 
-        # 1. Phase Pill (Generous width for long phase strings like FOLLOW-THROUGH)
-        p_col = theme.ACCENT_TEXT if phase_str in ("ADDRESS", "READY") else (theme.WARN if "BACK" in phase_str else (theme.DANGER if "IMPACT" in phase_str else theme.ACCENT_TEXT))
-        p_pill_w = max(142, len(phase_str) * 8 + 36)
-        pill_x1 = bar_x1 + 8
-        pill_x2 = pill_x1 + p_pill_w
-        self.canvas.create_rectangle(pill_x1, bar_y1 + 8, pill_x2, bar_y2 - 8, fill=theme.SURFACE_2, outline=p_col)
-        self.canvas.create_text((pill_x1 + pill_x2) // 2, (bar_y1 + bar_y2) // 2, text=f"● {phase_str}", fill=p_col, font=(theme.ui_font(), 8, "bold"), anchor="center")
+        lead_pct, trail_pct = (pct_r, pct_l) if self.is_left_handed else (pct_l, pct_r)
 
-        # 2. Weight & Force Stats (Left-aligned, dedicated width)
-        wt_x1 = pill_x2 + 14
-        wt_w = 135
-        wt_x2 = wt_x1 + wt_w
-        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 - 6, text="TOTAL WEIGHT", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
-        self.canvas.create_text(wt_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{total_kg:.1f} kg ({force_bw:.2f} BW)", fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
+        # Metric strip. Values read "--" rather than a plausible default when
+        # no board is connected -- 80.0 kg looked like a live reading.
+        strip_y = bar_y2 + 6
+        cells = [
+            ("TOTAL WEIGHT", f"{total_kg:.1f}" if live else "--", "kg"),
+            ("FORCE", f"{force_bw:.2f}" if live else "--", "BW"),
+            ("LEAD", f"{lead_pct:.0f}" if live else "--", "%"),
+            ("TRAIL", f"{trail_pct:.0f}" if live else "--", "%"),
+            ("TORQUE", f"{torque_nm:+.1f}" if live else "--", "N·m"),
+            ("PHASE", phase_str, ""),
+        ]
+        cw_ = (bar_w - 260) / len(cells)
+        for i, (lb, val, unit) in enumerate(cells):
+            cxp = bar_x1 + 4 + i * cw_
+            self.canvas.create_text(cxp, strip_y, text=lb, fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            # PHASE is a word, so it takes body-text size; the figures stay
+            # large. Everything mutes when no board is reporting.
+            _is_word = (lb == "PHASE")
+            vid = self.canvas.create_text(
+                cxp, strip_y + (16 if _is_word else 12), text=val,
+                fill=theme.TEXT if live else theme.TEXT_3,
+                font=(theme.ui_font(), 13 if _is_word else 20), anchor="nw")
+            if unit:
+                vbb = self.canvas.bbox(vid)
+                if vbb:
+                    self.canvas.create_text(vbb[2] + 5, strip_y + 26, text=unit,
+                                            fill=theme.TEXT_3,
+                                            font=(theme.ui_font(), 8),
+                                            anchor="nw")
+        bar_y2 = strip_y + 46
+        self.canvas.create_line(bar_x1, bar_y2, bar_x2, bar_y2,
+                                fill=theme.HAIRLINE)
 
-        # 3. L/R Balance Gauge (Strict left-to-right flow, no backwards anchor!)
-        bg_x1 = wt_x2 + 14
-        lbl_l_w = 38
-        b_bar_x1 = bg_x1 + lbl_l_w
-        b_bar_w = 60 if avail_w < 950 else 75
-        b_bar_x2 = b_bar_x1 + b_bar_w
-        b_bar_cy = (bar_y1 + bar_y2) // 2
 
-        # A left/right split is a state, not good-vs-bad: neutral both sides.
-        self.canvas.create_text(bg_x1, b_bar_cy, text=f"{int(pct_l)}% L", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
-        self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, b_bar_x2, b_bar_cy + 4, fill=theme.SURFACE_2, outline="")
-        fill_x = b_bar_x1 + int((pct_l / 100.0) * (b_bar_x2 - b_bar_x1))
-        self.canvas.create_rectangle(b_bar_x1, b_bar_cy - 4, fill_x, b_bar_cy + 4, fill=theme.ACCENT, outline="")
-        self.canvas.create_line((b_bar_x1 + b_bar_x2) // 2, b_bar_cy - 7, (b_bar_x1 + b_bar_x2) // 2, b_bar_cy + 7, fill=theme.TEXT, width=1)
-        self.canvas.create_text(b_bar_x2 + 6, b_bar_cy, text=f"{int(pct_r)}% R", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
-        bg_x2 = b_bar_x2 + 44
-
-        # 4. Torque
-        torq_x1 = bg_x2 + 12
-        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 - 6, text="TORQUE", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
-        self.canvas.create_text(torq_x1, (bar_y1 + bar_y2) // 2 + 7, text=f"{torque_nm:+.1f} N·m", fill=theme.TEXT, font=(theme.ui_font(), 9), anchor="w")
 
         # 5. Right Action Buttons (Right-aligned with 12px fixed gap and generous width)
         btn_w = 96 if avail_w >= 1000 else 88
@@ -6489,7 +6500,9 @@ class ShanktuaryApp:
         hw_x1 = hw_x2 - btn_w
         demo_x2 = hw_x1 - btn_gap
         demo_x1 = demo_x2 - btn_w
-        btn_y1 = (bar_y1 + bar_y2 - btn_h) // 2
+        # Pin the actions to the title row, not the centre of the whole
+        # header -- the metric strip below made "centred" land on the numbers.
+        btn_y1 = bar_y1 - 2
         btn_y2 = btn_y1 + btn_h
 
         # Check if simulator/demo is active
@@ -6514,45 +6527,101 @@ class ShanktuaryApp:
         # 3. Main Workspace Split (Left: Heatmap, Right: COP & Curves)
         content_y1 = bar_y2 + 10
         content_h = bot_y - content_y1
-        left_w = int(bar_w * 0.48)
-        right_w = bar_w - left_w - 10
+
+        # Per docs/ui/view_lab.png: CoP trail and dual-foot pressure share the
+        # top row, weight transfer and force curve share the bottom. The two
+        # curves get their own panels rather than sharing one.
+        top_h = int(content_h * 0.52)
+        top_y1 = content_y1
+        top_y2 = top_y1 + top_h
+        bot_y1 = top_y2 + 10
+
+        left_w = int(bar_w * 0.52)
         left_x1 = bar_x1
         left_x2 = left_x1 + left_w
         right_x1 = left_x2 + 10
-        right_x2 = right_x1 + right_w
+        right_x2 = bar_x2
 
-        # --- LEFT PANE: DUAL-FOOT PRESSURE HEATMAP ---
-        self.canvas.create_rectangle(left_x1, content_y1, left_x2, bot_y, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(left_x1 + 14, content_y1 + 16, text="🦶 DUAL-FOOT PRESSURE HEATMAP", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+        def panel(px1, py1, px2, py2, title, tag=None):
+            self.canvas.create_rectangle(px1, py1, px2, py2,
+                                         fill=theme.SURFACE, outline="")
+            self.canvas.create_text(px1 + 16, py1 + 13, text=title,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="nw")
+            if tag:
+                self.canvas.create_text(px2 - 16, py1 + 13, text=tag,
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 8), anchor="ne")
 
-        # Draw Footbeds
-        foot_w = (left_w - 50) // 2
-        foot_h = content_h - 70
-        l_foot_x1 = left_x1 + 16
-        r_foot_x1 = l_foot_x1 + foot_w + 18
-        foot_y1 = content_y1 + 38
+        # --- TOP LEFT: CoP trail ---
+        panel(left_x1, top_y1, left_x2, top_y2, "CENTRE OF PRESSURE TRAIL")
+        self.draw_cop_trajectory_canvas(left_x1, top_y1 + 26, left_w,
+                                        top_h - 30, latest=latest)
 
-        # Left Foot Box & Right Foot Box
-        self.draw_single_foot_heatmap(l_foot_x1, foot_y1, foot_w, foot_h, is_left=True, latest=latest)
-        self.draw_single_foot_heatmap(r_foot_x1, foot_y1, foot_w, foot_h, is_left=False, latest=latest)
+        # --- TOP RIGHT: dual-foot pressure ---
+        panel(right_x1, top_y1, right_x2, top_y2, "DUAL-FOOT PRESSURE")
+        right_w = right_x2 - right_x1
+        foot_w = (right_w - 58) // 2
+        foot_h = top_h - 96
+        l_foot_x1 = right_x1 + 18
+        r_foot_x1 = l_foot_x1 + foot_w + 22
+        self.draw_single_foot_heatmap(l_foot_x1, top_y1 + 30, foot_w, foot_h,
+                                      is_left=True, latest=latest)
+        self.draw_single_foot_heatmap(r_foot_x1, top_y1 + 30, foot_w, foot_h,
+                                      is_left=False, latest=latest)
 
-        # --- RIGHT PANE: COP TRAJECTORY & FORCE CURVES ---
-        cop_h = int(content_h * 0.56)
-        curves_h = content_h - cop_h - 10
-        cop_y1 = content_y1
-        cop_y2 = cop_y1 + cop_h
-        curves_y1 = cop_y2 + 10
-        curves_y2 = bot_y
+        # Lead / trail split beneath the footbeds, per the mockup.
+        sp_y = top_y1 + 30 + foot_h + 14
+        lead_pct, trail_pct = (pct_r, pct_l) if self.is_left_handed else (pct_l, pct_r)
+        self.canvas.create_text(l_foot_x1, sp_y, text="LEAD (L)",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.canvas.create_text(l_foot_x1 + foot_w, sp_y,
+                                text=f"{lead_pct:.0f}%" if live else "--",
+                                fill=theme.TEXT if live else theme.TEXT_3,
+                                font=(theme.ui_font(), 15), anchor="ne")
+        self.canvas.create_text(r_foot_x1, sp_y, text="TRAIL (R)",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.canvas.create_text(r_foot_x1 + foot_w, sp_y,
+                                text=f"{trail_pct:.0f}%" if live else "--",
+                                fill=theme.TEXT if live else theme.TEXT_3,
+                                font=(theme.ui_font(), 15), anchor="ne")
+        sb_y = sp_y + 28
+        sb_x2 = r_foot_x1 + foot_w
+        self.canvas.create_rectangle(l_foot_x1, sb_y, sb_x2, sb_y + 6,
+                                     fill=theme.SURFACE_2, outline="")
+        if live:
+            _split = max(0.0, min(1.0, lead_pct / 100.0))
+            self.canvas.create_rectangle(l_foot_x1, sb_y,
+                                         l_foot_x1 + (sb_x2 - l_foot_x1) * _split,
+                                         sb_y + 6, fill=theme.ACCENT, outline="")
+            self.canvas.create_text(l_foot_x1, sb_y + 10,
+                                    text=f"{lead_pct:.0f}% lead",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            self.canvas.create_text(sb_x2, sb_y + 10,
+                                    text=f"{trail_pct:.0f}% trail",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="ne")
+        else:
+            self.canvas.create_text((l_foot_x1 + sb_x2) / 2, sb_y + 10,
+                                    text="No board connected",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="n")
 
-        # Top Right: COP Stance Box
-        self.canvas.create_rectangle(right_x1, cop_y1, right_x2, cop_y2, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(right_x1 + 14, cop_y1 + 16, text="🎯 CENTER OF PRESSURE (COP) TRAIL", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
-        self.draw_cop_trajectory_canvas(right_x1, cop_y1 + 28, right_w, cop_h - 32, latest=latest)
-
-        # Bottom Right: Timeline Curves
-        self.canvas.create_rectangle(right_x1, curves_y1, right_x2, curves_y2, fill=theme.BG, outline=theme.HAIRLINE)
-        self.canvas.create_text(right_x1 + 14, curves_y1 + 14, text="📈 WEIGHT TRANSFER & FORCE CURVES", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="w")
-        self.draw_force_timeline_canvas(right_x1, curves_y1 + 26, right_w, curves_h - 30)
+        # --- BOTTOM: weight transfer + force curve, side by side ---
+        cw_ = (bar_w - 10) / 2
+        wt_x1 = bar_x1
+        wt_x2 = wt_x1 + cw_
+        fc_x1 = wt_x2 + 10
+        fc_x2 = bar_x2
+        panel(wt_x1, bot_y1, wt_x2, bot_y, "WEIGHT TRANSFER", "lead · trail")
+        panel(fc_x1, bot_y1, fc_x2, bot_y, "FORCE CURVE", "× bodyweight")
+        self.draw_force_timeline_canvas(wt_x1, bot_y1 + 24, cw_,
+                                        bot_y - bot_y1 - 28, series="transfer")
+        self.draw_force_timeline_canvas(fc_x1, bot_y1 + 24, cw_,
+                                        bot_y - bot_y1 - 28, series="force")
 
     def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
         x2, y2 = x1 + w, y1 + h
@@ -6622,11 +6691,17 @@ class ShanktuaryApp:
                 glow_col = theme.ACCENT_DEEP
             self.canvas.create_oval(sx - rad, sy - rad, sx + rad, sy + rad, fill="", outline=glow_col, width=2)
             self.canvas.create_oval(sx - rad // 2, sy - rad // 2, sx + rad // 2, sy + rad // 2, fill=glow_col, outline="")
-            self.canvas.create_text(sx, sy + rad + 9, text=f"{kg:.1f}kg", fill=theme.TEXT_2, font=(theme.ui_font(), 7))
+            self.canvas.create_text(sx, sy + rad + 9,
+                                    text=f"{kg:.1f}kg" if latest else "--",
+                                    fill=theme.TEXT_2 if latest else theme.TEXT_3,
+                                    font=(theme.ui_font(), 7))
 
         # Foot Total Badge
         self.canvas.create_rectangle(x1 + 10, y2 - 24, x2 - 10, y2 - 6, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text((x1 + x2) // 2, y2 - 15, text=f"Total: {int(tot_foot)}%", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
+        self.canvas.create_text((x1 + x2) // 2, y2 - 15,
+                                text=f"Total: {int(tot_foot)}%" if latest else "Total: --",
+                                fill=theme.TEXT_2 if latest else theme.TEXT_3,
+                                font=(theme.ui_font(), 8))
 
     def draw_cop_trajectory_canvas(self, x1, y1, w, h, latest=None):
         x2, y2 = x1 + w, y1 + h
@@ -6678,58 +6753,110 @@ class ShanktuaryApp:
         self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5, fill=theme.ACCENT_TEXT, outline=theme.TEXT)
         self.canvas.create_text(dot_x + 14, dot_y, text=f"({cur_cop_x:+.0f}, {cur_cop_y:+.0f})", fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
-    def draw_force_timeline_canvas(self, x1, y1, w, h):
+    def draw_force_timeline_canvas(self, x1, y1, w, h, series="transfer"):
+        """Timeline curve for the swing.
+
+        series="transfer" plots lead and trail foot load as a percentage;
+        series="force" plots vertical load in bodyweights. Both share the
+        same normalised timeline and phase bands so they can be read
+        together vertically, per docs/ui/view_lab.png.
+        """
         x2, y2 = x1 + w, y1 + h
-        self.canvas.create_rectangle(x1 + 10, y1 + 4, x2 - 10, y2 - 6, fill="#0C0E16", outline=theme.HAIRLINE)
 
         trail = self.swing_lab_history
         if self.current_shot and self.current_shot.get("pressure_trace"):
             trail = self.current_shot["pressure_trace"]
 
+        gx1, gx2 = x1 + 46, x2 - 16
+        gy1, gy2 = y1 + 22, y2 - 26
+        gw, gh = gx2 - gx1, gy2 - gy1
+
         if len(trail) < 2:
-            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="Awaiting Swing Data...", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
+            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2,
+                                    text="No swing captured yet",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 9))
             return
 
-        graph_x1 = x1 + 20
-        graph_x2 = x2 - 20
-        graph_y1 = y1 + 10
-        graph_y2 = y2 - 12
-        gw = graph_x2 - graph_x1
-        gh = graph_y2 - graph_y1
-
-        # Center 50% line
-        mid_y = graph_y1 + gh // 2
-        self.canvas.create_line(graph_x1, mid_y, graph_x2, mid_y, fill=theme.HAIRLINE, dash=(2, 4))
-        self.canvas.create_text(graph_x1 - 4, mid_y, text="50%", fill=theme.TEXT_3, font=(theme.ui_font(), 6), anchor="e")
-
-        samples = trail[-100:]
+        samples = trail[-120:]
         n = len(samples)
 
-        # Plot Left % (Cyan) and Right % (Magenta) Curves
-        pts_l = []
-        pts_r = []
+        def sx(i):
+            return gx1 + (i / float(max(1, n - 1))) * gw
+
+        # Phase bands along the bottom, from the sample phases themselves.
+        phases = []
         for i, s in enumerate(samples):
-            px = graph_x1 + int((i / float(max(1, n - 1))) * gw)
-            pct_l = s.get("pct_left", 50.0)
-            pct_r = s.get("pct_right", 100.0 - pct_l)
-            py_l = graph_y2 - int((pct_l / 100.0) * gh)
-            py_r = graph_y2 - int((pct_r / 100.0) * gh)
-            pts_l.append((px, py_l))
-            pts_r.append((px, py_r))
+            ph = str(s.get("phase", "")).title() or "—"
+            if not phases or phases[-1][0] != ph:
+                phases.append((ph, i))
+        for pi, (ph, i0) in enumerate(phases):
+            i1 = phases[pi + 1][1] if pi + 1 < len(phases) else n - 1
+            if i1 - i0 < 1:
+                continue
+            bx1, bx2_ = sx(i0), sx(i1)
+            if pi % 2:
+                self.canvas.create_rectangle(bx1, gy1, bx2_, gy2,
+                                             fill=theme.SURFACE_2, outline="")
+            self.canvas.create_text((bx1 + bx2_) / 2, gy2 + 8, text=ph,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="n")
 
-        for i in range(len(pts_l) - 1):
-            self.canvas.create_line(pts_l[i][0], pts_l[i][1], pts_l[i+1][0], pts_l[i+1][1], fill=theme.ACCENT_TEXT, width=2)
-            self.canvas.create_line(pts_r[i][0], pts_r[i][1], pts_r[i+1][0], pts_r[i+1][1], fill=theme.DANGER, width=2)
+        if series == "transfer":
+            ticks = [(0.0, "0%"), (0.5, "50%"), (1.0, "100%")]
+            lead_key = "pct_right" if self.is_left_handed else "pct_left"
+            trail_key = "pct_left" if self.is_left_handed else "pct_right"
+            seriess = [
+                (lead_key, theme.ACCENT_LINE, "lead", 100.0),
+                (trail_key, theme.TEXT_2, "trail", 100.0),
+            ]
+        else:
+            vals = [float(s.get("force_bw", 1.0) or 1.0) for s in samples]
+            hi = max(1.6, max(vals) * 1.1)
+            ticks = [(0.0, "0"), (1.0 / hi, "1.0"), (1.0, f"{hi:.1f}")]
+            seriess = [("force_bw", theme.ACCENT_LINE, "total", hi)]
 
-        # Legend
-        leg_x2 = x2 - 20
-        # Right Foot % Legend (Magenta)
-        self.canvas.create_line(leg_x2 - 82, y1 + 10, leg_x2 - 64, y1 + 10, fill=theme.DANGER, width=2)
-        self.canvas.create_text(leg_x2 - 60, y1 + 10, text="Right Foot %", fill=theme.DANGER, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        for frac, label in ticks:
+            ty = gy2 - frac * gh
+            self.canvas.create_line(gx1, ty, gx2, ty, fill=theme.HAIRLINE,
+                                    dash=(2, 4))
+            self.canvas.create_text(gx1 - 8, ty, text=label, fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="e")
 
-        # Left Foot % Legend (Cyan)
-        self.canvas.create_line(leg_x2 - 164, y1 + 10, leg_x2 - 146, y1 + 10, fill=theme.ACCENT_TEXT, width=2)
-        self.canvas.create_text(leg_x2 - 142, y1 + 10, text="Left Foot %", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        for key, col, label, scale in seriess:
+            pts = []
+            for i, s in enumerate(samples):
+                v = s.get(key)
+                if v is None and key == "pct_right":
+                    v = 100.0 - float(s.get("pct_left", 50.0) or 50.0)
+                v = float(v if v is not None else 0.0)
+                pts.append((sx(i), gy2 - max(0.0, min(1.0, v / scale)) * gh))
+            for i in range(len(pts) - 1):
+                self.canvas.create_line(pts[i][0], pts[i][1],
+                                        pts[i + 1][0], pts[i + 1][1],
+                                        fill=col, width=2)
+
+        # Impact marker -- the moment both curves are read against.
+        for i, s in enumerate(samples):
+            if "impact" in str(s.get("phase", "")).lower():
+                ix = sx(i)
+                self.canvas.create_line(ix, gy1, ix, gy2, fill=theme.WARN,
+                                        dash=(3, 3))
+                self.canvas.create_text(ix, gy1 - 4, text="impact",
+                                        fill=theme.WARN,
+                                        font=(theme.ui_font(), 7), anchor="s")
+                break
+
+        # Legend on the panel header row, clear of the plot.
+        lx = gx2
+        for key, col, label, _ in reversed(seriess):
+            tid = self.canvas.create_text(lx, y1 + 8, text=label, fill=col,
+                                          font=(theme.ui_font(), 7), anchor="ne")
+            bb = self.canvas.bbox(tid)
+            if bb:
+                self.canvas.create_line(bb[0] - 16, y1 + 12, bb[0] - 4, y1 + 12,
+                                        fill=col, width=2)
+                lx = bb[0] - 24
 
     def draw_setup_viewport(self, avail_w, h, offset_x=0):
         """Setup / hardware view -- see docs/ui/view_setup.png.
