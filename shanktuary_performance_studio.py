@@ -538,6 +538,13 @@ class ShanktuaryApp:
         self.overview_next_rect = None
         self.overview_bar_rects = []
         self.nav_setup_rect = None
+        self.setup_mode_1_rect = None
+        self.setup_mode_2_rect = None
+        self.setup_pair_rect = None
+        self.setup_step_a_rect = None
+        self.setup_step_b_rect = None
+        self.setup_align_rect = None
+        self.setup_tare_rect = None
         # Cache for _text_width(): measuring is cheap but this runs per card
         # per redraw, and the set of strings is small and repetitive.
         self._text_w_cache = {}
@@ -1930,8 +1937,7 @@ class ShanktuaryApp:
         # swallowed by the modal's own hit testing and feel dead.
         r = self.nav_setup_rect
         if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
-            self.show_balance_hardware_modal = not self.show_balance_hardware_modal
-            self.draw_screen()
+            self.set_mode(10)
             return
 
         # 0. In-Canvas Balance Hardware Modal Click Handling
@@ -2273,6 +2279,69 @@ class ShanktuaryApp:
                         self.current_shot = self.session_shots[idx]
                         self.draw_screen()
                         return
+
+        if self.view_mode == 10:
+            def _h(r):
+                return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
+            pm = getattr(obs_server, "pressure_manager", None)
+
+            if _h(self.setup_mode_1_rect) or _h(self.setup_mode_2_rect):
+                want_dual = _h(self.setup_mode_2_rect)
+                if pm:
+                    pm.set_board_mode("dual" if want_dual else "single")
+                    self.copy_feedback = ("Mode: 2 Boards (Dual Plate)"
+                                          if want_dual else "Mode: 1 Board (Single Mat)")
+                    self.root.after(2000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+
+            if _h(self.setup_pair_rect):
+                self.copy_feedback = "Scanning for Wii Balance Boards..."
+                self.root.after(2000, self.clear_copy_feedback)
+
+                def _do_pair():
+                    try:
+                        from src.hardware.pressure import connect_board
+                        connect_board()
+                    except Exception as e:
+                        print(f"[!] Pairing notice: {e}")
+                threading.Thread(target=_do_pair, daemon=True).start()
+                self.draw_screen()
+                return
+
+            # Step chips feed the assignment wizard a simulated load so a
+            # user can drive it without a board, matching the modal.
+            for rect, (kg_a, kg_b) in ((self.setup_step_a_rect, (35.0, 0.0)),
+                                       (self.setup_step_b_rect, (0.0, 35.0))):
+                if _h(rect):
+                    if pm:
+                        if not (pm.assignment_wizard
+                                and pm.assignment_wizard.get_status().get("phase")
+                                not in (None, "idle")):
+                            pm.start_assignment_wizard()
+                        pm.update_assignment_wizard(kg_a, kg_b)
+                    self.draw_screen()
+                    return
+
+            if _h(self.setup_align_rect):
+                try:
+                    if pm and hasattr(pm, "start_stance_alignment"):
+                        pm.start_stance_alignment(duration_sec=4.0)
+                except Exception as e:
+                    print(f"[!] Stance alignment failed: {e}")
+                self.draw_screen()
+                return
+
+            if _h(self.setup_tare_rect):
+                try:
+                    if pm and hasattr(pm, "tare"):
+                        pm.tare()
+                        self.copy_feedback = "✓ Boards tared"
+                        self.root.after(2000, self.clear_copy_feedback)
+                except Exception as e:
+                    print(f"[!] Tare failed: {e}")
+                self.draw_screen()
+                return
 
         if self.view_mode == 9:
             def _hit(r):
@@ -2843,16 +2912,16 @@ class ShanktuaryApp:
         # Setup pinned to the bottom, away from view switching. It opens the
         # balance-hardware modal rather than switching view_mode, so it gets
         # its own hit rect instead of joining mode_pill_rects.
-        setup_active = self.show_balance_hardware_modal
+        setup_active = (self.view_mode == 10)
         s_col = theme.ACCENT_TEXT if setup_active else theme.TEXT_3
         if setup_active:
-            self.canvas.create_rectangle(4, h - 64, theme.RAIL_W - 4, h - 20,
+            self.canvas.create_rectangle(4, h - 72, theme.RAIL_W - 4, h - 24,
                                          fill=theme.ACCENT_DEEP, outline="")
-        self.canvas.create_rectangle(25, h - 56, 39, h - 42, fill="",
+        self.canvas.create_rectangle(25, h - 66, 39, h - 52, fill="",
                                      outline=s_col, width=2)
-        self.canvas.create_text(32, h - 32, text="Setup", fill=s_col,
+        self.canvas.create_text(32, h - 38, text="Setup", fill=s_col,
                                 font=(theme.ui_font(), 7), anchor="center")
-        self.nav_setup_rect = (4, h - 64, theme.RAIL_W - 4, h - 20)
+        self.nav_setup_rect = (4, h - 72, theme.RAIL_W - 4, h - 24)
 
     def verify_ogc_model_sync(self, shot):
         """Detect drift between our mirrored OGC constants and the live payload.
@@ -3309,6 +3378,10 @@ class ShanktuaryApp:
         elif self.view_mode == 7:
             # Mode 7: Club Fitting & Head-to-Head Comparison
             self.draw_fitting_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 10:
+            # Mode 10: Setup -- devices & hardware.
+            self.draw_setup_viewport(avail_w, h, offset_x=offset_x)
+
         elif self.view_mode == 9:
             # Mode 9: Overview -- the landing view.
             # No shared metric toolbar here: Overview draws its own primary
@@ -6498,6 +6571,300 @@ class ShanktuaryApp:
         # Left Foot % Legend (Cyan)
         self.canvas.create_line(leg_x2 - 164, y1 + 10, leg_x2 - 146, y1 + 10, fill=theme.ACCENT_TEXT, width=2)
         self.canvas.create_text(leg_x2 - 142, y1 + 10, text="Left Foot %", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
+
+    def draw_setup_viewport(self, avail_w, h, offset_x=0):
+        """Setup / hardware view -- see docs/ui/view_setup.png.
+
+        Replaces the balance-hardware modal as the primary surface. Board
+        pairing used to live behind Swing Lab -> Hardware, which is a strange
+        place to look when you are trying to connect a board for the first
+        time and have no data yet.
+
+        Every control from the modal is preserved: single/dual mode, pairing,
+        the step-on assignment wizard, 50/50 alignment and tare.
+        """
+        pm = getattr(obs_server, "pressure_manager", None)
+        x0 = offset_x + 24
+        x1 = offset_x + avail_w - 24
+        # Start below the app top bar -- this view draws its own page header
+        # and would otherwise sit on top of the brand/status row.
+        y = 74
+
+        # ---- header --------------------------------------------------------
+        self.canvas.create_text(x0, y, text="Setup", fill=theme.TEXT,
+                                font=(theme.ui_font(), 17), anchor="nw")
+        hb = self.canvas.bbox(self.canvas.find_all()[-1])
+        self.canvas.create_text((hb[2] + 10) if hb else x0 + 70, y + 8,
+                                text="devices & hardware", fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 9), anchor="nw")
+
+        nova_up = bool(getattr(self, "nova_connected", False))
+        dot = theme.ACCENT if nova_up else theme.TEXT_3
+        self.canvas.create_oval(x1 - 132, y + 6, x1 - 126, y + 12,
+                                fill=dot, outline="")
+        self.canvas.create_text(x1 - 118, y + 4,
+                                text="Nova connected" if nova_up else "Nova offline",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                                anchor="nw")
+        y += 40
+        self.canvas.create_line(x0, y, x1, y, fill=theme.HAIRLINE)
+        y += 16
+
+        col_gap = 20
+        col_w = (x1 - x0 - col_gap) / 2
+        lx0, lx1 = x0, x0 + col_w
+        rx0, rx1 = lx1 + col_gap, x1
+        bot = h - 40
+
+        def card(cx0, cy0, cx1, cy1, title):
+            self.canvas.create_rectangle(cx0, cy0, cx1, cy1,
+                                         fill=theme.SURFACE, outline="")
+            self.canvas.create_text(cx0 + 18, cy0 + 14, text=title,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="nw")
+
+        def row(rx, ry, label, value, vcol=None):
+            self.canvas.create_text(rx + 18, ry, text=label, fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 9), anchor="nw")
+            self.canvas.create_text(rx1_cur - 18, ry, text=value,
+                                    fill=vcol or theme.TEXT,
+                                    font=(theme.ui_font(), 9), anchor="ne")
+
+        # ================= LEFT COLUMN =================
+        ly = y
+
+        # --- launch monitor ---
+        lm_h = 132
+        card(lx0, ly, lx1, ly + lm_h, "LAUNCH MONITOR")
+        rx1_cur = lx1
+        self.canvas.create_oval(lx0 + 18, ly + 36, lx0 + 28, ly + 46,
+                                fill=dot, outline="")
+        self.canvas.create_text(lx0 + 36, ly + 30, text="OpenLaunch Nova",
+                                fill=theme.TEXT, font=(theme.ui_font(), 13),
+                                anchor="nw")
+        self.canvas.create_text(lx0 + 36, ly + 50,
+                                text="Connected" if nova_up else "Not connected",
+                                fill=theme.ACCENT_TEXT if nova_up else theme.TEXT_3,
+                                font=(theme.ui_font(), 8), anchor="nw")
+        host = getattr(obs_server, "NOVA_HOST", None) or "openlaunch-nova.local"
+        row(lx0, ly + 76, "Host", str(host))
+        row(lx0, ly + 96, "Shots this session", str(len(self.session_shots)))
+        ly += lm_h + 14
+
+        # --- display ---
+        dsp_h = 118
+        card(lx0, ly, lx1, ly + dsp_h, "DISPLAY")
+        port = getattr(obs_server, "OBS_PORT", 9321)
+        row(lx0, ly + 34, "Overlay server", f"localhost:{port}")
+        row(lx0, ly + 56, "Handedness",
+            "Left" if self.is_left_handed else "Right")
+        row(lx0, ly + 78, "Units", "Yards / MPH")
+        ly += dsp_h + 14
+
+        # --- data sources: what is measured vs derived vs estimated ---
+        card(lx0, ly, lx1, bot, "DATA SOURCES")
+        dy = ly + 34
+        for tone, head, sub in (
+            (theme.TEXT, "Measured by Nova",
+             "Ball speed · launch angles · spin · spin axis"),
+            (theme.TEXT_2, "Derived by OpenGolfCoach",
+             "Club speed · smash · club path · face angles"),
+            (theme.WARN, "Estimated",
+             "Strike location — direction only, no club tracking"),
+        ):
+            self.canvas.create_text(lx0 + 18, dy, text=head, fill=tone,
+                                    font=(theme.ui_font(), 9), anchor="nw")
+            self.canvas.create_text(lx0 + 18, dy + 16, text=sub,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            dy += 40
+
+        self.canvas.create_line(lx0 + 18, dy + 2, lx1 - 18, dy + 2,
+                                fill=theme.HAIRLINE)
+        self.canvas.create_text(lx0 + 18, dy + 12, text="WHY SOME VALUES SHOW --",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        for i, line in enumerate((
+            "OpenGolfCoach infers club speed from ball data. Below",
+            "roughly 90 mph ball speed its model saturates and returns",
+            "a constant, so club speed and smash are hidden rather",
+            "than shown as a measurement.",
+        )):
+            self.canvas.create_text(lx0 + 18, dy + 28 + i * 12, text=line,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+
+        # ================= RIGHT COLUMN =================
+        ry = y
+        rx1_cur = rx1
+        card(rx0, ry, rx1, bot, "BALANCE BOARDS")
+
+        is_dual = bool(pm and getattr(pm, "board_mode", "single") == "dual")
+        self.canvas.create_text(rx0 + 18, ry + 34, text="MODE",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        mw_ = (rx1 - rx0 - 44) / 2
+        for i, (lbl, sub, active) in enumerate((
+            ("1 Board", "single mat", not is_dual),
+            ("2 Boards", "dual plate", is_dual),
+        )):
+            bx0 = rx0 + 18 + i * (mw_ + 8)
+            bx1_ = bx0 + mw_
+            self.canvas.create_rectangle(bx0, ry + 48, bx1_, ry + 84,
+                                         fill=theme.ACCENT_DEEP if active else theme.SURFACE_2,
+                                         outline=theme.ACCENT_LINE if active else "")
+            self.canvas.create_text(bx0 + 12, ry + 55, text=lbl,
+                                    fill=theme.ACCENT_TEXT if active else theme.TEXT_2,
+                                    font=(theme.ui_font(), 10), anchor="nw")
+            self.canvas.create_text(bx0 + 12, ry + 70, text=sub,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            if i == 0:
+                self.setup_mode_1_rect = (bx0, ry + 48, bx1_, ry + 84)
+            else:
+                self.setup_mode_2_rect = (bx0, ry + 48, bx1_, ry + 84)
+
+        # --- pair ---
+        py = ry + 96
+        self.setup_pair_rect = (rx0 + 18, py, rx1 - 18, py + 32)
+        self.canvas.create_rectangle(rx0 + 18, py, rx1 - 18, py + 32,
+                                     fill=theme.ACCENT_DEEP,
+                                     outline=theme.ACCENT_LINE)
+        self.canvas.create_text((rx0 + rx1) / 2, py + 16,
+                                text="Pair a board over Bluetooth",
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 9), anchor="center")
+        self.canvas.create_text(rx0 + 18, py + 40,
+                                text="Press the red SYNC button inside the battery compartment",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+
+        # --- paired boards ---
+        wiz = getattr(pm, "assignment_wizard", None) if pm else None
+        wst = wiz.get_status() if wiz else {}
+        w_a = wst.get("board_a_weight", 0.0)
+        w_b = wst.get("board_b_weight", 0.0)
+        phase = wst.get("phase", "idle")
+
+        by = py + 60
+        self.canvas.create_text(rx0 + 18, by, text="PAIRED",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        by += 16
+        boards = [("Board A", "LEAD (L)", w_a)]
+        if is_dual:
+            boards.append(("Board B", "TRAIL (R)", w_b))
+        for name, foot, kg in boards:
+            live = kg > 0.5
+            self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + 40,
+                                         fill=theme.SURFACE_2, outline="")
+            self.canvas.create_oval(rx0 + 30, by + 17, rx0 + 38, by + 25,
+                                    fill=theme.ACCENT if live else theme.TEXT_3,
+                                    outline="")
+            self.canvas.create_text(rx0 + 48, by + 8, text=name,
+                                    fill=theme.TEXT,
+                                    font=(theme.ui_font(), 10), anchor="nw")
+            self.canvas.create_text(rx0 + 48, by + 24, text=foot,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            self.canvas.create_text(rx1 - 30, by + 12,
+                                    text=f"{kg:.1f} kg" if live else "--",
+                                    fill=theme.TEXT if live else theme.TEXT_3,
+                                    font=(theme.ui_font(), 12), anchor="ne")
+            by += 46
+
+        # --- assign left / right (dual only) ---
+        if is_dual:
+            self.canvas.create_text(rx0 + 18, by, text="ASSIGN LEFT / RIGHT",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            self.canvas.create_text(rx0 + 18, by + 14,
+                                    text="Step on each board to tell the app which foot it is under",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            by += 32
+            sw_ = (rx1 - rx0 - 44) / 2
+            for i, (lbl, kg) in enumerate((("Step Board A", w_a),
+                                           ("Step Board B", w_b))):
+                sx0 = rx0 + 18 + i * (sw_ + 8)
+                sx1_ = sx0 + sw_
+                waiting = (phase == "waiting_left" and i == 0) or \
+                          (phase == "waiting_right" and i == 1)
+                self.canvas.create_rectangle(sx0, by, sx1_, by + 44,
+                                             fill=theme.SURFACE_2,
+                                             outline=theme.ACCENT_LINE if waiting else "")
+                self.canvas.create_text(sx0 + 12, by + 8, text=lbl,
+                                        fill=theme.TEXT_2,
+                                        font=(theme.ui_font(), 8), anchor="nw")
+                self.canvas.create_text(sx0 + 12, by + 22, text=f"{kg:.1f} kg",
+                                        fill=theme.TEXT,
+                                        font=(theme.ui_font(), 13), anchor="nw")
+                if waiting:
+                    self.canvas.create_text(sx1_ - 12, by + 28, text="detecting",
+                                            fill=theme.ACCENT_TEXT,
+                                            font=(theme.ui_font(), 7), anchor="ne")
+                if i == 0:
+                    self.setup_step_a_rect = (sx0, by, sx1_, by + 44)
+                else:
+                    self.setup_step_b_rect = (sx0, by, sx1_, by + 44)
+            by += 56
+        else:
+            self.setup_step_a_rect = None
+            self.setup_step_b_rect = None
+
+        # --- calibration ---
+        self.canvas.create_text(rx0 + 18, by, text="CALIBRATION",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        by += 16
+        al = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {}
+        aligning = al.get("active", False)
+        rem = al.get("remaining_sec", 0.0)
+
+        self.setup_align_rect = (rx0 + 18, by, rx1 - 18, by + 40)
+        self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + 40,
+                                     fill=theme.ACCENT_DEEP if aligning else theme.SURFACE_2,
+                                     outline=theme.ACCENT_LINE if aligning else "")
+        self.canvas.create_text(rx0 + 30, by + 8, text="50/50 Stance Calibration",
+                                fill=theme.ACCENT_TEXT if aligning else theme.TEXT,
+                                font=(theme.ui_font(), 9), anchor="nw")
+        self.canvas.create_text(rx0 + 30, by + 24,
+                                text="Stand in address, hold still for 4s",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        if aligning:
+            self.canvas.create_text(rx1 - 30, by + 12, text=f"{rem:.1f}s",
+                                    fill=theme.ACCENT_TEXT,
+                                    font=(theme.ui_font(), 13), anchor="ne")
+            frac = max(0.0, min(1.0, 1.0 - (rem / 4.0)))
+            self.canvas.create_rectangle(rx0 + 18, by + 37,
+                                         rx0 + 18 + (rx1 - rx0 - 36) * frac,
+                                         by + 40, fill=theme.ACCENT, outline="")
+        mult = getattr(obs_server.obs_state, "balance_multiplier", None) or [1.0, 1.0]
+        try:
+            self.canvas.create_text(rx0 + 18, by + 46,
+                                    text=f"Applied: L {float(mult[0]):.2f}   ·   R {float(mult[1]):.2f}",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+        except Exception:
+            pass
+        by += 66
+
+        self.setup_tare_rect = (rx0 + 18, by, rx1 - 18, by + 30)
+        self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + 30,
+                                     fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((rx0 + rx1) / 2, by + 15,
+                                text="Tare — zero both boards (step off first)",
+                                fill=theme.TEXT_2,
+                                font=(theme.ui_font(), 8), anchor="center")
+
+        # ---- footer --------------------------------------------------------
+        self.canvas.create_line(x0, h - 26, x1, h - 26, fill=theme.HAIRLINE)
+        self.canvas.create_text(x0, h - 18, text="Setup", fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="nw")
+        self.canvas.create_text(x1, h - 18, text="Changes apply immediately",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="ne")
 
     def draw_balance_hardware_modal(self, w, h):
         # Modal dark backdrop
