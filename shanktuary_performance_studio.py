@@ -4342,7 +4342,7 @@ class ShanktuaryApp:
                                smash_clamped=False, offset_x=0, top_bar_h=52):
         """Landing view: this shot at a glance, plus session context.
 
-        Layout follows docs/ui/full_screen_mockup.png -- header, primary
+        Layout follows the approved full-screen mockup -- header, primary
         metric row, three cards, recent strip + session summary, then a
         bottom band with dispersion and tendencies.
         """
@@ -6042,7 +6042,7 @@ class ShanktuaryApp:
             if c_items:
                 grouped_shots[c_name] = c_items
 
-        # --- Stacked layout, per docs/ui/view_fit.png: club header cards,
+        # --- Stacked layout, per the Fit view mockup: club header cards,
         # --- then the stat matrix, then chart + recommendation on one row.
         cx0 = offset_x + 10
         cx1 = offset_x + avail_w - 10
@@ -6281,7 +6281,7 @@ class ShanktuaryApp:
             self.canvas.create_oval(land_x - 4, base_y - 4, land_x + 4, base_y + 4, fill=c_color, outline=theme.TEXT)
 
     def _draw_fitting_h2h_matrix(self, x0, y0, w, y1, stats_by_club, session_clubs):
-        """Row-per-stat comparison table, per docs/ui/view_fit.png.
+        """Row-per-stat comparison table, per the Fit view mockup.
 
         One row per metric with a column per club and a delta column, rather
         than a stacked block per club -- the point of a fitting view is
@@ -6442,7 +6442,7 @@ class ShanktuaryApp:
         bar_x2 = bar_x1 + bar_w
 
         # 2. Header: page title, then a borderless metric strip, per
-        #    docs/ui/view_lab.png -- not a bordered toolbar of pills.
+        #    the Swing Lab mockup -- not a bordered toolbar of pills.
         _tid = self.canvas.create_text(bar_x1 + 4, bar_y1 - 2, text="Swing Lab",
                                        fill=theme.TEXT,
                                        font=(theme.ui_font(), 17), anchor="nw")
@@ -6547,7 +6547,7 @@ class ShanktuaryApp:
         content_y1 = bar_y2 + 10
         content_h = bot_y - content_y1
 
-        # Per docs/ui/view_lab.png: CoP trail and dual-foot pressure share the
+        # Per the Swing Lab mockup: CoP trail and dual-foot pressure share the
         # top row, weight transfer and force curve share the bottom. The two
         # curves get their own panels rather than sharing one.
         top_h = int(content_h * 0.52)
@@ -6778,7 +6778,7 @@ class ShanktuaryApp:
         series="transfer" plots lead and trail foot load as a percentage;
         series="force" plots vertical load in bodyweights. Both share the
         same normalised timeline and phase bands so they can be read
-        together vertically, per docs/ui/view_lab.png.
+        together vertically, per the Swing Lab mockup.
         """
         x2, y2 = x1 + w, y1 + h
 
@@ -6878,7 +6878,7 @@ class ShanktuaryApp:
                 lx = bb[0] - 24
 
     def draw_setup_viewport(self, avail_w, h, offset_x=0):
-        """Setup / hardware view -- see docs/ui/view_setup.png.
+        """Setup / hardware view -- see the Setup view mockup.
 
         Replaces the balance-hardware modal as the primary surface. Board
         pairing used to live behind Swing Lab -> Hardware, which is a strange
