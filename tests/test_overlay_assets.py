@@ -287,6 +287,36 @@ def test_divot_extent_covers_fringe_and_debris(overlay):
     assert "- t * 40" in body, "extent ignores the forward debris spray"
 
 
+def test_divot_surface_ignores_a_saved_hidden_flag(overlay):
+    """/divot must never render a black screen.
+
+    Requesting that URL IS the request to see the divot. If the saved layout
+    happens to hide the divot widget, honouring visible:false leaves the
+    surface completely empty, which reads as broken rather than as a setting.
+    /tiles keeps per-tile visibility, because there it is a real choice.
+    """
+    assert "function spsRoleForcesWidget" in overlay, (
+        "no override for the dedicated divot surface; a layout with the "
+        "divot hidden will render /divot as a black screen"
+    )
+    forces = re.search(r"function spsRoleForcesWidget\(id\) \{(.*?)\n    \}",
+                       overlay, re.S)
+    assert forces, "spsRoleForcesWidget not found"
+    body = forces.group(1)
+    assert "'divot'" in body, "the override must apply to the divot surface"
+    assert "tiles" not in body, (
+        "/tiles must NOT force widgets visible -- per-tile visibility there "
+        "is a genuine user choice"
+    )
+
+    apply_fn = re.search(
+        r"function applyLayoutConfig\(\) \{(.*?)\n    \}", overlay, re.S)
+    assert apply_fn and "spsRoleForcesWidget(id)" in apply_fn.group(1), (
+        "applyLayoutConfig ignores the override, so the layout fetch will "
+        "re-hide the divot after startup"
+    )
+
+
 def test_divot_edge_is_deterministic(overlay):
     """A random edge would crawl between frames on a projector."""
     assert "Math.random" not in overlay.split("function drawDivot")[1][:6000], (

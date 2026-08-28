@@ -648,12 +648,25 @@
     })();
 
     // True when this widget should be on screen for the current role.
-    // Roles win over the saved layout: a widget the user left visible is
-    // still suppressed if it does not belong to this projector surface.
+    //
+    // Roles win over the saved layout in BOTH directions:
+    //
+    //   /divot is a dedicated single-purpose surface -- asking for that URL
+    //   IS the request to see the divot, so it is forced visible even if the
+    //   saved layout hides it. Honouring visible:false there just renders a
+    //   black screen, which reads as broken rather than as a setting.
+    //
+    //   /tiles keeps per-tile visibility, because there the saved layout is
+    //   a real choice about which metrics the user wants on the mat.
     function spsRoleAllowsWidget(id) {
       if (SPS_PROJECTOR_ROLE === 'divot') return id === 'divot';
       if (SPS_PROJECTOR_ROLE === 'tiles') return id !== 'divot';
       return true;
+    }
+
+    // Whether the role overrides a saved visible:false for this widget.
+    function spsRoleForcesWidget(id) {
+      return SPS_PROJECTOR_ROLE === 'divot' && id === 'divot';
     }
 
     if (window.location.search.includes('mode=projector') || SPS_PROJECTOR_ROLE) {
@@ -668,7 +681,9 @@
       // layout fetch lands. applyLayoutConfig() enforces it again after.
       ALL_WIDGET_IDS.forEach(id => {
         const el = document.getElementById(`w_${id}`);
-        if (el && !spsRoleAllowsWidget(id)) el.style.display = 'none';
+        if (!el) return;
+        if (spsRoleForcesWidget(id)) el.style.display = 'flex';
+        else if (!spsRoleAllowsWidget(id)) el.style.display = 'none';
       });
     }
 
@@ -1166,7 +1181,8 @@
           // as hidden if a layout is saved from somewhere else.
           const isVis = cfg.visible !== false;
           el.setAttribute('data-visible', isVis ? 'true' : 'false');
-          const showHere = isVis && spsRoleAllowsWidget(id);
+          const showHere = spsRoleForcesWidget(id) ||
+                           (isVis && spsRoleAllowsWidget(id));
           if (isEditMode) {
             el.style.display = 'flex';
             el.classList.toggle('hidden-in-edit', !isVis);
