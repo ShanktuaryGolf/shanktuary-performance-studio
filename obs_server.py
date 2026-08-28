@@ -52,14 +52,18 @@ def get_assets_dir():
             return base / "_internal" / "assets"
         return base
     
+    # Source runs. SCRIPT_DIR first so the assets next to obs_server.py win,
+    # then cwd for the case where the app is launched from elsewhere.
+    #
+    # No absolute developer paths here: SPS ships to other Nova owners, and
+    # a hardcoded /home/<someone> is dead weight on every other machine --
+    # worse, it can silently resolve to a stale checkout on the one machine
+    # where it does exist.
     candidates = [
         SCRIPT_DIR / "assets",
         SCRIPT_DIR / "shanktuary-performance-studio" / "assets",
         Path.cwd() / "assets",
         Path.cwd() / "shanktuary-performance-studio" / "assets",
-        Path("/home/sean/shanktuary-performance-studio/assets"),
-        Path("/home/sean/assets"),
-        Path("/home/sean/sps/assets")
     ]
     
     for path in candidates:

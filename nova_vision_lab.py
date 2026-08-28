@@ -1,3 +1,14 @@
+"""Nova IR vision lab -- offline analysis tool, not part of the shipped app.
+
+Deliberately NOT in requirements.txt: the desktop app and obs_server never
+import cv2 or numpy, and forcing every Nova owner to pull OpenCV to run the
+launch monitor would be a large dependency for a tool most will never use.
+
+    python3 -m pip install opencv-python numpy
+
+Input/output paths come from NOVA_CAPTURE_DIR / NOVA_OUTPUT_DIR or from the
+function arguments -- see process_all_chad_images().
+"""
 import cv2, numpy as np, os, glob
 
 def apply_flat_field_correction(img):
@@ -62,11 +73,33 @@ def enhance_labeler(img_mono, mask=None):
         bgr = cv2.addWeighted(bgr, 0.75, colored_mask, 0.35, 0)
     return bgr
 
-def process_all_chad_images(chad_dir="/home/sean/Pictures/golf_studio/chad_images"):
-    user_out = "/home/sean/sps/output_user_facing"
-    labeler_out = "/home/sean/sps/output_labeler"
+def process_all_chad_images(chad_dir=None, out_root=None):
+    """Batch-process Nova IR capture directories into review composites.
+
+    Paths are arguments, not constants: this is a dev/analysis tool that
+    other Nova owners may run against their own captures. Defaults come from
+    the environment, then fall back to a directory beside this script.
+
+        NOVA_CAPTURE_DIR  input, dirs each containing left_0.png/right_0.png
+        NOVA_OUTPUT_DIR   where composites are written
+
+    Output is untracked user data: filenames carry per-user account IDs, so
+    it stays out of the repo (see .gitignore).
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    chad_dir = (chad_dir or os.environ.get("NOVA_CAPTURE_DIR")
+                or os.path.join(here, "nova_captures"))
+    out_root = (out_root or os.environ.get("NOVA_OUTPUT_DIR") or here)
+
+    user_out = os.path.join(out_root, "output_user_facing")
+    labeler_out = os.path.join(out_root, "output_labeler")
     os.makedirs(user_out, exist_ok=True)
     os.makedirs(labeler_out, exist_ok=True)
+
+    if not os.path.isdir(chad_dir):
+        print(f"[!] Capture directory not found: {chad_dir}")
+        print("    Set NOVA_CAPTURE_DIR or pass chad_dir=...")
+        return 0
 
     dirs = [d for d in glob.glob(os.path.join(chad_dir, "*")) if os.path.isdir(d)]
     print(f"[+] Re-processing {len(dirs)} sample directories with 1-to-1 Nova Official Dashboard Pipeline...")
