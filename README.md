@@ -27,12 +27,26 @@ Shanktuary Performance Studio is a comprehensive launch monitor visualization, p
 ### 🌿 3. Mode 2: Floor Divot Projector View & Alignment
 *(Press `[1]` / `[2]` or `[Tab]` to switch to Mode 2)*
 
-- **Virtual Divot Graphics:** High-contrast turf patch + swing path vector arrow.
+- **Virtual Divot Graphics:** Torn turf scar oriented to the measured club path.
+  The divot's shape is presentational and constant — the Nova measures club
+  path direction, not divot depth or size — so only its rotation reflects data.
 - **🎯 1-Click Physical Ball Origin Calibration:**
   - Click anywhere on the divot canvas to set the red `🎯 BALL ORIGIN` target anchor.
   - Adjust **X / Y Offset** shifting and **Rotational Tilt (`-45° to +45°`)** so the projected divot lines up 100% perfectly on top of your physical golf ball on your hitting mat.
-- **Fullscreen Floor Projector Mode ([`http://localhost:9321/?mode=projector`](http://localhost:9321/?mode=projector)):**
-  - Pitch-black background mode outputting ONLY the high-contrast divot patch for floor projectors.
+  - The divot begins **at** the ball and runs toward the target, matching a real
+    iron strike (ball first, then turf).
+- **Two independent floor-projection surfaces**, so each can be its own browser
+  window aimed at its own part of the mat:
+  - [`/divot`](http://localhost:9321/divot) — fullscreen divot target, nothing else.
+  - [`/tiles`](http://localhost:9321/tiles) — the metric cards you placed in the
+    editor, without the divot.
+  - `/?mode=projector` keeps your whole layout on one surface, and `/projector`
+    is kept as an alias of `/divot`.
+  - Colours invert automatically in projector mode: a projector cannot emit
+    black, so cards become bright with dark text.
+- **Widget rotation:** in the canvas editor, click a widget to select it, then
+  rotate it from the toolbar. A golfer at address views the mat from the side,
+  so cards often need turning once projected onto the floor.
 
 ---
 
@@ -79,9 +93,14 @@ python3 shanktuary_performance_studio.py
 
 ### OBS & Browser Source URLs
 - 🎥 **Clean OBS Browser Source:** `http://localhost:9321`
-- 🎥 **Floor Projector Fullscreen Mode:** `http://localhost:9321/?mode=projector`
+- 🌿 **Floor Projector — Divot only:** `http://localhost:9321/divot`
+- 📊 **Floor Projector — Metric tiles only:** `http://localhost:9321/tiles`
+- 🎥 **Floor Projector — Whole layout:** `http://localhost:9321/?mode=projector`
 - ⚙️ **Web Configurator UI:** `http://localhost:9321/config` (open in your browser outside of OBS)
 - ✏️ **Drag & Drop Canvas Editor:** `http://localhost:9321/?edit=true` (open in your browser outside of OBS)
+- 🏔️ **WebGPU 3D Driving Range:** `http://localhost:9321/range`
+
+All of these are also reachable from the desktop app under **Tools**.
 
 
 ---
