@@ -76,6 +76,15 @@ ASSETS_DIR = get_assets_dir()
 CONFIG_DIR = Path.home() / ".config" / "shanktuary"
 LAYOUT_FILE = CONFIG_DIR / "overlay_layout.json"
 
+# Shot history / My Bag live beside the executable (source dir when running from
+# source), matching DATA_DIR in shanktuary_performance_studio.py. The desktop
+# app owns this file; the server only ever reads it.
+if getattr(sys, "frozen", False):
+    DATA_DIR = Path(sys.executable).parent
+else:
+    DATA_DIR = SCRIPT_DIR
+SESSION_LOG_PATH = DATA_DIR / "shanktuary_session_history.json"
+
 # Default positions, sizes, visibility, and physical divot calibration (1920x1080 canvas)
 DEFAULT_LAYOUT = {
     "widgets": {
@@ -159,6 +168,49 @@ class OBSState:
         except Exception as e:
             print(f"[!] Error saving layout: {e}")
             return False
+
+    def load_bag(self):
+        """Read My Bag from the desktop app's session history.
+
+        The Tkinter process owns the bag and writes it to
+        shanktuary_session_history.json; this is a read-only view for the
+        browser surfaces. Deliberately NOT cached in OBSState -- the desktop
+        app can edit the bag at any time and a stale copy here would silently
+        disagree with what the user sees in My Bag.
+
+        Returns {"clubs": [...], "is_left_handed": bool}. An empty list means
+        "unknown", and the caller must say so rather than inventing clubs:
+        a fabricated bag would send the user's shots to the wrong club stats.
+        """
+        for path in (SESSION_LOG_PATH, SCRIPT_DIR / "shanktuary_session_history.json"):
+            try:
+                if not path or not Path(path).exists():
+                    continue
+                data = json.loads(Path(path).read_text())
+                if not isinstance(data, dict):
+                    continue
+                bag = data.get("bag") or []
+                if not isinstance(bag, list):
+                    continue
+                clubs = []
+                for c in bag:
+                    if not isinstance(c, dict) or not c.get("name"):
+                        continue
+                    clubs.append({
+                        "name": c.get("name"),
+                        "category": c.get("category") or "",
+                        "brand": c.get("brand") or "",
+                        "model": c.get("model") or "",
+                        "loft_deg": c.get("loft_deg"),
+                    })
+                if clubs:
+                    return {
+                        "clubs": clubs,
+                        "is_left_handed": bool(data.get("is_left_handed", False)),
+                    }
+            except Exception as e:
+                print(f"[!] Error reading bag from {path}: {e}")
+        return {"clubs": [], "is_left_handed": False}
 
     def push_shot(self, shot_data):
         with self.lock:
@@ -826,6 +878,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(assets_dir / "range" / "index.html", "text/html; charset=utf-8")
         elif parsed_path == "/api/layout":
             self.send_json(obs_state.load_layout())
+        elif parsed_path == "/api/bag":
+            self.send_json(obs_state.load_bag())
         elif parsed_path == "/api/shot":
             with obs_state.lock:
                 shot = obs_state.latest_shot or {}
