@@ -150,7 +150,9 @@ export class PressureTileRenderer {
                 const y2 = cy - (p2.cop_y || 0) * scale;
 
                 const phase = (p2.phase || "").toUpperCase();
-                ctx.strokeStyle = phase.includes("IMPACT") ? "#ef4444" : (phase.includes("BACK") ? "#eab308" : "#38bdf8");
+                // Phase colors map onto the shared theme: DANGER at impact,
+                // WARN through the backswing, ACCENT_LINE elsewhere.
+                ctx.strokeStyle = phase.includes("IMPACT") ? "#F04438" : (phase.includes("BACK") ? "#F5A524" : "#6FA880");
                 ctx.beginPath();
                 ctx.moveTo(x1, y1);
                 ctx.lineTo(x2, y2);
@@ -167,7 +169,7 @@ export class PressureTileRenderer {
         // Glowing outer pulse
         ctx.beginPath();
         ctx.arc(dotX, dotY, 9, 0, Math.PI * 2);
-        ctx.strokeStyle = "#38bdf8";
+        ctx.strokeStyle = "#6FA880";
         ctx.lineWidth = 2;
         ctx.stroke();
 
