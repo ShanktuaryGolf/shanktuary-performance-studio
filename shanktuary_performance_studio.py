@@ -2494,8 +2494,10 @@ class ShanktuaryApp:
                     self.draw_screen()
                 return
             if self.swing_lab_hw_rect and self.swing_lab_hw_rect[0] <= event.x <= self.swing_lab_hw_rect[2] and self.swing_lab_hw_rect[1] <= event.y <= self.swing_lab_hw_rect[3]:
-                self.show_balance_hardware_modal = True
-                self.draw_screen()
+                # Board pairing lives in Setup now (draw_setup_viewport) --
+                # route there instead of opening the old standalone modal's
+                # separate pairing flow.
+                self.set_mode(10)
                 return
             if self.swing_lab_demo_rect and self.swing_lab_demo_rect[0] <= event.x <= self.swing_lab_demo_rect[2] and self.swing_lab_demo_rect[1] <= event.y <= self.swing_lab_demo_rect[3]:
                 if hasattr(obs_server, "pressure_manager"):
