@@ -1,0 +1,20 @@
+# Minimal lint gate for SPS. Kept deliberately small — only rules that pass
+# repo-wide as of 2026-08-30 (see commit history). Add new rules one at a time,
+# fix the fallout in the same change, and keep `ruff check .` green.
+
+target-version = "py310"   # matches CI (.github/workflows/build-releases.yml)
+
+exclude = [
+    ".venv", "build", "dist", "AppDir", "scratch", "__pycache__",
+    "output_labeler", "output_user_facing", ".pytest_cache",
+]
+
+[lint]
+select = [
+    "F841",   # unused variable (keepalives are noqa'd in place with a comment)
+    "F821",   # undefined name
+    "I",      # import sorting
+    "UP006",  # non-pep585-annotation: Dict/List -> dict/list
+    "UP007",  # non-pep604-annotation: Optional[X] -> X | None
+    "UP045",  # non-pep604-annotation-optional (class attrs)
+]
