@@ -45,3 +45,7 @@ output_user_facing/
 output_labeler/
 
 .aider*
+
+# Captured pressure traces (user data, one gzipped file per shot).
+# *.json above does not cover .json.gz.
+pressure_traces/

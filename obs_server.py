@@ -136,6 +136,11 @@ class OBSState:
         self.latest_shot = None
         self.ws_clients = set()
         self.lock = threading.Lock()
+        # Callbacks invoked with (shot_id, trace_frames) once a shot's
+        # pressure capture completes. The capture finishes ~3s after impact,
+        # on the pressure thread, so this is the only path by which the
+        # desktop app can learn about a trace for a shot it has already saved.
+        self.trace_listeners = []
         # Serializes writes to each WS client socket so concurrent broadcasts
         # can't interleave partial frames; held only around socket I/O and
         # NEVER while holding self.lock (a stalled client must not wedge the
@@ -219,6 +224,8 @@ class OBSState:
         # Trigger shot impact capture in pressure buffer
         pm = globals().get('pressure_manager')
         if pm is not None and pm.buffer is not None:
+            shot_id = shot_data.get("shotId")
+
             def on_pressure_captured(trace_frames):
                 # Build an immutable snapshot instead of mutating the shared
                 # dict that /api/shot and broadcast may be serializing.
@@ -228,6 +235,17 @@ class OBSState:
                         self.latest_shot = snapshot
                 pm.last_shot_trace = trace_frames
                 self.broadcast({"type": "shot_pressure", "shot_id": shot_data.get("shotId"), "trace": trace_frames})
+
+                # Hand the trace to whoever owns shot history. This fires on
+                # the pressure thread ~3s after impact, long after the desktop
+                # app has already written the shot to disk, so it cannot
+                # simply mutate the stored dict -- see the listener in
+                # shanktuary_performance_studio.poll_queue().
+                for cb in list(self.trace_listeners):
+                    try:
+                        cb(shot_id, trace_frames)
+                    except Exception as e:
+                        print(f"[!] Pressure trace listener error: {e}")
 
             pm.buffer.trigger_shot_impact(callback=on_pressure_captured)
 

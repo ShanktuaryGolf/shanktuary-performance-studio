@@ -38,6 +38,7 @@ import tkinter as tk
 import theme
 from PIL import Image, ImageTk, ImageDraw, ImageOps
 import obs_server
+from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
 
 # Configuration & Logging
 FALLBACK_NOVA_HOST = "192.168.40.249"
@@ -153,6 +154,13 @@ FACE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_face.png")
 SIDE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_side.png")
 
 shot_queue = queue.Queue()
+
+# Completed pressure captures, posted from the pressure thread as
+# (shot_id, trace_frames). A capture finishes ~3s after impact -- long after
+# poll_queue() has already written the shot to disk -- so the trace has to
+# come back through a queue and be attached on the Tk thread. Writing to
+# self.sessions from the capture thread would race json.dump().
+pressure_trace_queue = queue.Queue()
 
 # --- Official OpenLaunch Nova Zero-Config Auto-Discovery Engine ---
 def discover_nova_device():
@@ -380,6 +388,10 @@ class ShanktuaryApp:
     # enough that a window-resize sweep can't run away.
     IMG_CACHE_MAX = 96
 
+    # Pressure traces read back from disk, kept in memory for review. Each is
+    # ~480 frames / ~155 KB parsed, so 12 is roughly 2 MB.
+    TRACE_CACHE_MAX = 12
+
     def __init__(self, root):
         self.root = root
         self.root.title(f"Shanktuary Performance Studio {APP_VERSION} - Launch Monitor Suite")
@@ -544,6 +556,14 @@ class ShanktuaryApp:
 
         # Mode 8: Swing Lab Biomechanics Suite
         self.swing_lab_history = []
+        # Captured pressure traces live beside the session file, one gzipped
+        # file per shot: a trace is ~200 KB of JSON and the history file is
+        # rewritten whole after every shot, so inlining them would mean a
+        # multi-megabyte write 3 seconds after each swing.
+        self.trace_store = PressureTraceStore(DATA_DIR)
+        # Cache of traces read back from disk, keyed by shot id, so scrolling
+        # the shot list doesn't re-read and re-parse the same file each frame.
+        self._trace_cache = OrderedDict()
         self.swing_lab_tare_rect = None
         self.swing_lab_hw_rect = None
         self.swing_lab_demo_rect = None
@@ -590,6 +610,17 @@ class ShanktuaryApp:
             self.selected_shot_index = len(self.session_shots) - 1
             self.current_shot = self.session_shots[self.selected_shot_index]
         self.root.after(100, self.poll_queue)
+        self.root.after(250, self.poll_pressure_traces)
+
+        # Pressure captures complete on the pressure thread ~3s after impact.
+        # Hand them to the Tk thread via a queue rather than touching
+        # self.sessions from there -- json.dump() runs on the Tk thread.
+        try:
+            obs_server.obs_state.trace_listeners.append(
+                lambda shot_id, frames: pressure_trace_queue.put((shot_id, frames))
+            )
+        except Exception as e:
+            print(f"[!] Could not register pressure trace listener: {e}")
 
     def get_active_session(self):
         if not self.sessions:
@@ -1769,6 +1800,90 @@ class ShanktuaryApp:
         except queue.Empty:
             pass
         self.root.after(100, self.poll_queue)
+
+    def poll_pressure_traces(self):
+        """Attach completed pressure captures to their shots.
+
+        Runs on the Tk thread. The capture itself finishes ~3s after impact on
+        the pressure thread, by which point poll_queue() has already appended
+        and saved the shot -- so the trace arrives here afterwards and the shot
+        is found again by id.
+
+        Derived metrics go inline on the shot (~250 bytes, and what swing
+        analysis actually reads). The raw ~200 KB trace goes to its own file.
+        """
+        try:
+            while True:
+                shot_id, frames = pressure_trace_queue.get_nowait()
+                if not frames:
+                    continue
+
+                shot = self._find_shot_by_id(shot_id)
+                if shot is None:
+                    # Shot may have been cleared, or the session switched
+                    # during the 3s capture. Keep the trace anyway; it is
+                    # still valid data and costs nothing to leave on disk.
+                    self.trace_store.save(shot_id, frames)
+                    continue
+
+                metrics = derive_pressure_metrics(frames)
+                if metrics:
+                    shot["pressure_metrics"] = metrics
+                path = self.trace_store.save(shot_id, frames)
+                if path:
+                    shot["has_pressure_trace"] = True
+                    self._trace_cache[str(shot_id)] = frames
+                    while len(self._trace_cache) > self.TRACE_CACHE_MAX:
+                        self._trace_cache.popitem(last=False)
+
+                if metrics or path:
+                    self.save_session_to_file()
+                    if self.current_shot is shot:
+                        self.draw_screen()
+        except queue.Empty:
+            pass
+        self.root.after(250, self.poll_pressure_traces)
+
+    def _find_shot_by_id(self, shot_id):
+        """Locate a stored shot by its Nova shotId, newest first."""
+        if shot_id is None:
+            return None
+        target = str(shot_id)
+        for sess in reversed(self.sessions):
+            for shot in reversed(sess.get("shots", [])):
+                if str(shot.get("shotId")) == target:
+                    return shot
+        return None
+
+    def get_pressure_trace(self, shot):
+        """Full pressure trace for a shot, loaded from disk on demand.
+
+        Returns None when the shot has no stored trace. Traces are not held in
+        the session file (see trace_store), so this is the only way to get the
+        frame-level data back for review.
+        """
+        if not shot:
+            return None
+        # A live shot may still carry its trace inline before it is persisted.
+        inline = shot.get("pressure_trace")
+        if inline:
+            return inline
+        if not shot.get("has_pressure_trace"):
+            return None
+        shot_id = shot.get("shotId")
+        if shot_id is None:
+            return None
+        key = str(shot_id)
+        cached = self._trace_cache.get(key)
+        if cached is not None:
+            self._trace_cache.move_to_end(key)
+            return cached
+        frames = self.trace_store.load(shot_id)
+        if frames:
+            self._trace_cache[key] = frames
+            while len(self._trace_cache) > self.TRACE_CACHE_MAX:
+                self._trace_cache.popitem(last=False)
+        return frames
 
     def rotate_point(self, x, y, cx, cy, angle_rad):
         cos_a = math.cos(angle_rad)
@@ -6489,8 +6604,8 @@ class ShanktuaryApp:
         latest = None
         if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
             latest = obs_server.pressure_manager.latest_frame
-        if not latest and self.current_shot and self.current_shot.get("pressure_trace"):
-            trace = self.current_shot["pressure_trace"]
+        if not latest and self.current_shot:
+            trace = self.get_pressure_trace(self.current_shot)
             if trace:
                 latest = trace[-1]
 
@@ -6779,8 +6894,10 @@ class ShanktuaryApp:
 
         # Draw Trail from history
         trail = self.swing_lab_history
-        if self.current_shot and self.current_shot.get("pressure_trace"):
-            trail = self.current_shot["pressure_trace"]
+        if self.current_shot:
+            stored = self.get_pressure_trace(self.current_shot)
+            if stored:
+                trail = stored
 
         if len(trail) > 1:
             pts = []
@@ -6816,8 +6933,10 @@ class ShanktuaryApp:
         x2, y2 = x1 + w, y1 + h
 
         trail = self.swing_lab_history
-        if self.current_shot and self.current_shot.get("pressure_trace"):
-            trail = self.current_shot["pressure_trace"]
+        if self.current_shot:
+            stored = self.get_pressure_trace(self.current_shot)
+            if stored:
+                trail = stored
 
         gx1, gx2 = x1 + 46, x2 - 16
         gy1, gy2 = y1 + 22, y2 - 26

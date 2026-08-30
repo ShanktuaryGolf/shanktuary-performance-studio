@@ -6,6 +6,8 @@ from .compression import CompressionCalculator, CompressionResult
 from .velocity import VelocityCalculator
 from .swing import SwingDetector, SwingPhase
 from .buffer import ShotSynchronizedPressureBuffer
+from .shot_metrics import derive_pressure_metrics
+from .trace_store import PressureTraceStore
 
 __all__ = [
     "CoPCalculator",
@@ -20,4 +22,6 @@ __all__ = [
     "SwingDetector",
     "SwingPhase",
     "ShotSynchronizedPressureBuffer",
+    "derive_pressure_metrics",
+    "PressureTraceStore",
 ]
