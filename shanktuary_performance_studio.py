@@ -32,6 +32,7 @@ import math
 import threading
 import queue
 import webbrowser
+from collections import OrderedDict
 from datetime import datetime
 import tkinter as tk
 import theme
@@ -368,10 +369,17 @@ def load_image_asset(path, target_h=210, mirror=False):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.2.0"
-BUILD_NUMBER = "2026.08.24.1"
+APP_VERSION = "v1.3.1"
+BUILD_NUMBER = "2026.08.29.1"
 
 class ShanktuaryApp:
+    # Bound on img_cache. Rotated overhead sprites measure ~0.5 MB each as PIL
+    # data, and Tk's PhotoImage keeps its own copy of the pixels, so budget
+    # ~1 MB per entry: 96 entries is roughly 100 MB worst case. Comfortably
+    # larger than one view's working set (a handful of sizes x angles), small
+    # enough that a window-resize sweep can't run away.
+    IMG_CACHE_MAX = 96
+
     def __init__(self, root):
         self.root = root
         self.root.title(f"Shanktuary Performance Studio {APP_VERSION} - Launch Monitor Suite")
@@ -510,7 +518,13 @@ class ShanktuaryApp:
         self.face_img = load_image_asset(FACE_PATH, target_h=115, mirror=False)
         self.side_img = load_image_asset(SIDE_PATH, target_h=110, mirror=False)
 
-        self.img_cache = {}
+        # Rendered-image cache. MUST stay bounded: entries are keyed partly on
+        # continuous values (window scale, and face angle rounded to 0.1deg), so
+        # an unbounded dict grows without limit -- a resize sweep alone spans
+        # ~166 heights x 301 angles, and at ~0.5 MB per rotated RGBA sprite
+        # (plus Tk's own copy of the pixels) that reaches tens of GB.
+        # OrderedDict + move_to_end gives LRU eviction.
+        self.img_cache = OrderedDict()
 
         self.canvas = tk.Canvas(root, bg=theme.BG, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -849,22 +863,41 @@ class ShanktuaryApp:
             self._text_w_cache[key] = cached
         return cached
 
+    def _cache_image(self, key, photo):
+        """Store a rendered image, evicting the least recently used entries.
+
+        Bounded because several keys embed continuously-varying values (window
+        scale, face angle); see the img_cache comment in __init__.
+        """
+        self.img_cache[key] = photo
+        self.img_cache.move_to_end(key)
+        while len(self.img_cache) > self.IMG_CACHE_MAX:
+            self.img_cache.popitem(last=False)
+        return photo
+
+    def _cached_image(self, key):
+        """Fetch and mark as recently used, or None."""
+        if key in self.img_cache:
+            self.img_cache.move_to_end(key)
+            return self.img_cache[key]
+        return None
+
     def get_scaled_club_asset(self, path, target_h, mirror=False):
         key = (path, target_h, mirror)
-        if key in self.img_cache:
-            return self.img_cache[key]
+        hit = self._cached_image(key)
+        if hit is not None:
+            return hit
         img = load_image_asset(path, target_h=target_h, mirror=mirror)
         if img:
-            photo = ImageTk.PhotoImage(img)
-            self.img_cache[key] = photo
-            return photo
+            return self._cache_image(key, ImageTk.PhotoImage(img))
         return None
 
     def get_rotated_overhead_asset(self, target_h, face_angle, mirror=False):
         raw_key = (OVERHEAD_PATH, target_h, mirror, round(face_angle, 1))
-        if raw_key in self.img_cache:
-            return self.img_cache[raw_key]
-        
+        hit = self._cached_image(raw_key)
+        if hit is not None:
+            return hit
+
         if os.path.exists(OVERHEAD_PATH):
             try:
                 base_img = Image.open(OVERHEAD_PATH).convert("RGBA")
@@ -883,9 +916,7 @@ class ShanktuaryApp:
                 # For RH, -face_angle; For LH, +face_angle
                 rot_deg = -face_angle if not mirror else face_angle
                 rotated = canvas_img.rotate(rot_deg, resample=Image.BICUBIC, expand=True)
-                photo = ImageTk.PhotoImage(rotated)
-                self.img_cache[raw_key] = photo
-                return photo
+                return self._cache_image(raw_key, ImageTk.PhotoImage(rotated))
             except Exception as e:
                 print(f"[!] Error creating overhead asset: {e}")
         return None
