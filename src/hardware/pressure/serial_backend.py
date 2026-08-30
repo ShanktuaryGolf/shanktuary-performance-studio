@@ -244,10 +244,11 @@ class SerialBackend(BoardBackend):
             (bar_raw[i] - self._cal.bar_offsets[i]) * self._cal.bar_scales[i]
             for i in range(8)
         ]
-        beam_kg = [
-            (beam_raw[i] - self._cal.beam_offsets[i]) * self._cal.beam_scales[i]
-            for i in range(2)
-        ]
+        # NOTE: HX711 beam-cell calibration path is currently unconsumed —
+        # left_beam_raw/right_beam_raw are captured below and fed only into the
+        # tare/calibrate loops, whose results (beam_offsets/beam_scales) were
+        # used solely by a dead beam_kg computation. Filed as its own issue:
+        # decide whether to wire the beam cells in or rip the path out.
 
         # Clamp negatives to zero (noise below tare)
         bar_kg = [max(0.0, v) for v in bar_kg]

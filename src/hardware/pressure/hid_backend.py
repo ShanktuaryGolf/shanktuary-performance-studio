@@ -103,7 +103,6 @@ def enumerate_boards() -> list[dict]:
         matched = []
         for d in all_devs:
             vid = d.get("vendor_id", 0)
-            pid = d.get("product_id", 0)
             prod = str(d.get("product_string", "")).lower()
             path = str(d.get("path", "")).lower()
             if vid == WBB_VID or "rvl-wbc" in prod or "balance" in prod or "rvl-wbc" in path:

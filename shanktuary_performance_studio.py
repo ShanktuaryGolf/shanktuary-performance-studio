@@ -196,7 +196,7 @@ def discover_nova_device():
 
         zeroconf_obj = Zeroconf()
         listener = NovaMDNSListener()
-        browser = ServiceBrowser(zeroconf_obj, "_openlaunch-ws._tcp.local.", listener)
+        browser = ServiceBrowser(zeroconf_obj, "_openlaunch-ws._tcp.local.", listener)  # noqa: F841  # keepalive — do not delete (holds mDNS browse alive until zeroconf_obj.close())
         
         # Poll up to 2 seconds for mDNS broadcast response
         for _ in range(20):
@@ -2154,7 +2154,9 @@ class ShanktuaryApp:
                 return
             if self.balance_modal_bt_settings_rect and self.balance_modal_bt_settings_rect[0] <= event.x <= self.balance_modal_bt_settings_rect[2] and self.balance_modal_bt_settings_rect[1] <= event.y <= self.balance_modal_bt_settings_rect[3]:
                 try:
-                    from src.hardware.pressure.bluetooth_windows import open_windows_bluetooth_settings
+                    from src.hardware.pressure.bluetooth_windows import (
+                        open_windows_bluetooth_settings,
+                    )
                     open_windows_bluetooth_settings()
                     self.copy_feedback = "✓ Opening Bluetooth Settings..."
                     self.root.after(2000, self.clear_copy_feedback)
@@ -2862,7 +2864,6 @@ class ShanktuaryApp:
                 us = ogc.get("us_customary_units", {})
                 carry = us.get("carry_distance_yards", 0.0)
                 bspeed = us.get("ball_speed_mph", 0.0)
-                smash = ogc.get("smash_factor", 1.0)
                 s_name = self.resolve_handed(ogc.get("shot_name"), "Shot")
                 c_tag = shot.get("club", "Club")
                 t_stamp = shot.get("timestamp", "--:--")
@@ -3015,16 +3016,13 @@ class ShanktuaryApp:
         nova_up = nova_status["connected"]
         if avail_w < 1050 and not self.sidebar_collapsed:
             status_text = "● Nova" if nova_up else "● Ready"
-            status_w = 60
         else:
             status_text = "● Nova Ready" if nova_up else "● Ready"
-            status_w = 86
         # A live dot plus plain text -- no bordered box.
         status_col = theme.ACCENT_LINE if nova_up else theme.TEXT_3
         status_text = status_text.replace("● ", "")
 
         status_x1 = brand_right + 16
-        status_x2 = status_x1 + status_w
         self.canvas.create_oval(status_x1, 22, status_x1 + 8, 30, fill=status_col, outline="")
         self.canvas.create_text(status_x1 + 15, 26, text=status_text, fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
 
@@ -3744,7 +3742,6 @@ class ShanktuaryApp:
         if carry_yds > 0:
             traj_pts = []
             ground_pts = []
-            apex_pt = None
             max_alt = -1
 
             for step in range(0, 101, 3):
@@ -3765,7 +3762,6 @@ class ShanktuaryApp:
 
                 if alt_px > max_alt:
                     max_alt = alt_px
-                    apex_pt = (gx, ty, apex_yds)
 
             # Shadow Curtain dropped to ground
             curtain_poly = []
@@ -4433,7 +4429,6 @@ class ShanktuaryApp:
         card_h = (grid_h - (rows - 1) * row_gap) // rows
 
         lbl_font = (theme.ui_font(), max(8, int(10 * ui_scale)), "bold")
-        val_font = (theme.ui_font(), max(20, int(30 * ui_scale)))
         unit_font = (theme.ui_font(), max(7, int(9 * ui_scale)), "bold")
         tag_font = (theme.ui_font(), max(7, int(8 * ui_scale)), "bold")
 
@@ -4599,7 +4594,6 @@ class ShanktuaryApp:
         # and bars and stay readable at a smaller height.
         card_h = max(150, avail_v * 0.53)
         recent_h = max(104, avail_v * 0.21)
-        band_h = max(126, avail_v * 0.26)
 
         def card(cx0, title, rows, tag=None):
             cx1 = cx0 + card_w
@@ -4762,7 +4756,6 @@ class ShanktuaryApp:
         # session summary card sits to the right of the bars
         sm_x = x0 + bars_w + 24
         sm_y1, sm_y2 = y - 4, y + recent_h - 14
-        sm_h = sm_y2 - sm_y1
         self.canvas.create_rectangle(sm_x, sm_y1, x1, sm_y2,
                                      fill=theme.SURFACE, outline="")
         self.canvas.create_text(sm_x + 18, sm_y1 + 16, text="SESSION",
@@ -5008,7 +5001,6 @@ class ShanktuaryApp:
             return ("No shot", "", theme.TEXT_3)
 
         club = shot.get("club") or self.current_club
-        ogc = shot.get("open_golf_coach", {}) or {}
         vla = float(shot.get("vertical_launch_angle_degrees") or 0.0)
 
         c = self.get_bag_club(club) or {}
@@ -5066,13 +5058,6 @@ class ShanktuaryApp:
         q1_cx, q1_cy = offset_x + (quad_w // 2), top_bar_h + (quad_h // 2)
         q1_top = top_bar_h
         q1_bot = mid_y
-
-        if self.is_left_handed:
-            path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path < 0 else 'Out To In'}"
-        else:
-            path_str = f"Path: {abs(club_path):.1f}° {'In To Out' if club_path > 0 else 'Out To In'}"
-        face_target_str = f"Face To Target: {abs(face_to_target):.1f}° {'Open' if face_to_target > 0 else 'Closed'}"
-        face_path_str = f"Face To Path: {abs(face_to_path):.1f}° {'Open' if face_to_path > 0 else 'Closed'}"
 
         # Panel annotations follow the mockup: a small quiet caption with the
         # value beneath it, anchored to the panel gutter -- not a centred
@@ -5165,8 +5150,6 @@ class ShanktuaryApp:
         q2_bot = h - 10
         ground_y = q2_cy + int(36 * scale)
 
-        top_elev_str = f"Launch Angle: {vert_launch:.1f}°   |   Apex: {apex_yds:.1f} yds"
-        bot_elev_str = f"Descent: {descent:.1f}°   |   Backspin: {int(backspin)} rpm"
 
         panel_cap(gut_l, q2_top + int(16 * font_scale), "LAUNCH & LOFT")
         annot(gut_l, q2_top + int(34 * font_scale), "LAUNCH ANGLE",
@@ -5211,7 +5194,6 @@ class ShanktuaryApp:
         q3_top = top_bar_h
         q3_bot = mid_y
         
-        rank_colors = {"A": theme.ACCENT_TEXT, "B": theme.ACCENT_TEXT, "C": theme.WARN, "D": theme.DANGER}
         gut_l3 = offset_x + quad_w + int(18 * font_scale)
         gut_r3 = offset_x + avail_w - int(18 * font_scale)
         panel_cap(gut_l3, q3_top + int(16 * font_scale), "SPIN")
@@ -5220,12 +5202,7 @@ class ShanktuaryApp:
                                 text=shot_name, fill=theme.ACCENT_TEXT,
                                 font=(theme.ui_font(), max(10, int(12 * font_scale))),
                                 anchor="center")
-        badge_color = rank_colors.get(shot_rank, theme.ACCENT_TEXT)
         
-        badge_h = int(24 * font_scale)
-        badge_y1 = q3_top + int(12 * font_scale)
-        badge_y2 = badge_y1 + badge_h
-        badge_w = int(32 * font_scale)
         # (grade pill and duplicated shape label removed -- the shape is drawn
         # above the ball and the grade is not part of the mockup)
 
@@ -5238,8 +5215,6 @@ class ShanktuaryApp:
         ax2, ay2 = self.rotate_point(q3_cx, q3_cy - spin_len, q3_cx, q3_cy, axis_rad)
         self.canvas.create_line(ax1, ay1, ax2, ay2, fill=theme.ACCENT_LINE, width=max(4, int(4.5 * scale)), arrow=tk.LAST, arrowshape=(int(14 * scale), int(18 * scale), int(6 * scale)))
 
-        spin_line1 = f"Spin Axis: {abs(spin_axis):.1f}° {'R' if spin_axis > 0 else 'L'}   |   Sidespin: {int(sidespin)} rpm"
-        spin_line2 = f"Total Spin: {int(total_spin)} rpm   |   Opt. Potential: {opt_max:.1f} YDS"
 
         annot(gut_l3, q3_cy - int(34 * font_scale), "SPIN AXIS",
               f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}")
@@ -5428,10 +5403,7 @@ class ShanktuaryApp:
         h_impact_mm = max(-24.0, min(24.0, h_impact_mm))
         v_impact_mm = max(-16.0, min(16.0, v_impact_mm))
         total_offset_mm = math.sqrt(h_impact_mm**2 + v_impact_mm**2)
-        if measured:
-            purity_pct = max(0.0, min(100.0, 100.0 - total_offset_mm * 5.0))
-        else:
-            purity_pct = max(0.0, min(100.0, 100.0 * (1.0 - smash_deficit / 0.25)))
+        if not measured:
             if not dir_known:
                 total_offset_mm = est_offset_mm
 
@@ -5615,13 +5587,6 @@ class ShanktuaryApp:
             self.canvas.create_oval(center_x - r_ring, center_y - r_ring, center_x + r_ring, center_y + r_ring, fill="", outline=strike_color, width=1, dash=(4, 3))
             self.canvas.create_text(center_x, center_y - r_ring - int(8 * scale), text="EST RADIUS", fill=strike_color, font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"))
 
-        # Footer Metrics
-        if measured:
-            footer_main = f"🎯 STRIKE: {strike_rank}  ({total_offset_mm:.1f} mm Offset)"
-        elif magnitude_known:
-            footer_main = f"🎯 STRIKE: {strike_rank}  (~{total_offset_mm:.0f} mm, from smash)"
-        else:
-            footer_main = f"🎯 STRIKE: {strike_rank}  (direction only — no club data)"
         # Footer sits in the gutter as quiet caption text, matching the
         # mockup -- no centred bold banner.
         if measured:
@@ -6443,7 +6408,6 @@ class ShanktuaryApp:
                                 anchor="nw")
 
         baseline = self.fitting_baseline_club or (session_clubs[0] if session_clubs else None)
-        base_st = stats_by_club.get(baseline)
 
         if not stats_by_club:
             self.canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2,
@@ -6615,8 +6579,6 @@ class ShanktuaryApp:
         pct_l = latest.get("pct_left", 50.0) if latest else 50.0
         pct_r = latest.get("pct_right", 50.0) if latest else 50.0
         torque_nm = latest.get("torque_nm", 0.0) if latest else 0.0
-        cop_x = latest.get("cop_x", 0.0) if latest else 0.0
-        cop_y = latest.get("cop_y", 0.0) if latest else 0.0
         live = latest is not None
 
         lead_pct, trail_pct = (pct_r, pct_l) if self.is_left_handed else (pct_l, pct_r)
@@ -7443,10 +7405,10 @@ class ShanktuaryApp:
 
         # --- SECTION 1: BLUETOOTH PAIRING PIN CARD ---
         from src.hardware.pressure.bluetooth_windows import (
+            format_mac_display,
             get_host_bluetooth_mac,
             mac_to_wii_pin,
             mac_to_wii_pin_display,
-            format_mac_display,
         )
         mac = get_host_bluetooth_mac() or ""
         if mac:
@@ -7619,7 +7581,7 @@ def main():
     pos_y = max(0, (scr_h - win_h) // 3)
     root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
     root.minsize(1100, 720)
-    app = ShanktuaryApp(root)
+    app = ShanktuaryApp(root)  # noqa: F841  # keepalive — do not delete (holds the Tk app alive until mainloop() returns)
     try:
         root.mainloop()
     except KeyboardInterrupt:
