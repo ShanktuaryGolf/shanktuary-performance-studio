@@ -1613,7 +1613,7 @@ class ShanktuaryApp:
             cx2 = cx1 + chip_w
             self.spec_editor_cat_chips.append((cx1, cat_y1, cx2, cat_y2, cat))
             is_cat_sel = (self.spec_editor_category == cat)
-            self.canvas.create_rectangle(cx1, cat_y1, cx2, cat_y2, fill=theme.SURFACE_2 if is_cat_sel else theme.SURFACE_2, outline=theme.ACCENT_TEXT if is_cat_sel else theme.HAIRLINE)
+            self.canvas.create_rectangle(cx1, cat_y1, cx2, cat_y2, fill=theme.SURFACE_2 if is_cat_sel else theme.SURFACE, outline=theme.ACCENT_TEXT if is_cat_sel else theme.HAIRLINE)
             
             chip_label = "Woods" if cat == "Woods & Drivers" else ("Hybrids" if cat == "Hybrids & Utilities" else cat)
             self.canvas.create_text((cx1 + cx2) // 2, (cat_y1 + cat_y2) // 2, text=chip_label, fill=theme.ACCENT_TEXT if is_cat_sel else "#A0A7B8", font=(theme.ui_font(), 8, "bold" if is_cat_sel else "normal"))
@@ -4299,7 +4299,7 @@ class ShanktuaryApp:
             
             is_sel = (real_idx == self.selected_shot_index)
             is_ex = shot.get("excluded", False)
-            bg = "#2A2118" if is_sel else (theme.SURFACE if r_i % 2 == 0 else theme.SURFACE)
+            bg = "#2A2118" if is_sel else (theme.SURFACE if r_i % 2 == 0 else theme.SURFACE_2)
             border = theme.WARN if is_sel else theme.HAIRLINE
             txt_color = theme.TEXT_3 if is_ex else (theme.TEXT if not is_sel else theme.WARN)
 
