@@ -3,16 +3,12 @@
 from .base import (
     BoardBackend,
     BoardOrientation,
+    DualPlateReading,
     SensorReading,
     TareOffsets,
     get_board_dimensions,
     remap_for_orientation,
 )
-
-try:
-    from .serial_backend import DualPlateReading
-except Exception:
-    DualPlateReading = None
 
 try:
     from .dual_wbb_backend import DualWbbBackend

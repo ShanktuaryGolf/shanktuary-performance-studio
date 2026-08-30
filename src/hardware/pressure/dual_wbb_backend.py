@@ -57,7 +57,7 @@ class DualWbbBackend(BoardBackend):
     def read(self) -> SensorReading | None:
         """Non-blocking read merging both boards.
 
-        Uses the same mapping as SerialBackend.read():
+        Mapping (each board's 4 cells combine into one foot):
           top_left     = left foot front (TL+TR of left board)
           bottom_left  = left foot back  (BL+BR of left board)
           top_right    = right foot front (TL+TR of right board)
@@ -85,8 +85,6 @@ class DualWbbBackend(BoardBackend):
         self._last_dual = DualPlateReading(
             left=left,
             right=right,
-            left_beam_raw=0,
-            right_beam_raw=0,
             timestamp=now,
             device_timestamp_us=0,
         )

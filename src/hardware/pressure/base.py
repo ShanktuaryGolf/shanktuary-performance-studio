@@ -72,8 +72,6 @@ class DualPlateReading:
     """Reading from two separate plates (e.g. Dual Wii Balance Boards)."""
     left: SensorReading
     right: SensorReading
-    left_beam_raw: int = 0
-    right_beam_raw: int = 0
     timestamp: float = 0.0
     device_timestamp_us: int = 0
 
