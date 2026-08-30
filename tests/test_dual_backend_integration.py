@@ -1,8 +1,8 @@
-import unittest
 import json
-import urllib.request
-import time
 import sys
+import time
+import unittest
+import urllib.request
 
 sys.path.insert(0, '/home/sean/sps')
 import obs_server

@@ -1,8 +1,8 @@
 """Serial backend for DIY dual force plates (ESP32 + ADS1256 + HX711)."""
 
 import struct
-import time
 import threading
+import time
 from dataclasses import dataclass
 
 try:
@@ -12,7 +12,6 @@ except ImportError:
     serial = None
 
 from .base import BoardBackend, BoardOrientation, SensorReading, remap_for_orientation
-
 
 # Frame protocol constants
 SYNC = b"\xAA\x55"

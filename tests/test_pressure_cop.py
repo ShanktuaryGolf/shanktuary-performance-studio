@@ -1,9 +1,16 @@
 """Unit tests for Center of Pressure (COP) and Biomechanical Math."""
 
 import unittest
-from src.hardware.pressure.base import SensorReading, TareOffsets, BOARD_WIDTH, BOARD_LENGTH
-from src.processing.pressure.cop import CoPCalculator, BodyWeightNormalizer
+
+from src.hardware.pressure.base import (
+    BOARD_LENGTH,
+    BOARD_WIDTH,
+    SensorReading,
+    TareOffsets,
+)
+from src.processing.pressure.cop import BodyWeightNormalizer, CoPCalculator
 from src.processing.pressure.torque import TorqueCalculator
+
 
 class TestPressureCOP(unittest.TestCase):
     def setUp(self):

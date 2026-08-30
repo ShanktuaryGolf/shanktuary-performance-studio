@@ -1,15 +1,17 @@
-import urllib.request
-import urllib.error
+import json
+import socket
+import sys
 import threading
 import time
-import socket
-import pytest
-import sys
-import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
+import pytest
+
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
-from obs_server import start_obs_server, obs_state
+from obs_server import obs_state, start_obs_server
+
 
 @pytest.fixture(scope="module")
 def server():

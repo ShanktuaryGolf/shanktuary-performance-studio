@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from .filters import ButterworthLowPass
 
-
 # Reference sample rate used to derive default cutoffs
 _REF_SAMPLE_RATE = 30.0
 

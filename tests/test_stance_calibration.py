@@ -5,8 +5,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from src.hardware.pressure.base import SensorReading
 from obs_server import PressureManager
+from src.hardware.pressure.base import SensorReading
 
 
 class TestStanceCalibration(unittest.TestCase):

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-import socket
 import base64
-import os
-import struct
 import json
-import time
+import os
+import socket
+import struct
 import sys
+import time
 
 TARGET_HOST = "192.168.40.249"
 TARGET_PORT = 2920

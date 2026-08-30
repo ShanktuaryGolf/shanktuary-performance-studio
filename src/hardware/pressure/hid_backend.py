@@ -9,9 +9,10 @@ Implements the Wiimote Bluetooth HID protocol for the Balance Board extension:
 This replicates the approach used by WiimoteLib / WiiBalanceWalker.
 """
 
-from dataclasses import dataclass
 import struct
 import time
+from dataclasses import dataclass
+
 try:
     import hid
 except ImportError:

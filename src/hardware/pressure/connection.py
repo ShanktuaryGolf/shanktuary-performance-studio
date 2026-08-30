@@ -106,7 +106,7 @@ class BoardAssignmentWizard:
     """
     WEIGHT_THRESHOLD = 5.0  # kg
 
-    def __init__(self, board_a: Optional[Any] = None, board_b: Optional[Any] = None, threshold: float = 5.0):
+    def __init__(self, board_a: Any | None = None, board_b: Any | None = None, threshold: float = 5.0):
         self.board_a = board_a
         self.board_b = board_b
         self.threshold = threshold
@@ -117,7 +117,7 @@ class BoardAssignmentWizard:
         self.board_b_weight = 0.0
         self.message = ""
 
-    def start(self, board_a: Optional[Any] = None, board_b: Optional[Any] = None):
+    def start(self, board_a: Any | None = None, board_b: Any | None = None):
         if board_a is not None:
             self.board_a = board_a
         if board_b is not None:
@@ -137,7 +137,7 @@ class BoardAssignmentWizard:
         self.board_b_weight = 0.0
         self.message = ""
 
-    def update(self, weight_a: float, weight_b: float) -> Tuple[AssignmentPhase, str]:
+    def update(self, weight_a: float, weight_b: float) -> tuple[AssignmentPhase, str]:
         self.board_a_weight = max(0.0, weight_a)
         self.board_b_weight = max(0.0, weight_b)
 

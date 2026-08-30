@@ -1,7 +1,7 @@
-import unittest
-import tempfile
-import os
 import json
+import os
+import tempfile
+import unittest
 
 
 class TestDexterityAndScaling(unittest.TestCase):

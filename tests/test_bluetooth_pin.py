@@ -1,16 +1,17 @@
 """Unit tests for Windows Bluetooth MAC reverse-PIN calculations."""
 
-import unittest
 import sys
+import unittest
 
 sys.path.insert(0, '/home/sean/sps')
 from src.hardware.pressure.bluetooth_windows import (
+    format_mac_display,
+    mac_has_zero_byte,
     mac_to_wii_pin,
     mac_to_wii_pin_bytes,
     mac_to_wii_pin_display,
-    mac_has_zero_byte,
-    format_mac_display,
 )
+
 
 class TestBluetoothPIN(unittest.TestCase):
     def test_known_mac_reversal(self):

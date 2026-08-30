@@ -1,13 +1,13 @@
 """Rolling 60Hz Pre-roll & Post-roll Buffer for Shot-Synchronized Balance Telemetry."""
 
-from collections import deque
-from dataclasses import dataclass, asdict
 import time
-from typing import Optional, List, Dict, Any
+from collections import deque
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Optional
 
+from .compression import CompressionResult
 from .cop import CoPSample
 from .torque import TorqueSample
-from .compression import CompressionResult
 
 
 @dataclass
@@ -27,9 +27,9 @@ class SynchronizedPressureFrame:
     cop_y: float
     torque_nm: float
     phase: str
-    raw_cells: List[float]
+    raw_cells: list[float]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -38,9 +38,9 @@ class ShotSynchronizedPressureBuffer:
 
     def __init__(self, capacity: int = 600) -> None:
         self.capacity = capacity
-        self._ring: deque[Dict[str, Any]] = deque(maxlen=capacity)
+        self._ring: deque[dict[str, Any]] = deque(maxlen=capacity)
         self._recording = False
-        self._impact_time: Optional[float] = None
+        self._impact_time: float | None = None
         self._post_impact_frames = 0
         self._post_impact_target = 180  # ~3.0s at 60Hz
         self._captured_shot_callback = None
@@ -48,10 +48,10 @@ class ShotSynchronizedPressureBuffer:
     def push(
         self,
         sample: CoPSample,
-        torque: Optional[TorqueSample] = None,
-        compression: Optional[CompressionResult] = None,
+        torque: TorqueSample | None = None,
+        compression: CompressionResult | None = None,
         phase: str = "Address",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         now = sample.timestamp
         frame = {
             "timestamp": now,
@@ -83,7 +83,7 @@ class ShotSynchronizedPressureBuffer:
 
         return frame
 
-    def trigger_shot_impact(self, impact_time: Optional[float] = None, callback=None) -> None:
+    def trigger_shot_impact(self, impact_time: float | None = None, callback=None) -> None:
         """Called when Launch Monitor detects ball impact.
 
         impact_time must be on the SAME clock as the frame timestamps
@@ -122,7 +122,7 @@ class ShotSynchronizedPressureBuffer:
             except Exception as e:
                 print(f"[!] Error in pressure shot callback: {e}")
 
-    def get_latest_frame(self) -> Optional[Dict[str, Any]]:
+    def get_latest_frame(self) -> dict[str, Any] | None:
         # Shallow copy: callers (obs_server) serialize/broadcast from other
         # threads; handing out the live ring entry invites mutation races.
         return dict(self._ring[-1]) if self._ring else None

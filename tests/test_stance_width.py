@@ -11,7 +11,7 @@ import pytest
 import obs_server
 from src.hardware.pressure.base import SensorReading
 from src.processing.pressure.cop import CoPSample
-from src.processing.pressure.stance import StanceCalibrator, CalibrationState
+from src.processing.pressure.stance import CalibrationState, StanceCalibrator
 
 
 def _manager():

@@ -1,5 +1,10 @@
-import os, numpy as np, pytest
-from nova_vision_lab import enhance_nova_official_aesthetic, enhance_labeler
+import os
+
+import numpy as np
+import pytest
+
+from nova_vision_lab import enhance_labeler, enhance_nova_official_aesthetic
+
 
 def test_enhance_nova_official_aesthetic():
     dummy_l = np.zeros((480, 640), dtype=np.uint8)

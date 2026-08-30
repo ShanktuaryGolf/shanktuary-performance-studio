@@ -1,5 +1,7 @@
 import unittest
-from src.hardware.pressure.connection import BoardAssignmentWizard, AssignmentPhase
+
+from src.hardware.pressure.connection import AssignmentPhase, BoardAssignmentWizard
+
 
 class TestBoardAssignmentWizard(unittest.TestCase):
     def setUp(self):

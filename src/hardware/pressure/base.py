@@ -1,10 +1,9 @@
 """Base types and abstract backend for Wii Balance Board data."""
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-import time
-
 
 # Board physical dimensions in mm (landscape orientation)
 BOARD_WIDTH = 433.0   # left-right

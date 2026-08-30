@@ -3,9 +3,10 @@
 from dataclasses import dataclass
 from math import sqrt
 
+from src.hardware.pressure.base import BOARD_LENGTH, BOARD_WIDTH
+
 from .cop import CoPSample
 from .filters import LowPassFilter
-from src.hardware.pressure.base import BOARD_WIDTH, BOARD_LENGTH
 
 # Effective lever arm: half-diagonal of the sensor rectangle in metres
 _EFF_ARM = sqrt((BOARD_WIDTH / 2) ** 2 + (BOARD_LENGTH / 2) ** 2) / 1000.0

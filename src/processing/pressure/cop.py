@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass, field
 
-from src.hardware.pressure.base import SensorReading, BOARD_WIDTH, BOARD_LENGTH
+from src.hardware.pressure.base import BOARD_LENGTH, BOARD_WIDTH, SensorReading
 
 
 @dataclass

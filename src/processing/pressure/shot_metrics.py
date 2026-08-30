@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-
 # Phase strings written by SwingDetector via the buffer. Compared
 # case-insensitively on a prefix so "Backswing"/"BACKSWING" both match.
 _BACKSWING = "backswing"
@@ -24,13 +23,13 @@ _DOWNSWING = "downswing"
 _IMPACT = "impact"
 
 
-def _phase(frame: Dict[str, Any]) -> str:
+def _phase(frame: dict[str, Any]) -> str:
     return str(frame.get("phase", "")).strip().lower()
 
 
-def _phase_span(frames: List[Dict[str, Any]], name: str) -> Optional[float]:
+def _phase_span(frames: list[dict[str, Any]], name: str) -> float | None:
     """Duration in seconds that the trace spent in a phase, or None."""
-    times: List[float] = []
+    times: list[float] = []
     for f in frames:
         t = f.get("rel_time_s")
         if t is not None and _phase(f).startswith(name):
@@ -40,7 +39,7 @@ def _phase_span(frames: List[Dict[str, Any]], name: str) -> Optional[float]:
     return round(max(times) - min(times), 3)
 
 
-def _impact_frame(frames: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _impact_frame(frames: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The frame at impact.
 
     Prefer an explicit IMPACT phase; otherwise fall back to the frame nearest
@@ -55,7 +54,7 @@ def _impact_frame(frames: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return min(dated, key=lambda f: abs(f["rel_time_s"]))
 
 
-def _cop_speed_mm_s(frames: List[Dict[str, Any]]) -> Optional[float]:
+def _cop_speed_mm_s(frames: list[dict[str, Any]]) -> float | None:
     """Peak centre-of-pressure speed across the trace.
 
     CoP coordinates are already in mm (see CoPCalculator); rel_time_s is
@@ -82,8 +81,8 @@ def _cop_speed_mm_s(frames: List[Dict[str, Any]]) -> Optional[float]:
 
 
 def derive_pressure_metrics(
-    frames: Optional[List[Dict[str, Any]]],
-) -> Optional[Dict[str, Any]]:
+    frames: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
     """Summarise a captured pressure trace.
 
     Returns None when there is nothing to summarise, so callers can simply

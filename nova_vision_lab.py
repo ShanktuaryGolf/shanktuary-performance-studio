@@ -9,7 +9,12 @@ launch monitor would be a large dependency for a tool most will never use.
 Input/output paths come from NOVA_CAPTURE_DIR / NOVA_OUTPUT_DIR or from the
 function arguments -- see process_all_chad_images().
 """
-import cv2, numpy as np, os, glob
+import glob
+import os
+
+import cv2
+import numpy as np
+
 
 def apply_flat_field_correction(img):
     h, w = img.shape[:2]

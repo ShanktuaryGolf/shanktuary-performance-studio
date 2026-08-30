@@ -20,24 +20,26 @@ Controls:
   - Esc      : Exit
 """
 
-import socket
 import base64
-from typing import Any
-import os
-import sys
-import struct
 import json
-import time
 import math
-import threading
+import os
 import queue
+import socket
+import struct
+import sys
+import threading
+import time
+import tkinter as tk
 import webbrowser
 from collections import OrderedDict
 from datetime import datetime
-import tkinter as tk
-import theme
-from PIL import Image, ImageTk, ImageDraw, ImageOps
+from typing import Any
+
+from PIL import Image, ImageDraw, ImageOps, ImageTk
+
 import obs_server
+import theme
 from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
 
 # Configuration & Logging
@@ -173,7 +175,7 @@ def discover_nova_device():
 
     # 2. Official OpenLaunch Zeroconf mDNS Discovery (_openlaunch-ws._tcp.local.)
     try:
-        from zeroconf import Zeroconf, ServiceBrowser
+        from zeroconf import ServiceBrowser, Zeroconf
 
         class NovaMDNSListener:
             def __init__(self):

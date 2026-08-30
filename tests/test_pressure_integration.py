@@ -1,10 +1,10 @@
 """Integration test for OBS server pressure endpoints and WebSocket frames."""
 
-import unittest
-import time
 import json
-import urllib.request
 import sys
+import time
+import unittest
+import urllib.request
 
 sys.path.insert(0, '/home/sean/sps')
 import obs_server

@@ -12,13 +12,11 @@ Example:
     PIN characters: Ü ´ ; ˜ ü 8
 """
 
-import subprocess
-import re
-import sys
-import os
-
-
 import functools
+import os
+import re
+import subprocess
+import sys
 
 
 @functools.lru_cache(maxsize=1)

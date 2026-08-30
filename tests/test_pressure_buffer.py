@@ -1,10 +1,12 @@
 """Unit tests for Shot-Synchronized Pressure Buffer."""
 
-import unittest
 import time
+import unittest
+
 from src.hardware.pressure.base import SensorReading
-from src.processing.pressure.cop import CoPCalculator
 from src.processing.pressure.buffer import ShotSynchronizedPressureBuffer
+from src.processing.pressure.cop import CoPCalculator
+
 
 class TestPressureBuffer(unittest.TestCase):
     def setUp(self):

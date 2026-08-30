@@ -15,23 +15,26 @@ Based on the proven architecture from ShanktuaryGolf/SwingLab:
   - Broadcasts live shot events to connected OBS browser sources over WebSocket
 """
 
+import base64
 import http.server
-import socketserver
-import threading
 import json
 import os
-import time
 import socket
-import base64
+import socketserver
+import struct
+import sys
+import threading
+import time
+from pathlib import Path
+
+from src.processing.pressure.stance import (
+    CalibrationState as StanceCalState,
+)
 
 # Stance-width calibration state machine (shift left, then right).
 from src.processing.pressure.stance import (
     StanceCalibrator,
-    CalibrationState as StanceCalState,
 )
-import struct
-import sys
-from pathlib import Path
 
 APP_VERSION = "v1.2.0"
 BUILD_NUMBER = "2026.08.24.1"
@@ -335,9 +338,9 @@ class PressureManager:
             from src.hardware.pressure import TareOffsets
             from src.processing.pressure import (
                 CoPCalculator,
-                TorqueCalculator,
-                SwingDetector,
                 ShotSynchronizedPressureBuffer,
+                SwingDetector,
+                TorqueCalculator,
             )
             self.cop_calc = CoPCalculator()
             self.torque_calc = TorqueCalculator()
@@ -584,7 +587,7 @@ class PressureManager:
 
     def tare(self):
         with self.lock:
-            from src.hardware.pressure import TareOffsets, SensorReading
+            from src.hardware.pressure import SensorReading, TareOffsets
             from src.processing.pressure.cop import CoPSample
             if self.buffer is None:
                 return False
@@ -761,7 +764,9 @@ class PressureManager:
                     pass
             else:
                 try:
-                    from src.hardware.pressure.evdev_backend import enumerate_board_devices
+                    from src.hardware.pressure.evdev_backend import (
+                        enumerate_board_devices,
+                    )
                     dev_paths = enumerate_board_devices()
                 except Exception:
                     pass
@@ -909,11 +914,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/pressure/pin":
             try:
                 from src.hardware.pressure.bluetooth_windows import (
+                    format_mac_display,
                     get_host_bluetooth_mac,
+                    mac_has_zero_byte,
                     mac_to_wii_pin,
                     mac_to_wii_pin_display,
-                    mac_has_zero_byte,
-                    format_mac_display,
                 )
                 mac = get_host_bluetooth_mac() or ""
                 self.send_json({
@@ -1036,7 +1041,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/pressure/open_bt_settings":
             try:
-                from src.hardware.pressure.bluetooth_windows import open_windows_bluetooth_settings
+                from src.hardware.pressure.bluetooth_windows import (
+                    open_windows_bluetooth_settings,
+                )
                 ok = open_windows_bluetooth_settings()
                 self.send_json({"status": "ok" if ok else "error"})
             except Exception as e:

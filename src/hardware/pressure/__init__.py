@@ -8,6 +8,7 @@ from .base import (
     get_board_dimensions,
     remap_for_orientation,
 )
+
 try:
     from .serial_backend import DualPlateReading
 except Exception:
@@ -18,8 +19,8 @@ try:
 except Exception:
     DualWbbBackend = None
 
+from .connection import AssignmentPhase, BoardAssignmentWizard, connect_board
 from .simulator import SimulatorBackend
-from .connection import connect_board, BoardAssignmentWizard, AssignmentPhase
 
 __all__ = [
     "BoardBackend",

@@ -44,7 +44,7 @@ class PressureTraceStore:
     def path_for(self, shot_id: Any) -> str:
         return os.path.join(self.dir, f"{_safe_id(shot_id)}.json.gz")
 
-    def save(self, shot_id: Any, frames: List[Dict[str, Any]]) -> Optional[str]:
+    def save(self, shot_id: Any, frames: list[dict[str, Any]]) -> str | None:
         """Write a trace. Returns the path, or None if nothing was written.
 
         Failures are reported and swallowed: losing a trace must never take
@@ -71,7 +71,7 @@ class PressureTraceStore:
             print(f"[!] Could not save pressure trace for {shot_id}: {e}")
             return None
 
-    def load(self, shot_id: Any) -> Optional[List[Dict[str, Any]]]:
+    def load(self, shot_id: Any) -> list[dict[str, Any]] | None:
         """Read a trace back, or None when absent or unreadable."""
         path = self.path_for(shot_id)
         if not os.path.isfile(path):
