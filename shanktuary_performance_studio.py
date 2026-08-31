@@ -45,6 +45,7 @@ from src.analytics.aim import (
     MIN_CALIBRATION_SHOTS,
     apply_aim,
     load_aim_offset,
+    offset_from_geometry,
     offset_from_shots,
     save_aim_offset,
 )
@@ -605,6 +606,18 @@ class ShanktuaryApp:
         self.setup_aim_start_rect = None
         self.setup_aim_nudge_rects = []
         self.setup_aim_clear_rect = None
+        # Aim measurement modal: distance to the aim point and how far that
+        # point sits off the target line. Two numbers a tape measure gives you,
+        # because nobody can eyeball "2.4 degrees".
+        self.show_aim_modal = False
+        self.aim_modal_distance = ""
+        self.aim_modal_lateral = ""
+        self.aim_modal_active_field = "distance"
+        self.aim_modal_field_rects = {}
+        self.aim_modal_save_rect = None
+        self.aim_modal_cancel_rect = None
+        self.aim_modal_box_rect = None
+        self.setup_aim_measure_rect = None
         # Cache for _text_width(): measuring is cheap but this runs per card
         # per redraw, and the set of strings is small and repetitive.
         self._text_w_cache = {}
@@ -1425,6 +1438,38 @@ class ShanktuaryApp:
         self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def handle_key_press(self, event):
+        if self.show_aim_modal:
+            if event.keysym == "Escape":
+                self.show_aim_modal = False
+                self.draw_screen()
+                return "break"
+            if event.keysym in ("Return", "KP_Enter"):
+                self.apply_aim_measurements()
+                self.draw_screen()
+                return "break"
+            if event.keysym == "Tab":
+                self.aim_modal_active_field = (
+                    "lateral" if self.aim_modal_active_field == "distance"
+                    else "distance"
+                )
+                self.draw_screen()
+                return "break"
+            f = self.aim_modal_active_field
+            cur = self.aim_modal_distance if f == "distance" else self.aim_modal_lateral
+            if event.keysym == "BackSpace":
+                cur = cur[:-1]
+            elif event.char and (event.char.isdigit()
+                                 or (event.char == "." and "." not in cur)
+                                 or (event.char == "-" and not cur and f == "lateral")):
+                cur += event.char
+            else:
+                return "break"
+            if f == "distance":
+                self.aim_modal_distance = cur
+            else:
+                self.aim_modal_lateral = cur
+            self.draw_screen()
+            return "break"
         if self.show_balance_hardware_modal:
             if event.keysym == "Escape":
                 self.show_balance_hardware_modal = False
@@ -1635,6 +1680,143 @@ class ShanktuaryApp:
         self.copy_feedback = f"✓ Saved {name} Specs"
         self.root.after(2500, self.clear_copy_feedback)
         self.draw_screen()
+
+    def draw_aim_measure_modal(self, w, h):
+        """Turn two tape-measure numbers into an aim offset.
+
+        Nobody can look at a launch monitor and say "that's 2.4 degrees off".
+        They CAN measure how far away the screen is and how far the device's
+        aim point sits off the target line. This does the trigonometry.
+        """
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="",
+                                     stipple="gray75")
+
+        modal_w = min(620, max(500, int(w * 0.52)))
+        modal_h = 420
+        cx, cy = w // 2, h // 2
+        x1, x2 = cx - modal_w // 2, cx + modal_w // 2
+        y1, y2 = cy - modal_h // 2, cy + modal_h // 2
+        self.aim_modal_box_rect = (x1, y1, x2, y2)
+
+        self.canvas.create_rectangle(x1 + 6, y1 + 6, x2 + 6, y2 + 6,
+                                     fill="#020305", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE,
+                                     outline=theme.ACCENT_TEXT, width=2)
+
+        self.canvas.create_text(x1 + 35, y1 + 30, text="Measure your aim",
+                                fill=theme.TEXT, font=(theme.ui_font(), 15),
+                                anchor="w")
+        for i, line in enumerate((
+            "Put an alignment stick on the target line your device is meant to",
+            "watch. Measure to where the device is actually pointing.",
+        )):
+            self.canvas.create_text(x1 + 35, y1 + 54 + i * 14, text=line,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="w")
+
+        # Diagram: device at the bottom, target line up, aim point offset.
+        dgx, dgy = x2 - 110, y1 + 40
+        d_h = 96
+        self.canvas.create_line(dgx, dgy + d_h, dgx, dgy,
+                                fill=theme.GUIDE, dash=(3, 3))
+        self.canvas.create_text(dgx - 4, dgy - 4, text="target",
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="se")
+        try:
+            lat_prev = float(self.aim_modal_lateral or 0.0)
+            dist_prev = float(self.aim_modal_distance or 0.0)
+        except (TypeError, ValueError):
+            lat_prev = dist_prev = 0.0
+        shown = offset_from_geometry(dist_prev, lat_prev) if dist_prev > 0 else None
+        a = math.radians(max(-28.0, min(28.0, (shown or 0.0) * 5.0)))
+        self.canvas.create_line(dgx, dgy + d_h,
+                                dgx + d_h * math.sin(a), dgy + d_h - d_h * math.cos(a),
+                                fill=theme.ACCENT_LINE, width=2)
+        self.canvas.create_oval(dgx - 4, dgy + d_h - 4, dgx + 4, dgy + d_h + 4,
+                                fill=theme.ACCENT, outline="")
+        self.canvas.create_text(dgx, dgy + d_h + 14, text="device",
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="n")
+
+        fields = [
+            ("distance", "Distance from device to screen / net  (feet)",
+             self.aim_modal_distance),
+            ("lateral", "Aim point offset from the target line  (inches, − left)",
+             self.aim_modal_lateral),
+        ]
+        self.aim_modal_field_rects = {}
+        fy = y1 + 116
+        for f_key, f_label, f_val in fields:
+            self.canvas.create_text(x1 + 35, fy, text=f_label, fill=theme.TEXT_2,
+                                    font=(theme.ui_font(), 8), anchor="w")
+            bx1, bx2 = x1 + 35, x2 - 35
+            by1 = fy + 14
+            by2 = by1 + 30
+            self.aim_modal_field_rects[f_key] = (bx1, by1, bx2, by2)
+            active = (self.aim_modal_active_field == f_key)
+            self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.BG,
+                                         outline=theme.ACCENT_TEXT if active
+                                         else "#282F42",
+                                         width=2 if active else 1)
+            txt = (f_val + " |") if active else f_val
+            self.canvas.create_text(bx1 + 12, (by1 + by2) // 2,
+                                    text=txt or "Click, then type a number…",
+                                    fill=theme.TEXT if f_val else "#485065",
+                                    font=(theme.ui_font(), 10), anchor="w")
+            fy += 66
+
+        # Live result, so the user sees the angle before committing.
+        self.canvas.create_line(x1 + 35, fy + 2, x2 - 35, fy + 2,
+                                fill=theme.HAIRLINE)
+        if shown is None:
+            res_txt, res_col = "Enter both measurements", theme.TEXT_3
+        else:
+            side = "right" if shown > 0 else "left" if shown < 0 else ""
+            res_txt = (f"Aim offset  {shown:+.2f}°"
+                       + (f"   ({abs(shown):.2f}° {side} of target)" if side else ""))
+            res_col = theme.ACCENT_TEXT
+        self.canvas.create_text(x1 + 35, fy + 24, text=res_txt, fill=res_col,
+                                font=(theme.ui_font(), 13), anchor="w")
+
+        btn_y1 = y2 - 52
+        btn_y2 = btn_y1 + 32
+        self.aim_modal_save_rect = (cx - 180, btn_y1, cx - 40, btn_y2)
+        can_save = shown is not None
+        self.canvas.create_rectangle(*self.aim_modal_save_rect,
+                                     fill=theme.ACCENT_TEXT if can_save
+                                     else theme.HAIRLINE, outline="")
+        self.canvas.create_text((cx - 110), (btn_y1 + btn_y2) // 2,
+                                text="✓ Apply offset",
+                                fill="#08090C" if can_save else theme.TEXT_3,
+                                font=(theme.ui_font(), 9, "bold"))
+        self.aim_modal_cancel_rect = (cx - 30, btn_y1, cx + 110, btn_y2)
+        self.canvas.create_rectangle(*self.aim_modal_cancel_rect,
+                                     fill=theme.HAIRLINE, outline="#323B50")
+        self.canvas.create_text((cx + 40), (btn_y1 + btn_y2) // 2,
+                                text="Cancel (Esc)", fill=theme.TEXT_2,
+                                font=(theme.ui_font(), 9, "bold"))
+        self.canvas.create_text(cx, y2 - 12,
+                                text="Tab switches fields  •  Enter applies",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8))
+
+    def apply_aim_measurements(self):
+        """Commit the modal's measurements as an aim offset."""
+        try:
+            dist = float(self.aim_modal_distance)
+            lat = float(self.aim_modal_lateral or 0.0)
+        except (TypeError, ValueError):
+            self.copy_feedback = "Enter a distance in feet"
+            self.root.after(2500, self.clear_copy_feedback)
+            return
+        offset = offset_from_geometry(dist, lat)
+        if offset is None:
+            self.copy_feedback = "Distance must be greater than zero"
+            self.root.after(2500, self.clear_copy_feedback)
+            return
+        self.set_aim_offset(offset)
+        self.show_aim_modal = False
+        self.copy_feedback = f"✓ Aim set to {self.aim_offset_deg:+.2f}°"
+        self.root.after(2500, self.clear_copy_feedback)
 
     def draw_club_spec_editor_modal(self, w, h):
         # 1. Backdrop
@@ -2330,6 +2512,29 @@ class ShanktuaryApp:
             return
 
         # 0a. In-Canvas Spec Editor Modal Click Handling
+        if self.show_aim_modal:
+            for f_key, (bx1, by1, bx2, by2) in self.aim_modal_field_rects.items():
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    self.aim_modal_active_field = f_key
+                    self.draw_screen()
+                    return
+            r = self.aim_modal_save_rect
+            if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                self.apply_aim_measurements()
+                self.draw_screen()
+                return
+            r = self.aim_modal_cancel_rect
+            if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                self.show_aim_modal = False
+                self.draw_screen()
+                return
+            # A click outside the card dismisses, matching the other modals.
+            b = self.aim_modal_box_rect
+            if b and not (b[0] <= event.x <= b[2] and b[1] <= event.y <= b[3]):
+                self.show_aim_modal = False
+                self.draw_screen()
+            return
+
         if self.show_spec_editor_modal:
             for cx1, cy1, cx2, cy2, cat in self.spec_editor_cat_chips:
                 if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
@@ -2620,6 +2825,12 @@ class ShanktuaryApp:
                 return
 
             # --- aim calibration ---
+            if _h(self.setup_aim_measure_rect):
+                self.show_aim_modal = True
+                self.aim_modal_active_field = "distance"
+                self.draw_screen()
+                return
+
             for ax0, ay0, ax1, ay1, delta in self.setup_aim_nudge_rects:
                 if ax0 <= event.x <= ax1 and ay0 <= event.y <= ay1:
                     self.set_aim_offset(self.aim_offset_deg + delta)
@@ -3742,6 +3953,8 @@ class ShanktuaryApp:
             self.draw_club_spec_editor_modal(w, h)
         elif self.show_custom_club_modal:
             self.draw_custom_club_modal(w, h)
+        elif self.show_aim_modal:
+            self.draw_aim_measure_modal(w, h)
 
         # 6. Toast Notification (Always on Top)
         if self.copy_feedback:
@@ -7190,27 +7403,28 @@ class ShanktuaryApp:
         # The Nova has no aim calibration. A unit sitting a couple of degrees
         # off square reports every shot as a push (or a pull), which biases
         # start line and offline for every shot the app has ever stored.
-        aim_h = 150
+        aim_h = 188
         card(lx0, ly, lx1, ly + aim_h, "AIM CALIBRATION")
         rx1_cur = lx1
         off = float(self.aim_offset_deg or 0.0)
 
         if off == 0.0:
             head, head_col = "Not calibrated", theme.TEXT_2
+            sub = "Offline and start line are read as-is from the device"
         else:
             side = "right" if off > 0 else "left"
             head, head_col = f"{abs(off):.1f}° {side} of target", theme.ACCENT_TEXT
-        self.canvas.create_text(lx0 + 18, ly + 30, text=head, fill=head_col,
+            sub = "Applied to start line and offline on every shot"
+        self.canvas.create_text(lx0 + 18, ly + 28, text=head, fill=head_col,
                                 font=(theme.ui_font(), 13), anchor="nw")
-        self.canvas.create_text(lx0 + 18, ly + 50,
-                                text="Where the device points, not where you aim",
+        self.canvas.create_text(lx0 + 18, ly + 48, text=sub,
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
                                 anchor="nw")
 
         # A tiny plan view: target line, and the device's actual heading.
         # Kept above the nudge row -- an earlier version ran into the Reset
         # button, which the postscript capture caught.
-        gx, gy = lx1 - 60, ly + 24
+        gx, gy = lx1 - 60, ly + 22
         base_y = gy + 40
         self.canvas.create_line(gx, base_y, gx, gy, fill=theme.GUIDE, dash=(2, 3))
         ang = math.radians(max(-25.0, min(25.0, off * 5.0)))
@@ -7220,8 +7434,23 @@ class ShanktuaryApp:
         self.canvas.create_oval(gx - 3, base_y - 3, gx + 3, base_y + 3,
                                 fill=theme.ACCENT, outline="")
 
-        # Manual nudge -- a user who squared the unit with a laser knows the number.
-        ny = ly + 76
+        # Primary path: measure the room. Nobody can eyeball a degree value,
+        # so this is the button that has to look like the way in.
+        my = ly + 70
+        self.setup_aim_measure_rect = (lx0 + 18, my, lx1 - 18, my + 34)
+        self.canvas.create_rectangle(*self.setup_aim_measure_rect,
+                                     fill=theme.ACCENT_DEEP,
+                                     outline=theme.ACCENT_LINE)
+        self.canvas.create_text((lx0 + lx1) / 2, my + 17,
+                                text="Measure with a tape  —  distance & offset",
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 9), anchor="center")
+
+        # Secondary: fine adjustment for someone who already knows the number.
+        ny = my + 56
+        self.canvas.create_text(lx0 + 18, ny - 14, text="FINE ADJUST",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
         self.setup_aim_nudge_rects = []
         for i, (lbl, delta) in enumerate((("−1.0", -1.0), ("−0.1", -0.1),
                                           ("+0.1", 0.1), ("+1.0", 1.0))):
@@ -7242,7 +7471,7 @@ class ShanktuaryApp:
                                 font=(theme.ui_font(), 8), anchor="center")
 
         # Calibrate from shots.
-        cy = ly + 112
+        cy = ny + 36
         n_cal = len(self.aim_calib_shots)
         self.setup_aim_start_rect = (lx0 + 18, cy, lx1 - 18, cy + 30)
         self.canvas.create_rectangle(*self.setup_aim_start_rect,

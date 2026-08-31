@@ -79,6 +79,30 @@ def offset_from_shots(shots: list[dict[str, Any]]) -> float | None:
     return max(-MAX_AIM_OFFSET_DEG, min(MAX_AIM_OFFSET_DEG, median))
 
 
+def offset_from_geometry(distance_ft: float, lateral_in: float) -> float | None:
+    """Derive the aim offset from two measurements anyone can take with a tape.
+
+    ``distance_ft``  how far the device sits from the thing it is aimed at
+                     (screen, net, target mark).
+    ``lateral_in``   how far that aim point sits to the RIGHT of the real
+                     target line, in inches. Negative is left.
+
+    This is the path for a user who cannot answer "how many degrees off is
+    it?" -- nobody can eyeball that -- but can measure a distance and an
+    offset. Returns ``None`` when the distance is missing, because a zero
+    result would render as "calibrated" and be indistinguishable from a
+    device that is genuinely square.
+    """
+    try:
+        d_in = float(distance_ft) * 12.0
+        lat = float(lateral_in)
+    except (TypeError, ValueError):
+        return None
+    if d_in <= 0.0:
+        return None
+    return _clamp(math.degrees(math.atan2(lat, d_in)))
+
+
 def _rotate(carry: float, offline: float, offset_deg: float) -> tuple[float, float]:
     """Rotate a landing point about the tee by ``-offset_deg``.
 

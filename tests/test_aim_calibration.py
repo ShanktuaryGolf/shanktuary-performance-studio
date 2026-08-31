@@ -11,6 +11,7 @@ import pytest
 from src.analytics.aim import (
     apply_aim,
     load_aim_offset,
+    offset_from_geometry,
     offset_from_shots,
     save_aim_offset,
 )
@@ -241,3 +242,45 @@ def test_the_offset_is_a_device_property_not_a_player_one():
         apply_aim(lefty, 2.0)["horizontal_launch_angle_degrees"]
         == apply_aim(righty, 2.0)["horizontal_launch_angle_degrees"]
     )
+
+
+# --------------------------------------------------------------------------
+# Deriving the offset from room measurements (the QuadMAX-style path)
+# --------------------------------------------------------------------------
+
+
+def test_a_device_pointing_straight_has_no_offset():
+    assert offset_from_geometry(distance_ft=12.0, lateral_in=0.0) == pytest.approx(0.0)
+
+
+def test_offset_is_the_angle_between_the_aim_point_and_the_target():
+    """12 ft to the screen, aim mark 6 in right of target -> atan(0.5/12)."""
+    expected = math.degrees(math.atan2(6.0 / 12.0, 12.0))
+
+    got = offset_from_geometry(distance_ft=12.0, lateral_in=6.0)
+
+    assert got == pytest.approx(expected, abs=1e-9)
+    assert got == pytest.approx(2.39, abs=0.01)
+
+
+def test_left_of_target_is_a_negative_offset():
+    assert offset_from_geometry(distance_ft=12.0, lateral_in=-6.0) == pytest.approx(
+        -2.39, abs=0.01
+    )
+
+
+def test_the_same_lateral_error_matters_less_from_further_away():
+    near = offset_from_geometry(distance_ft=8.0, lateral_in=6.0)
+    far = offset_from_geometry(distance_ft=16.0, lateral_in=6.0)
+
+    assert near > far > 0
+
+
+def test_a_zero_or_negative_distance_is_refused():
+    """No distance means no angle -- returning 0.0 would look like 'calibrated'."""
+    assert offset_from_geometry(distance_ft=0.0, lateral_in=6.0) is None
+    assert offset_from_geometry(distance_ft=-3.0, lateral_in=6.0) is None
+
+
+def test_geometry_result_is_clamped_like_every_other_path():
+    assert offset_from_geometry(distance_ft=1.0, lateral_in=48.0) == pytest.approx(5.0)
