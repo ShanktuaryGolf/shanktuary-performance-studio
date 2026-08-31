@@ -3174,6 +3174,10 @@ class ShanktuaryApp:
                 if is_selected:
                     self.canvas.create_rectangle(10, cy1, 13, cy2, fill=theme.ACCENT_LINE, outline="")
 
+                # Aim-corrected so the list agrees with the shot table and the
+                # HUD -- including shot_name, whose start-line word OGC derived
+                # from the uncorrected angles.
+                shot = self.aim_corrected(shot)
                 ogc = shot.get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
                 carry = us.get("carry_distance_yards", 0.0)
@@ -4036,7 +4040,7 @@ class ShanktuaryApp:
         for s in self.session_shots[:-1]:
             if s.get("excluded", False):
                 continue
-            s_ogc = s.get("open_golf_coach", {})
+            s_ogc = self.aim_corrected(s).get("open_golf_coach", {})
             s_us = s_ogc.get("us_customary_units", {})
             s_c = s_us.get("carry_distance_yards", 0.0)
             s_off = s_us.get("offline_distance_yards", 0.0)
@@ -4288,9 +4292,10 @@ class ShanktuaryApp:
 
                 c_color = self.get_club_color(c_name)
                 c_shots = [s for s in self.session_shots if s.get("club") == c_name and not s.get("excluded", False)]
-                c_carries = [s.get("open_golf_coach", {}).get("us_customary_units", {}).get("carry_distance_yards", 0.0) for s in c_shots]
+                c_us = [self.aim_corrected(s).get("open_golf_coach", {}).get("us_customary_units", {}) for s in c_shots]
+                c_carries = [u.get("carry_distance_yards", 0.0) for u in c_us]
                 c_carries = [x for x in c_carries if x > 0]
-                c_offs = [s.get("open_golf_coach", {}).get("us_customary_units", {}).get("offline_distance_yards", 0.0) for s in c_shots]
+                c_offs = [u.get("offline_distance_yards", 0.0) for u in c_us]
 
                 if c_carries:
                     avg_c = sum(c_carries) / len(c_carries)
@@ -4354,6 +4359,7 @@ class ShanktuaryApp:
         for c_name, items in grouped_shots.items():
             c_color = self.get_club_color(c_name)
             for real_idx, shot in items:
+                shot = self.aim_corrected(shot)
                 ogc = shot.get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
                 c_yds = us.get("carry_distance_yards", 0.0)
@@ -4421,7 +4427,7 @@ class ShanktuaryApp:
             carries = []
             offs = []
             for real_idx, s in items:
-                ogc = s.get("open_golf_coach", {})
+                ogc = self.aim_corrected(s).get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
                 c_yds = us.get("carry_distance_yards", 0.0)
                 o_yds = us.get("offline_distance_yards", 0.0)
@@ -4451,7 +4457,7 @@ class ShanktuaryApp:
 
             # Draw dots
             for real_idx, s in items:
-                ogc = s.get("open_golf_coach", {})
+                ogc = self.aim_corrected(s).get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
                 c_yds = us.get("carry_distance_yards", 0.0)
                 o_yds = us.get("offline_distance_yards", 0.0)
@@ -4583,7 +4589,7 @@ class ShanktuaryApp:
 
         def get_sort_val(item):
             idx, s = item
-            ogc = s.get("open_golf_coach", {})
+            ogc = self.aim_corrected(s).get("open_golf_coach", {})
             us = ogc.get("us_customary_units", {})
             if self.table_sort_col == "index": return idx
             elif self.table_sort_col == "excluded": return 1 if s.get("excluded", False) else 0
@@ -5129,7 +5135,7 @@ class ShanktuaryApp:
         for s in self.session_shots:
             if s.get("excluded"):
                 continue
-            us = (s.get("open_golf_coach", {}) or {}).get("us_customary_units", {}) or {}
+            us = (self.aim_corrected(s).get("open_golf_coach", {}) or {}).get("us_customary_units", {}) or {}
             v = us.get("offline_distance_yards")
             if v is not None:
                 offs.append(float(v))
@@ -5189,7 +5195,7 @@ class ShanktuaryApp:
         for s in self.session_shots[-20:]:
             if s.get("excluded"):
                 continue
-            us = (s.get("open_golf_coach", {}) or {}).get("us_customary_units", {}) or {}
+            us = (self.aim_corrected(s).get("open_golf_coach", {}) or {}).get("us_customary_units", {}) or {}
             off = us.get("offline_distance_yards")
             car = us.get("carry_distance_yards")
             if off is None or car is None:
@@ -6266,7 +6272,7 @@ class ShanktuaryApp:
         dyn_lofts = []
 
         for s in c_shots:
-            ogc = s.get("open_golf_coach", {})
+            ogc = self.aim_corrected(s).get("open_golf_coach", {})
             us = ogc.get("us_customary_units", {})
 
             c = us.get("carry_distance_yards", 0.0)
@@ -6636,7 +6642,7 @@ class ShanktuaryApp:
         for c_name, items in grouped_shots.items():
             c_color = self.get_club_color(c_name)
             for real_idx, s in items:
-                ogc = s.get("open_golf_coach", {})
+                ogc = self.aim_corrected(s).get("open_golf_coach", {})
                 us = ogc.get("us_customary_units", {})
                 c_yds = us.get("carry_distance_yards", 0.0)
                 o_yds = us.get("offline_distance_yards", 0.0)

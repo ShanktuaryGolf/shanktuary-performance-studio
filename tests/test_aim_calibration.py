@@ -284,3 +284,50 @@ def test_a_zero_or_negative_distance_is_refused():
 
 def test_geometry_result_is_clamped_like_every_other_path():
     assert offset_from_geometry(distance_ft=1.0, lateral_in=48.0) == pytest.approx(5.0)
+
+
+def test_apply_aim_relabels_the_shot_name():
+    """The whole point: a corrected shot list must not read like an uncorrected one."""
+    shot = {
+        "horizontal_launch_angle_degrees": -2.5,
+        "open_golf_coach": {
+            "shot_name": {"right_handed": "Pull Fade", "left_handed": "Push Draw"},
+            "us_customary_units": {},
+        },
+    }
+
+    out = apply_aim(shot, -2.5)
+
+    assert out["open_golf_coach"]["shot_name"]["right_handed"] == "Straight Fade"
+
+
+def test_the_left_handed_label_uses_the_mirrored_start_line():
+    """A lefty's start line is the negated angle, so its word must flip too."""
+    shot = {
+        "horizontal_launch_angle_degrees": 0.0,
+        "open_golf_coach": {
+            "shot_name": {"right_handed": "Straight Fade",
+                          "left_handed": "Straight Draw"},
+            "us_customary_units": {},
+        },
+    }
+
+    out = apply_aim(shot, 5.0)   # corrected RH start line = -5 deg (a pull)
+
+    names = out["open_golf_coach"]["shot_name"]
+    assert names["right_handed"] == "Pull Fade"
+    assert names["left_handed"] == "Push Draw"
+
+
+def test_relabelling_does_not_mutate_the_stored_name():
+    shot = {
+        "horizontal_launch_angle_degrees": -2.5,
+        "open_golf_coach": {
+            "shot_name": {"right_handed": "Pull Fade"},
+            "us_customary_units": {},
+        },
+    }
+
+    apply_aim(shot, -2.5)
+
+    assert shot["open_golf_coach"]["shot_name"]["right_handed"] == "Pull Fade"

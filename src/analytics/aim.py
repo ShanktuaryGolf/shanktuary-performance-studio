@@ -103,6 +103,51 @@ def offset_from_geometry(distance_ft: float, lateral_in: float) -> float | None:
     return _clamp(math.degrees(math.atan2(lat, d_in)))
 
 
+# OpenGolfCoach's start-line vocabulary and the boundary between the words.
+# The +-3.0 threshold is RECOVERED, not chosen: it reproduces all 28 stored
+# non-Baby / non-Worm-Burner labels exactly, while +-2.5 and +-3.5 both
+# misclassify. See tests/test_aim_labels.py.
+OGC_START_WORDS = ("Pull", "Push", "Straight")
+OGC_STRAIGHT_BAND_DEG = 3.0
+
+# OGC branches we deliberately do not touch: "Baby ..." applies its own
+# near-zero naming rule, and "Worm Burner" is a launch-angle verdict rather
+# than a direction one.
+_OGC_OPAQUE = ("Baby", "Worm")
+
+
+def relabel_shot_name(name: str | None, corrected_hla_deg: float,
+                      offset_deg: float) -> str | None:
+    """Re-word the start-line half of an OGC shot name after an aim correction.
+
+    OGC derives ``shot_name`` from the raw device-frame angles, so once an
+    offset is applied the start-line word is stale -- a shot that is now dead
+    straight would still read "Pull Fade", making a calibrated shot list look
+    identical to an uncalibrated one.
+
+    Only the start-line word changes. Spin axis is a property of the ball, not
+    of where the device points, so the curve word ("Draw", "Fade", ...) stays
+    exactly as OGC reported it.
+    """
+    if not name or not offset_deg:
+        return name
+    if any(tok in name for tok in _OGC_OPAQUE):
+        return name
+
+    words = name.split()
+    if not any(w in OGC_START_WORDS for w in words):
+        return name
+
+    if corrected_hla_deg < -OGC_STRAIGHT_BAND_DEG:
+        start = "Pull"
+    elif corrected_hla_deg > OGC_STRAIGHT_BAND_DEG:
+        start = "Push"
+    else:
+        start = "Straight"
+
+    return " ".join(start if w in OGC_START_WORDS else w for w in words)
+
+
 def _rotate(carry: float, offline: float, offset_deg: float) -> tuple[float, float]:
     """Rotate a landing point about the tee by ``-offset_deg``.
 
@@ -140,7 +185,8 @@ def apply_aim(shot: dict[str, Any], offset_deg: float) -> dict[str, Any]:
     out = dict(shot)
     hla = out.get("horizontal_launch_angle_degrees")
     if hla is not None:
-        out["horizontal_launch_angle_degrees"] = float(hla) - float(offset_deg)
+        hla = float(hla) - float(offset_deg)
+        out["horizontal_launch_angle_degrees"] = hla
 
     ogc = shot.get("open_golf_coach")
     if not isinstance(ogc, dict):
@@ -150,6 +196,21 @@ def apply_aim(shot: dict[str, Any], offset_deg: float) -> dict[str, Any]:
         ogc, "carry_distance_meters", "offline_distance_meters", offset_deg
     )
     new_ogc = dict(ogc) if new_ogc is None else new_ogc
+
+    # shot_name is OGC's verdict on the RAW start line, so it goes stale the
+    # moment the angles move. Without this a corrected shot list looks
+    # identical to an uncorrected one -- the numbers change but every label
+    # still reads "Pull Fade".
+    if hla is not None:
+        name = ogc.get("shot_name")
+        if isinstance(name, dict):
+            new_ogc["shot_name"] = {
+                k: relabel_shot_name(v, hla if k == "right_handed" else -hla,
+                                     offset_deg)
+                for k, v in name.items()
+            }
+        elif isinstance(name, str):
+            new_ogc["shot_name"] = relabel_shot_name(name, hla, offset_deg)
 
     us = ogc.get("us_customary_units")
     if isinstance(us, dict):
