@@ -651,6 +651,12 @@ class ShanktuaryApp:
             save_aim_offset(self.aim_offset_deg)
         except Exception as e:
             print(f"[!] Could not save aim calibration: {e}")
+        # The overlay server caches the offset; tell it to re-read so a
+        # mid-session recalibration reaches OBS without a restart.
+        try:
+            obs_server.obs_state.invalidate_aim_cache()
+        except Exception as e:
+            print(f"[!] Could not refresh server aim cache: {e}")
 
     def finish_aim_calibration(self):
         """Turn the collected calibration shots into an offset, or explain why not."""

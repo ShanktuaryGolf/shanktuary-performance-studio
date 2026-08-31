@@ -27,6 +27,8 @@ import threading
 import time
 from pathlib import Path
 
+from src.analytics.aim import AIM_FILE as _DEFAULT_AIM_FILE
+from src.analytics.aim import apply_aim, load_aim_offset
 from src.processing.pressure.stance import (
     CalibrationState as StanceCalState,
 )
@@ -78,6 +80,10 @@ def get_assets_dir():
 ASSETS_DIR = get_assets_dir()
 CONFIG_DIR = Path.home() / ".config" / "shanktuary"
 LAYOUT_FILE = CONFIG_DIR / "overlay_layout.json"
+# Aim calibration is written by the desktop app; the server only reads it, and
+# re-reads when the desktop app tells it the value changed. Module-level so
+# tests can point it somewhere harmless.
+AIM_FILE = _DEFAULT_AIM_FILE
 
 # Shot history / My Bag live beside the executable (source dir when running from
 # source), matching DATA_DIR in shanktuary_performance_studio.py. The desktop
@@ -149,7 +155,51 @@ class OBSState:
         # NEVER while holding self.lock (a stalled client must not wedge the
         # 30 Hz pressure pipeline or the HTTP handlers).
         self.send_lock = threading.Lock()
+        # Aim offset, read lazily from disk and cached: every shot broadcast
+        # and every /api/shot would otherwise stat+parse a JSON file.
+        # invalidate_aim_cache() is how the desktop app publishes a change.
+        self._aim_offset = None
         self.ensure_layout_file()
+
+    def invalidate_aim_cache(self):
+        """Force the next read to re-load the aim offset from disk.
+
+        Called by the desktop app after a user calibrates, so a mid-session
+        recalibration reaches the overlay without restarting OBS.
+        """
+        with self.lock:
+            self._aim_offset = None
+
+    def aim_offset(self):
+        """Cached aim offset in degrees; 0.0 when uncalibrated or unreadable."""
+        with self.lock:
+            cached = self._aim_offset
+        if cached is None:
+            # load_aim_offset already degrades to 0.0 on a missing or corrupt
+            # file, so a lost calibration never stops shots being served.
+            cached = load_aim_offset(path=AIM_FILE)
+            with self.lock:
+                self._aim_offset = cached
+        return cached
+
+    def aim_corrected(self, shot):
+        """Return ``shot`` with the device's aim error removed.
+
+        The stored/broadcast payload stays native (AGENTS.md), so correction
+        happens here, at the read boundary, exactly as in the desktop app.
+        """
+        if not shot:
+            return shot
+        offset = self.aim_offset()
+        if not offset:
+            return shot
+        return apply_aim(shot, offset)
+
+    def latest_shot_for_display(self):
+        """The most recent shot, aim-corrected, for browser consumers."""
+        with self.lock:
+            shot = self.latest_shot
+        return self.aim_corrected(shot)
 
     def ensure_layout_file(self):
         try:
@@ -252,7 +302,8 @@ class OBSState:
 
             pm.buffer.trigger_shot_impact(callback=on_pressure_captured)
 
-        self.broadcast({"type": "shot", "data": shot_data})
+        # latest_shot above stays native; only the outbound copy is corrected.
+        self.broadcast({"type": "shot", "data": self.aim_corrected(shot_data)})
 
     def broadcast(self, message):
         payload = json.dumps(message)
@@ -904,9 +955,9 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/bag":
             self.send_json(obs_state.load_bag())
         elif parsed_path == "/api/shot":
-            with obs_state.lock:
-                shot = obs_state.latest_shot or {}
-            self.send_json(shot)
+            # Aim-corrected: the browser overlay must agree with the desktop
+            # app's shot table about which way the ball started.
+            self.send_json(obs_state.latest_shot_for_display() or {})
         elif parsed_path == "/api/pressure/status":
             self.send_json(pressure_manager.get_status())
         elif parsed_path == "/api/pressure/shot":
@@ -1134,8 +1185,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         except OSError:
             pass
 
-        with obs_state.lock:
-            current_shot = obs_state.latest_shot
+        current_shot = obs_state.latest_shot_for_display()
 
         init_msg = json.dumps({
             "type": "init",
