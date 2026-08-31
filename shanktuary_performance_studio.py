@@ -40,6 +40,14 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 import obs_server
 import theme
+from src.analytics.aim import (
+    MAX_AIM_OFFSET_DEG,
+    MIN_CALIBRATION_SHOTS,
+    apply_aim,
+    load_aim_offset,
+    offset_from_shots,
+    save_aim_offset,
+)
 from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
 
 # Configuration & Logging
@@ -588,6 +596,15 @@ class ShanktuaryApp:
         self.setup_step_b_rect = None
         self.setup_align_rect = None
         self.setup_tare_rect = None
+        # Aim calibration: where the Nova points relative to the target line.
+        # The device has no aim calibration of its own, so an off-square unit
+        # reports every shot as a push or a pull.
+        self.aim_offset_deg = load_aim_offset()
+        self.aim_calibrating = False
+        self.aim_calib_shots = []
+        self.setup_aim_start_rect = None
+        self.setup_aim_nudge_rects = []
+        self.setup_aim_clear_rect = None
         # Cache for _text_width(): measuring is cheap but this runs per card
         # per redraw, and the set of strings is small and repetitive.
         self._text_w_cache = {}
@@ -623,6 +640,42 @@ class ShanktuaryApp:
             )
         except Exception as e:
             print(f"[!] Could not register pressure trace listener: {e}")
+
+    def set_aim_offset(self, offset_deg):
+        """Set and persist the aim offset, clamped to the sane range."""
+        self.aim_offset_deg = max(-MAX_AIM_OFFSET_DEG,
+                                  min(MAX_AIM_OFFSET_DEG, float(offset_deg)))
+        # Nudges land on values like 1.9000000000000001 otherwise.
+        self.aim_offset_deg = round(self.aim_offset_deg, 2)
+        try:
+            save_aim_offset(self.aim_offset_deg)
+        except Exception as e:
+            print(f"[!] Could not save aim calibration: {e}")
+
+    def finish_aim_calibration(self):
+        """Turn the collected calibration shots into an offset, or explain why not."""
+        offset = offset_from_shots(self.aim_calib_shots)
+        if offset is None:
+            need = MIN_CALIBRATION_SHOTS - len(self.aim_calib_shots)
+            self.copy_feedback = f"Need {need} more shot{'s' if need != 1 else ''}"
+            self.root.after(2500, self.clear_copy_feedback)
+            return
+        self.set_aim_offset(offset)
+        self.aim_calibrating = False
+        self.aim_calib_shots = []
+        self.copy_feedback = f"✓ Aim set to {self.aim_offset_deg:+.1f}°"
+        self.root.after(2500, self.clear_copy_feedback)
+
+    def aim_corrected(self, shot):
+        """Return ``shot`` with the aim offset removed.
+
+        Applied at READ time, never on the incoming event: the native Nova
+        payload must be preserved when forwarding, and shots recorded before a
+        user calibrated have to be corrected too.
+        """
+        if not shot or not self.aim_offset_deg:
+            return shot
+        return apply_aim(shot, self.aim_offset_deg)
 
     def get_active_session(self):
         if not self.sessions:
@@ -1138,7 +1191,12 @@ class ShanktuaryApp:
                 "carry": 0.0, "total": 0.0, "ball_speed": 0.0, "club_speed": 0.0,
                 "smash": 0.0, "launch_angle": 0.0, "total_spin": 0.0, "offline": 0.0
             }
-        
+
+        # Correct for a mis-squared device before anything reads direction.
+        # Applied here rather than on the incoming event so that shots recorded
+        # before the user calibrated are corrected too.
+        s = self.aim_corrected(s)
+
         ogc = s.get("open_golf_coach", {})
         us = ogc.get("us_customary_units", {})
         
@@ -1788,7 +1846,16 @@ class ShanktuaryApp:
                 self.selected_shot_index = len(sess["shots"]) - 1
                 self.current_shot = msg
                 self.save_session_to_file()
-                
+
+                # Aim calibration collects raw start lines. The shot is stored
+                # uncorrected either way -- calibration reads the device's own
+                # frame, which is exactly the bias being measured.
+                if self.aim_calibrating:
+                    self.aim_calib_shots.append(msg)
+                    if len(self.aim_calib_shots) >= MIN_CALIBRATION_SHOTS:
+                        self.finish_aim_calibration()
+
+
                 # Push a COPY to the OBS server: its pressure-capture callback
                 # mutates the pushed dict from another thread (adds
                 # pressure_trace), which would race with json.dump of the
@@ -2546,6 +2613,33 @@ class ShanktuaryApp:
                 self.draw_screen()
                 return
 
+            # --- aim calibration ---
+            for ax0, ay0, ax1, ay1, delta in self.setup_aim_nudge_rects:
+                if ax0 <= event.x <= ax1 and ay0 <= event.y <= ay1:
+                    self.set_aim_offset(self.aim_offset_deg + delta)
+                    self.draw_screen()
+                    return
+
+            if _h(self.setup_aim_clear_rect):
+                self.set_aim_offset(0.0)
+                self.aim_calibrating = False
+                self.aim_calib_shots = []
+                self.copy_feedback = "Aim calibration cleared"
+                self.root.after(2000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+
+            if _h(self.setup_aim_start_rect):
+                if not self.aim_calibrating:
+                    self.aim_calibrating = True
+                    self.aim_calib_shots = []
+                    self.copy_feedback = "Pick one target and hit at it"
+                    self.root.after(2500, self.clear_copy_feedback)
+                else:
+                    self.finish_aim_calibration()
+                self.draw_screen()
+                return
+
         if self.view_mode == 9:
             def _hit(r):
                 return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
@@ -2724,6 +2818,7 @@ class ShanktuaryApp:
         sum_bs = sum_cs = sum_sm = sum_la = sum_spin = sum_carry = sum_total = sum_hl = sum_ss = sum_sa = sum_cp = sum_fp = sum_da = sum_apex = sum_off = 0.0
 
         for shot in shots:
+            shot = self.aim_corrected(shot)
             ogc = shot.get("open_golf_coach", {})
             us_units = ogc.get("us_customary_units", {})
 
@@ -3457,7 +3552,10 @@ class ShanktuaryApp:
 
         # Extract Current Shot Metrics
         if self.current_shot:
-            ogc = self.current_shot.get("open_golf_coach", {})
+            # Read through the aim correction so the HUD, the 3D range and the
+            # shot table all agree with the analytics.
+            shot_view = self.aim_corrected(self.current_shot)
+            ogc = shot_view.get("open_golf_coach", {})
             us_units = ogc.get("us_customary_units", {})
 
             hand_key = "left_handed" if self.is_left_handed else "right_handed"
@@ -3481,8 +3579,8 @@ class ShanktuaryApp:
             else:
                 face_to_target = float(f2t_data or 0.0)
                 if self.is_left_handed: face_to_target = -face_to_target
-            vert_launch = self.current_shot.get("vertical_launch_angle_degrees", 0.0)
-            horiz_launch = self.current_shot.get("horizontal_launch_angle_degrees", 0.0)
+            vert_launch = shot_view.get("vertical_launch_angle_degrees", 0.0)
+            horiz_launch = shot_view.get("horizontal_launch_angle_degrees", 0.0)
             sidespin = ogc.get("sidespin_rpm", 0.0)
             backspin = ogc.get("backspin_rpm", 0.0)
             spin_axis = ogc.get("spin_axis_degrees", 0.0)
@@ -4277,7 +4375,7 @@ class ShanktuaryApp:
             elif self.table_sort_col == "club_speed": return us.get("club_speed_mph", 0.0)
             elif self.table_sort_col == "smash": return ogc.get("smash_factor", 1.0)
             elif self.table_sort_col == "launch": return s.get("vertical_launch_angle_degrees", 0.0)
-            elif self.table_sort_col == "push_pull": return s.get("horizontal_launch_angle_degrees", 0.0)
+            elif self.table_sort_col == "push_pull": return self.aim_corrected(s).get("horizontal_launch_angle_degrees", 0.0)
             elif self.table_sort_col == "spin": return ogc.get("total_spin_rpm", 0.0)
             elif self.table_sort_col == "sidespin": return ogc.get("sidespin_rpm", 0.0)
             elif self.table_sort_col == "axis": return ogc.get("spin_axis_degrees", 0.0)
@@ -4304,9 +4402,9 @@ class ShanktuaryApp:
             self.canvas.create_rectangle(table_x1, ry1, table_x2, ry2, fill=bg, outline=border, width=2 if is_sel else 1)
             self.table_row_rects.append((table_x1, ry1, table_x2, ry2, real_idx))
 
-            ogc = shot.get("open_golf_coach", {})
+            ogc_shot = self.aim_corrected(shot)
+            ogc = ogc_shot.get("open_golf_coach", {})
             us = ogc.get("us_customary_units", {})
-            
             c_val = us.get("carry_distance_yards", 0.0)
             tot_val = us.get("total_distance_yards", 0.0)
             bs_val = us.get("ball_speed_mph", 0.0)
@@ -4320,8 +4418,8 @@ class ShanktuaryApp:
                 shot.get("vertical_launch_angle_degrees"),
                 shot.get("total_spin_rpm"),
             )["clamped"]
-            la_val = shot.get("vertical_launch_angle_degrees", 0.0)
-            hl_val = shot.get("horizontal_launch_angle_degrees", 0.0)
+            la_val = ogc_shot.get("vertical_launch_angle_degrees", 0.0)
+            hl_val = ogc_shot.get("horizontal_launch_angle_degrees", 0.0)
             sp_val = ogc.get("total_spin_rpm", 0.0)
             ss_val = ogc.get("sidespin_rpm", 0.0)
             sa_val = ogc.get("spin_axis_degrees", 0.0)
@@ -7081,6 +7179,87 @@ class ShanktuaryApp:
             "Left" if self.is_left_handed else "Right")
         row(lx0, ly + 78, "Units", "Yards / MPH")
         ly += dsp_h + 14
+
+        # --- aim calibration -------------------------------------------------
+        # The Nova has no aim calibration. A unit sitting a couple of degrees
+        # off square reports every shot as a push (or a pull), which biases
+        # start line and offline for every shot the app has ever stored.
+        aim_h = 150
+        card(lx0, ly, lx1, ly + aim_h, "AIM CALIBRATION")
+        rx1_cur = lx1
+        off = float(self.aim_offset_deg or 0.0)
+
+        if off == 0.0:
+            head, head_col = "Not calibrated", theme.TEXT_2
+        else:
+            side = "right" if off > 0 else "left"
+            head, head_col = f"{abs(off):.1f}° {side} of target", theme.ACCENT_TEXT
+        self.canvas.create_text(lx0 + 18, ly + 30, text=head, fill=head_col,
+                                font=(theme.ui_font(), 13), anchor="nw")
+        self.canvas.create_text(lx0 + 18, ly + 50,
+                                text="Where the device points, not where you aim",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+
+        # A tiny plan view: target line, and the device's actual heading.
+        # Kept above the nudge row -- an earlier version ran into the Reset
+        # button, which the postscript capture caught.
+        gx, gy = lx1 - 60, ly + 24
+        base_y = gy + 40
+        self.canvas.create_line(gx, base_y, gx, gy, fill=theme.GUIDE, dash=(2, 3))
+        ang = math.radians(max(-25.0, min(25.0, off * 5.0)))
+        self.canvas.create_line(gx, base_y,
+                                gx + 40 * math.sin(ang), base_y - 40 * math.cos(ang),
+                                fill=theme.ACCENT_LINE, width=2)
+        self.canvas.create_oval(gx - 3, base_y - 3, gx + 3, base_y + 3,
+                                fill=theme.ACCENT, outline="")
+
+        # Manual nudge -- a user who squared the unit with a laser knows the number.
+        ny = ly + 76
+        self.setup_aim_nudge_rects = []
+        for i, (lbl, delta) in enumerate((("−1.0", -1.0), ("−0.1", -0.1),
+                                          ("+0.1", 0.1), ("+1.0", 1.0))):
+            bw = 46
+            bx0 = lx0 + 18 + i * (bw + 6)
+            self.canvas.create_rectangle(bx0, ny, bx0 + bw, ny + 26,
+                                         fill=theme.SURFACE_2, outline="")
+            self.canvas.create_text(bx0 + bw / 2, ny + 13, text=lbl,
+                                    fill=theme.TEXT_2,
+                                    font=(theme.ui_font(), 9), anchor="center")
+            self.setup_aim_nudge_rects.append((bx0, ny, bx0 + bw, ny + 26, delta))
+
+        self.setup_aim_clear_rect = (lx1 - 76, ny, lx1 - 18, ny + 26)
+        self.canvas.create_rectangle(*self.setup_aim_clear_rect,
+                                     fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((lx1 - 47), ny + 13, text="Reset",
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 8), anchor="center")
+
+        # Calibrate from shots.
+        cy = ly + 112
+        n_cal = len(self.aim_calib_shots)
+        self.setup_aim_start_rect = (lx0 + 18, cy, lx1 - 18, cy + 30)
+        self.canvas.create_rectangle(*self.setup_aim_start_rect,
+                                     fill=theme.ACCENT_DEEP if self.aim_calibrating
+                                     else theme.SURFACE_2,
+                                     outline=theme.ACCENT_LINE if self.aim_calibrating
+                                     else "")
+        if self.aim_calibrating:
+            btn_txt = (f"Aim at one target — {n_cal}/{MIN_CALIBRATION_SHOTS} shots"
+                       if n_cal < MIN_CALIBRATION_SHOTS
+                       else f"Apply median of {n_cal} shots")
+        else:
+            btn_txt = f"Calibrate from {MIN_CALIBRATION_SHOTS} shots at one target"
+        self.canvas.create_text((lx0 + lx1) / 2, cy + 15, text=btn_txt,
+                                fill=theme.ACCENT_TEXT if self.aim_calibrating
+                                else theme.TEXT_2,
+                                font=(theme.ui_font(), 9), anchor="center")
+        if self.aim_calibrating and n_cal:
+            frac = min(1.0, n_cal / float(MIN_CALIBRATION_SHOTS))
+            self.canvas.create_rectangle(lx0 + 18, cy + 27,
+                                         lx0 + 18 + (lx1 - lx0 - 36) * frac,
+                                         cy + 30, fill=theme.ACCENT, outline="")
+        ly += aim_h + 14
 
         # --- data sources: what is measured vs derived vs estimated ---
         card(lx0, ly, lx1, bot, "DATA SOURCES")
