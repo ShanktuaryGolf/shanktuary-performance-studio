@@ -88,8 +88,12 @@ Shanktuary Performance Studio is a comprehensive launch monitor visualization, p
 git clone https://github.com/ShanktuaryGolf/shanktuary-performance-studio.git
 cd shanktuary-performance-studio
 pip install -r requirements.txt
-python3 shanktuary_performance_studio.py
+python3 shanktuary_app.py
 ```
+
+`shanktuary_app.py` is the redesigned production desktop entry point. It starts the normal Nova websocket worker and OBS/browser server, then applies the desktop UI layer in `src/ui/` over the production implementation in `shanktuary_performance_studio.py`. Hardware, OpenGolfCoach processing, aim calibration, persistence, pressure capture, and browser/API behavior remain owned by the production app.
+
+For desktop visual conventions, palette roles, data-credibility rules, and maintainership guidance, see [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md).
 
 ### OBS & Browser Source URLs
 - 🎥 **Clean OBS Browser Source:** `http://localhost:9321`
@@ -102,6 +106,17 @@ python3 shanktuary_performance_studio.py
 
 All of these are also reachable from the desktop app under **Tools**.
 
+### Desktop UI maintenance
+
+The stable desktop seam is `src/ui/desktop.py`, and new desktop styling should use roles from `src/ui/tokens.py`. The approved iterative renderer snapshot is isolated under `src/ui/_legacy/`; it is implementation detail, not a public API. As views are revisited, those renderers can be consolidated behind `ShanktuaryDesktopApp` without changing production data or hardware code.
+
+Before merging desktop changes, run:
+
+```bash
+python -m pytest -q
+```
+
+The GitHub Actions workflow runs the suite before packaging Linux, Windows, and macOS builds.
 
 ---
 
@@ -127,4 +142,3 @@ The WebGPU 3D Driving Range ships the following models under
 * **"Wooden Sign With Roof"** — [KenVeel](https://sketchfab.com/KenVeel) · [source](https://sketchfab.com/3d-models/wooden-sign-with-roof-d3c14c892ce54564b7fde91c73896ca3)
 
 Rendering uses [three.js](https://threejs.org) (MIT).
-

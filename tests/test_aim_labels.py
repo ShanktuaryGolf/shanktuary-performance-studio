@@ -77,11 +77,20 @@ def test_the_start_thresholds_match_opengolfcoach(hla, expected):
 
 
 def test_recovered_threshold_reproduces_every_stored_label():
-    """The +-3.0 boundary is a recovered OGC constant, not a chosen one."""
+    """The +-3.0 boundary is a recovered OGC constant, not a chosen one.
+
+    The calibration data is a local session-history file rather than a tracked
+    repository fixture. Keep validating it when present, but do not make a clean
+    checkout or CI environment fail simply because that private/local history is
+    intentionally absent.
+    """
     import json
     from pathlib import Path
 
     path = Path(__file__).resolve().parent.parent / "shanktuary_session_history.json"
+    if not path.exists():
+        pytest.skip("local shanktuary_session_history.json fixture is not present")
+
     data = json.loads(path.read_text())
     shots = [s for sess in data["sessions"] for s in sess.get("shots", [])]
 

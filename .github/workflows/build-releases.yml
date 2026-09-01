@@ -1,10 +1,12 @@
 name: Build Cross-Platform Standalone Binaries
 
+# Handoff CI validates repository-backed tests before packaging the redesigned app.
 on:
   push:
     branches:
       - main
       - 'feature/**'
+      - 'handoff/**'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -13,8 +15,38 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Production test suite
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest numpy opencv-python-headless
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+          PYTHONUTF8: "1"
+        run: |
+          # Upstream's real-session-history regression test intentionally reads
+          # a non-versioned local user-data file. Run every repository-backed
+          # test in CI while leaving that local-only diagnostic test untouched.
+          python -m pytest -q -k "not test_the_gate_on_the_real_session_history"
+
   build:
     name: Build on ${{ matrix.os }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -39,34 +71,37 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller numpy opencv-python-headless
 
       - name: Build Executable with PyInstaller (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          pyinstaller --noconfirm --onedir --windowed --add-data "assets:assets" shanktuary_performance_studio.py
+          pyinstaller --noconfirm --onedir --windowed \
+            --name shanktuary_performance_studio \
+            --icon assets/shanktuary_shield.png \
+            --paths src/ui/_legacy \
+            --add-data "assets:assets" \
+            shanktuary_app.py
 
       - name: Build Executable with PyInstaller (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --noconfirm --onedir --windowed --add-data "assets;assets" shanktuary_performance_studio.py
+          pyinstaller --noconfirm --onedir --windowed --name shanktuary_performance_studio --icon assets/shanktuary_shield.png --paths src/ui/_legacy --add-data "assets;assets" shanktuary_app.py
 
       - name: Package Linux Tarball & AppImage
         if: runner.os == 'Linux'
         run: |
-          # 1. Package Tarball
           tar -czf Shanktuary-Studio-Linux-x64.tar.gz -C dist shanktuary_performance_studio
-          
-          # 2. Package Universal AppImage
+
           mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
           cp -r dist/shanktuary_performance_studio/* AppDir/usr/bin/
           cp shanktuary_performance_studio.desktop AppDir/
-          cp assets/iron_face.png AppDir/shanktuary_performance_studio.png
-          cp assets/iron_face.png AppDir/usr/share/icons/hicolor/256x256/apps/shanktuary_performance_studio.png
-          
+          cp assets/shanktuary_shield.png AppDir/shanktuary_performance_studio.png
+          cp assets/shanktuary_shield.png AppDir/usr/share/icons/hicolor/256x256/apps/shanktuary_performance_studio.png
+
           cat << 'EOF' > AppDir/AppRun
           #!/bin/sh
           HERE="$(dirname "$(readlink -f "${0}")")"
@@ -84,11 +119,13 @@ jobs:
         run: |
           Compress-Archive -Path dist/shanktuary_performance_studio -DestinationPath Shanktuary-Studio-Windows-x64.zip
 
-      - name: Compress Artifacts (macOS)
+      - name: Sign and package macOS app bundle
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          tar -czf Shanktuary-Studio-macOS.zip -C dist shanktuary_performance_studio
+          codesign --force --deep --sign - --timestamp=none dist/shanktuary_performance_studio.app
+          codesign --verify --deep --strict --verbose=2 dist/shanktuary_performance_studio.app
+          ditto -c -k --sequesterRsrc --keepParent dist/shanktuary_performance_studio.app Shanktuary-Studio-macOS.zip
 
       - name: Upload Build Artifact to GitHub Actions
         uses: actions/upload-artifact@v4

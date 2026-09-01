@@ -1,22 +1,20 @@
-"""Central design tokens for Shanktuary Performance Studio.
+"""Shared/legacy theme tokens for Shanktuary Performance Studio.
 
-Why this exists
----------------
-The desktop UI grew to 195 distinct hex literals across ~734 usages. Colour
-stopped carrying meaning: cyan marked "offline" in one panel and "spin axis"
-in another, so nothing stood out because everything did.
+This module remains the compatibility source for production renderers and the
+browser/OBS surfaces that already consume these names.  The redesigned desktop
+UI has a separate, intentional navy/teal/gold design system in
+``src/ui/tokens.py``; see ``DESIGN_SYSTEM.md`` before styling new desktop work.
 
-This module is the single source of truth. The rules:
+Do not globally replace these compatibility values just to recolor the desktop.
+The desktop adapter applies its palette at the UI boundary so browser assets and
+older production renderers can migrate deliberately without surprise regressions.
+
+The legacy rules below still apply to code that consumes this module directly:
 
 * ONE neutral ramp (BG -> SURFACE -> HAIRLINE -> TEXT*) builds structure.
-* ONE brand accent (hunter green) marks identity and active state.
+* ONE compatibility accent (hunter green) marks identity and active state.
 * SEMANTIC colours (WARN / DANGER / ESTIMATE) are reserved for meaning and
   must never be used decoratively.
-
-Hunter green needs a scale, not a single value. A true hunter (#355E3B) is
-only 2.55:1 against BG, which is unreadable for text or thin strokes. The
-deep tones carry large fills; the light tints carry text and 1px lines.
-Contrast ratios below are measured against BG (#0E1013).
 """
 
 # --- neutral ramp ---------------------------------------------------------
