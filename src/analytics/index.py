@@ -13,18 +13,41 @@ the kind of bug nobody notices until the ratings disagree with each other.
 from __future__ import annotations
 
 import enum
-from statistics import median
 from typing import Any
 
-# A shot slower than this fraction of the club's own median ball speed is a
-# chip or a half swing, not a bad full swing. Median-RELATIVE by decision in
-# plan §9a: an absolute mph floor would filter a 60 mph senior's entire bag
-# while letting a 110 mph player's half swings through.
-PARTIAL_SWING_RATIO = 0.55
+# The partial-swing floor: a shot slower than PARTIAL_SWING_RATIO x the club's
+# full-swing anchor is a chip or a half swing, not a badly struck full one.
+#
+# RELATIVE, not an absolute mph floor (plan §9a): an absolute floor would filter
+# a 60 mph senior's entire bag while passing a 110 mph player's half swings.
+#
+# The anchor is the 80th percentile of ball speed, NOT the median. The median
+# was wrong and real data proved it: on a golfer who practises deliberate
+# partial swings, the partials drag the median down and the floor follows, so
+# the filter admits exactly what it exists to remove. Measured on a synthetic
+# session of full swings N(85, 4) mixed with partials U(40, 70):
+#
+#   % partial   median   p80   0.55*median admits   0.75*p80 admits
+#         10%     84.5  87.4        30 of 42            7 of 42
+#         30%     82.7  87.1        96 of 120          13 of 120
+#         50%     71.4  85.8       201 of 201          43 of 201
+#
+# At a 50/50 mix the median anchor keeps every partial swing. p80 stays pinned
+# to the full-swing mode because that mode is, by construction, the top of the
+# distribution for any club a player is actually trying to hit full.
+#
+# 0.75 chosen with the ratio: across 7 clubs of real unfiltered range data it
+# keeps ~87% of shots while cutting mean carry CV from 33.5% to 29.2%. Lower
+# ratios leave pitches in; higher ones start discarding genuinely bad full
+# swings, which are the shots the Index most needs to see.
+FULL_SWING_ANCHOR_Q = 0.80
+PARTIAL_SWING_RATIO = 0.75
 
-# Below this many shots the median is not stable enough to filter against, so
+# Below this many shots the anchor is not stable enough to filter against, so
 # the partial-swing rule stays dormant rather than discarding scarce data.
-MIN_SHOTS_FOR_MEDIAN = 10
+MIN_SHOTS_FOR_ANCHOR = 10
+# Back-compat alias; the old name said "median" which is no longer the anchor.
+MIN_SHOTS_FOR_MEDIAN = MIN_SHOTS_FOR_ANCHOR
 
 MIN_SHOTS_PROVISIONAL = 15
 MIN_SHOTS_ESTABLISHED = 30
@@ -84,13 +107,15 @@ def valid_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return the subset of ``shots`` every attribute is allowed to score.
 
     Two passes. The structural rules run first so that bad reads cannot drag
-    the ball-speed median down and take genuine full swings with them.
+    the ball-speed anchor down and take genuine full swings with them.
     """
     structural = [s for s in shots if _is_structurally_valid(s)]
-    if len(structural) < MIN_SHOTS_FOR_MEDIAN:
+    if len(structural) < MIN_SHOTS_FOR_ANCHOR:
         return structural
 
     # _is_structurally_valid guarantees a usable speed, so none of these are None.
-    speeds = [bs for s in structural if (bs := _ball_speed(s)) is not None]
-    floor = median(speeds) * PARTIAL_SWING_RATIO
+    speeds = sorted(bs for s in structural if (bs := _ball_speed(s)) is not None)
+    idx = min(len(speeds) - 1, int(len(speeds) * FULL_SWING_ANCHOR_Q))
+    anchor = speeds[idx]
+    floor = anchor * PARTIAL_SWING_RATIO
     return [s for s in structural if (_ball_speed(s) or 0.0) >= floor]
