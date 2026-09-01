@@ -1,13 +1,40 @@
 #!/usr/bin/env python3
-"""Production entry point for the redesigned Shanktuary desktop app."""
+"""Production entry point for the redesigned Shanktuary desktop app.
 
+Usage:
+    python shanktuary_app.py              # normal launch
+    python shanktuary_app.py --splash     # force the setup splash
+    python shanktuary_app.py --no-splash  # skip it even on first run
+"""
+
+import argparse
 import threading
 
 import shanktuary_performance_studio as studio
 from src.ui import ShanktuaryDesktopApp, SplashScreen, should_show_splash
 
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="shanktuary_app",
+        description="Shanktuary Performance Studio",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--splash", action="store_true",
+        help="always show the shot-source setup splash, even after onboarding "
+             "(for testing; does not erase your saved settings)",
+    )
+    group.add_argument(
+        "--no-splash", action="store_true",
+        help="never show the splash, even on a first run",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
     # Keep the production connectivity lifecycle exactly aligned with the
     # original entry point: Nova worker + local OBS/browser server + Tk UI.
     t_ws = threading.Thread(target=studio.websocket_worker, daemon=True)
@@ -46,7 +73,7 @@ def main():
     # launch), but an explicit deiconify maps it regardless. See
     # tests/test_splash_visibility.py, which locks both halves of this in.
     splash_choice = None
-    if should_show_splash():
+    if args.splash or (should_show_splash() and not args.no_splash):
         root.withdraw()
         try:
             bag_specs = studio.load_bag_specs_for_splash()
