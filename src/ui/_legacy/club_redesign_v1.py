@@ -272,9 +272,13 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
         theme.WARN if state in ("estimated", "direction") else theme.TEXT_3)
 
     cap_y = q4_top + int(16 * fs)
-    c.create_text(gut_l3, cap_y, text="IMPACT LOCATION",
-                  fill=theme.TEXT_3, font=cap_f, anchor="w")
-    chip_x = gut_l3 + int(118 * fs)
+    cap_id = c.create_text(gut_l3, cap_y, text="IMPACT LOCATION",
+                           fill=theme.TEXT_3, font=cap_f, anchor="w")
+    # Measure the caption instead of assuming its width. A fixed 118px offset
+    # overlaps "IMPACT LOCATION" as soon as the font or scale changes -- which
+    # is exactly the trap production documents at the same spot.
+    cap_bb = c.bbox(cap_id)
+    chip_x = (cap_bb[2] + int(12 * fs)) if cap_bb else gut_l3 + int(118 * fs)
     c.create_rectangle(chip_x, cap_y - int(8 * fs),
                        chip_x + int((62 if state != "direction" else 116) * fs),
                        cap_y + int(9 * fs), fill=theme.SURFACE_2, outline="")

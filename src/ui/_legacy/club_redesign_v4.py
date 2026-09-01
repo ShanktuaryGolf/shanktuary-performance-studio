@@ -7,6 +7,8 @@ on the Shot page's Strike panel. Unknown impact still shows no marker.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import club_redesign_v1 as v1
 import club_redesign_v2 as v2
 import club_redesign_v3 as v3
@@ -18,6 +20,30 @@ import shanktuary_performance_studio as studio
 
 def draw_top_metric_toolbar(app, *args, **kwargs):
     return v3.draw_top_metric_toolbar(app, *args, **kwargs)
+
+
+@contextmanager
+def _without_production_clubface(app):
+    """Stop production drawing its Q4 clubface for one render.
+
+    The redesign previously painted an opaque rectangle over production's face
+    and drew its own on top. That cover could never be right: sized to hide the
+    whole face it erased the panel header and the "Nova measures ball flight"
+    disclaimer, and trimmed to spare them it left a sliver of the old clubhead
+    showing. Suppressing the asset is exact -- there is nothing to cover.
+    """
+    original = app.get_scaled_club_asset
+
+    def guarded(path, size, *a, **kw):
+        if path == studio.FACE_PATH:
+            return None
+        return original(path, size, *a, **kw)
+
+    app.get_scaled_club_asset = guarded
+    try:
+        yield
+    finally:
+        app.get_scaled_club_asset = original
 
 
 def _redraw_impact_face(app, *args, **kwargs):
@@ -40,35 +66,62 @@ def _redraw_impact_face(app, *args, **kwargs):
     mid_y = top_bar_h + quad_h
     scale = max(0.85, min(2.5, min(quad_w / 380.0, quad_h / 230.0)))
 
-    q4_cx = mid_x + quad_w / 2
     q4_cy = mid_y + quad_h / 2
-    face_h = int(126 * scale)
-    face_cx = q4_cx + int(32 * scale)
-    face_cy = q4_cy + int(2 * scale)
 
     state, _hx, _vy = v1._impact_state(app)
     mirror = bool(getattr(app, "is_left_handed", False))
-    face_img = app.get_scaled_club_asset(studio.FACE_PATH, face_h, mirror=mirror)
 
-    # Cover the old Q4 clubface + dashed/legacy marker precisely enough to avoid
-    # disturbing the Vertical/Horizontal copy on the left side of the quadrant.
+    # Budget BOTH axes. Horizontally the face must clear the readout column;
+    # vertically it must sit between the readouts and the footer disclaimer,
+    # which spans the full quadrant width. Production sizes from quadrant
+    # height alone, which is why the graphic clipped "FLUSH (EST)" and sat on
+    # top of the "Nova measures ball flight" line.
+    readout_right = mid_x + int(quad_w * 0.42)
+    gutter = max(12, int(10 * scale))
+    quad_right = offset_x + 2 * quad_w
+    max_face_w = max(120, quad_right - readout_right - gutter * 2)
+    # Footer sits ~55px above the quadrant bottom; keep clear of it.
+    footer_top = mid_y + quad_h - int(58 * scale / 1.7)
+    max_face_h = max(70, footer_top - (mid_y + int(24 * scale)) - gutter)
+
+    face_h = int(126 * scale)
+    face_img = app.get_scaled_club_asset(studio.FACE_PATH, face_h, mirror=mirror)
     if face_img:
         try:
-            fw, fh = face_img.width(), face_img.height()
+            shrink = min(
+                1.0,
+                max_face_w / max(1, face_img.width()),
+                max_face_h / max(1, face_img.height()),
+            )
+            if shrink < 1.0:
+                face_h = max(70, int(face_h * shrink))
+                face_img = app.get_scaled_club_asset(
+                    studio.FACE_PATH, face_h, mirror=mirror
+                )
         except Exception:
-            fw, fh = int(face_h * 2.25), face_h
-    else:
-        fw, fh = int(face_h * 2.25), face_h
+            pass
 
-    pad = max(8, int(12 * scale))
-    app.canvas.create_rectangle(
-        face_cx - fw / 2 - pad,
-        face_cy - fh / 2 - pad,
-        face_cx + fw / 2 + pad,
-        face_cy + fh / 2 + pad,
-        fill=v2.CLUB_BG,
-        outline="",
-    )
+    if face_img:
+        try:
+            fw = face_img.width()
+        except Exception:
+            fw = int(face_h * 2.25)
+    else:
+        fw = int(face_h * 2.25)
+
+    # Centre the face in the space right of the readout column, then clamp so
+    # it cannot spill past the quadrant's right edge.
+    face_cx = readout_right + gutter + fw / 2
+    face_cx = min(face_cx, quad_right - gutter - fw / 2)
+    face_cy = q4_cy + int(2 * scale)
+
+    # No cover rectangle. The redesign used to hide production's face behind an
+    # opaque rect and draw over it, which could never be sized correctly: big
+    # enough to hide the face, it erased the panel header and the "Nova
+    # measures ball flight, not face contact" disclaimer; trimmed to spare
+    # them, it left a sliver of the old clubhead showing. Production's face
+    # asset is suppressed for this render instead -- see
+    # _without_production_clubface -- so there is nothing to cover.
 
     with v2._club_theme(accent_text=v2.TEAL_TEXT):
         if state == "unknown":
@@ -82,6 +135,7 @@ def _redraw_impact_face(app, *args, **kwargs):
 
 
 def draw_4_quadrant_studio(app, production_draw, *args, **kwargs):
-    result = v3.draw_4_quadrant_studio(app, production_draw, *args, **kwargs)
+    with _without_production_clubface(app):
+        result = v3.draw_4_quadrant_studio(app, production_draw, *args, **kwargs)
     _redraw_impact_face(app, *args, **kwargs)
     return result
