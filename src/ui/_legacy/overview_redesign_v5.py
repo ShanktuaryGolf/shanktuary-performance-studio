@@ -15,6 +15,7 @@ from __future__ import annotations
 import statistics
 
 import overview_redesign_v4 as v4
+
 import theme
 
 BLUE = v4.BLUE

@@ -117,7 +117,6 @@ def paint_sidebar(app, w, h):
     c = app.canvas
     x0 = theme.RAIL_W
     x1 = app.sidebar_width
-    width = x1 - x0
 
     # Cover the production sidebar after it has registered its controls. Then
     # redraw a calmer branded shell while keeping those interaction hooks.

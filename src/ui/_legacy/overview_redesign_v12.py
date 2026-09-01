@@ -2,10 +2,11 @@
 
 import math
 
-import shanktuary_performance_studio as studio
 import overview_redesign_v7 as v7
 import overview_redesign_v10 as v10
 import overview_redesign_v11 as v11
+
+import shanktuary_performance_studio as studio
 import theme
 
 BLUE_LINE = v7.BLUE_LINE

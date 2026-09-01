@@ -9,7 +9,6 @@ import math
 
 import theme
 
-
 BLUE = theme.ACCENT_LINE
 BLUE_TEXT = theme.ACCENT_TEXT
 ORANGE = theme.WARN

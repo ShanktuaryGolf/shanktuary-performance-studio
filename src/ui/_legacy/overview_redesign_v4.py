@@ -13,9 +13,9 @@ from __future__ import annotations
 import math
 import statistics
 
+import overview_redesign_v2 as v2
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
-import overview_redesign_v2 as v2
 import theme
 
 BLUE = getattr(theme, "ACCENT", "#1E6CFF")

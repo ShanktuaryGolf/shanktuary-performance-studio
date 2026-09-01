@@ -14,6 +14,7 @@ import shell_redesign_v7 as v7
 import shell_redesign_v8 as v8
 import shell_redesign_v10 as v10
 import shell_redesign_v11 as v11
+
 import theme
 
 NAV_RAIL_W = 64

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import statistics
 
-from PIL import Image, ImageDraw, ImageOps, ImageTk
-
 import overview_redesign_v4 as v4
 import overview_redesign_v5 as v5
+from PIL import Image, ImageDraw, ImageOps, ImageTk
+
 import theme
 
 BLUE = v4.BLUE

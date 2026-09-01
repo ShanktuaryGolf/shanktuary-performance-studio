@@ -4,6 +4,7 @@ import statistics
 
 import overview_redesign_v7 as v7
 import overview_redesign_v8 as v8
+
 import theme
 
 BLUE_LINE = v7.BLUE_LINE

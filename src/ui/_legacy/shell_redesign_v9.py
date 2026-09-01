@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 import random
 
-from PIL import Image, ImageDraw, ImageTk
-
+import shell_redesign_v4 as v4
 import shell_redesign_v7 as v7
 import shell_redesign_v8 as v8
-import shell_redesign_v4 as v4
+from PIL import Image, ImageDraw, ImageTk
+
 import theme
 
 BLUE = v8.BLUE

@@ -7,10 +7,10 @@ assets so the header and packaged app use the exact brand artwork.
 
 from __future__ import annotations
 
-from PIL import Image, ImageTk
-
 import shell_redesign_v9 as v9
 import shell_redesign_v10 as v10
+from PIL import Image, ImageTk
+
 import theme
 from src.ui.asset_paths import asset_path
 

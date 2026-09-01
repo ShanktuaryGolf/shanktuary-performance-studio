@@ -1,5 +1,5 @@
-from src.ui.desktop import ShanktuaryDesktopApp, _aim_corrected_display_shots
 import shanktuary_performance_studio as production
+from src.ui.desktop import ShanktuaryDesktopApp, _aim_corrected_display_shots
 
 
 def test_desktop_app_is_visual_subclass_of_production_app():

@@ -12,9 +12,9 @@ iterative renderers are progressively consolidated.
 
 from __future__ import annotations
 
+import sys
 from contextlib import contextmanager
 from pathlib import Path
-import sys
 
 import shanktuary_performance_studio as studio
 import theme

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import math
 
-from PIL import Image, ImageDraw, ImageTk
-
 import shell_redesign_v9 as v9
 import shell_redesign_v11 as v11
 import shell_redesign_v14 as v14
+from PIL import Image, ImageDraw, ImageTk
+
 import theme
 
 NAV_RAIL_W = v14.NAV_RAIL_W
@@ -149,7 +149,6 @@ def _gold_wordmark(app, target_h=31):
             min_y = min(c[1] for c in meaningful)
             max_y = max(c[3] for c in meaningful)
             span_w = max(1, max_x - min_x)
-            span_h = max(1, max_y - min_y)
 
             trailing = []
             for c in meaningful:

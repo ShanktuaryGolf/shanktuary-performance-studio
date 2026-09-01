@@ -12,7 +12,6 @@ hierarchy/credibility changes remain untouched.
 
 import club_redesign_v2 as v2
 
-
 # Keep this exactly aligned with the cleanup/redraw background used by v2/v1.
 CLUB_BG = v2.CLUB_BG
 

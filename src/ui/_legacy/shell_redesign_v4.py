@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import shell_redesign as v3
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
-import shell_redesign as v3
 import theme
 
 BLUE = getattr(theme, "ACCENT", "#1E6CFF")

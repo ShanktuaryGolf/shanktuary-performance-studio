@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 import club_redesign_v1 as v1
 import overview_redesign_v14 as shot_v14
+
 import theme
 
 GOLD = shot_v14.GOLD

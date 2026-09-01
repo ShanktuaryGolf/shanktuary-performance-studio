@@ -5,11 +5,11 @@ remain unchanged. This pass makes Session / Practice / Tools read as true
 sections rather than small captions floating between nav items.
 """
 
+import shell_redesign_v7 as v7
 import shell_redesign_v10 as v10
 import shell_redesign_v11 as v11
-import shell_redesign_v7 as v7
-import theme
 
+import theme
 
 # The nav itself remains a compact 64px rail. When Recent Shots is collapsed,
 # the design launcher reserves a separate gutter immediately to its right so

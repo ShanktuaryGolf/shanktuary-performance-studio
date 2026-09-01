@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shell_redesign_v4 as v4
 import shell_redesign_v7 as v7
+
 import theme
 
 BLUE = v7.BLUE

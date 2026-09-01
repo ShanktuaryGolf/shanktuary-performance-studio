@@ -10,11 +10,11 @@ from __future__ import annotations
 import math
 import random
 
-from PIL import Image, ImageDraw, ImageTk
-
 import shell_redesign_v9 as v9
 import shell_redesign_v11 as v11
 import shell_redesign_v14 as v14
+from PIL import Image, ImageDraw, ImageTk
+
 import theme
 
 NAV_RAIL_W = v14.NAV_RAIL_W

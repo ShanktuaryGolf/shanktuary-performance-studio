@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 
 import overview_redesign_v2 as v2
+
 import theme
 
 BLUE = getattr(theme, "ACCENT", "#1E6CFF")

@@ -6,9 +6,9 @@ import math
 import random
 import statistics
 
+import overview_redesign_v7 as v7
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageTk
 
-import overview_redesign_v7 as v7
 import theme
 
 BLUE = v7.BLUE

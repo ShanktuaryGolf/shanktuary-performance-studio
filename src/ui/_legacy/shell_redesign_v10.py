@@ -10,6 +10,7 @@ import math
 import shell_redesign as icons
 import shell_redesign_v7 as v7
 import shell_redesign_v9 as v9
+
 import theme
 
 BLUE = v9.BLUE

@@ -19,6 +19,7 @@ import overview_redesign_v10 as v10
 import overview_redesign_v11 as v11
 import overview_redesign_v12 as v12
 import overview_redesign_v14 as v14
+
 import theme
 
 GOLD = v14.GOLD
@@ -94,7 +95,7 @@ def _draw_dispersion(app, x0, y0, x1, y1, shots):
     club = (app.current_shot or {}).get("club") or app.current_club
     _section_title(c, x0, y0, "Dispersion", f"{club} · carry landing pattern")
 
-    points = [(v7._values(s), s) for s in shots]
+    points = [(v7._values(s, app), s) for s in shots]
     points = [(vv, ss) for vv, ss in points if vv["carry"] > 0]
     if not points:
         return
@@ -181,7 +182,7 @@ def _draw_dispersion(app, x0, y0, x1, y1, shots):
 def _draw_session_bottom(app, x0, y0, x1, y1, shots):
     """Accepted Session layout with stronger titles and alternating trend colors."""
     c = app.canvas
-    vals = [v7._values(s) for s in shots]
+    vals = [v7._values(s, app) for s in shots]
     if not vals:
         return
 

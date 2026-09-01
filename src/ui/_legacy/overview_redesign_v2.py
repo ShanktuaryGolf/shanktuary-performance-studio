@@ -10,6 +10,7 @@ import math
 import statistics
 
 import overview_redesign as v1
+
 import theme
 
 GOOD = getattr(theme, "GOOD", "#39A879")

@@ -8,10 +8,8 @@ range-green material as the rough edges.
 
 from __future__ import annotations
 
-from PIL import Image, ImageDraw, ImageOps, ImageTk
-
 import range_redesign_v2 as v2
-
+from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 TOP_GREEN = "#081A15"
 BOTTOM_GREEN = v2.GROUND

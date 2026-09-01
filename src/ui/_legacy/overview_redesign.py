@@ -19,7 +19,37 @@ BLUE_LINE = getattr(theme, "ACCENT_LINE", "#40A3FF")
 BLUE_TEXT = getattr(theme, "ACCENT_TEXT", "#78BAFF")
 
 
-def _values(shot):
+def _handed(val, default=0.0, app=None):
+    """Resolve an OGC field that may be a scalar or a right/left handed dict.
+
+    Six fields in the Nova payload are dicts keyed right_handed/left_handed:
+    club_path_degrees, club_face_to_path_degrees, club_face_to_target_degrees,
+    shot_name, shot_rank, shot_color_rgb. Calling float() or str() on one
+    raises TypeError or paints the raw dict.
+
+    ``app`` is optional because these renderers are called from module-level
+    helpers that do not carry it. With an app, defer to the production
+    ``resolve_handed`` so a left-handed player sees their own values; without
+    one, fall back to right-handed rather than crashing.
+    """
+    if app is not None:
+        resolver = getattr(app, "resolve_handed", None)
+        if resolver is not None:
+            return resolver(val, default)
+    if isinstance(val, dict):
+        return val.get("right_handed", default)
+    return default if val is None else val
+
+
+def _num(val, default=0.0, app=None):
+    """_handed() coerced to float, tolerating a non-numeric payload."""
+    try:
+        return float(_handed(val, default, app))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _values(shot, app=None):
     ogc = (shot or {}).get("open_golf_coach", {}) or {}
     us = ogc.get("us_customary_units", {}) or {}
     return {
@@ -35,10 +65,10 @@ def _values(shot):
         "offline": float(us.get("offline_distance_yards") or 0.0),
         "descent": float(ogc.get("descent_angle_degrees") or 0.0),
         "hang": float(ogc.get("hang_time_seconds") or 0.0),
-        "path": float(ogc.get("club_path_degrees") or 0.0),
-        "face_path": float(ogc.get("club_face_to_path_degrees") or 0.0),
-        "face_target": float(ogc.get("club_face_to_target_degrees") or 0.0),
-        "shape": str(ogc.get("shot_name") or "Straight"),
+        "path": _num(ogc.get("club_path_degrees"), 0.0, app),
+        "face_path": _num(ogc.get("club_face_to_path_degrees"), 0.0, app),
+        "face_target": _num(ogc.get("club_face_to_target_degrees"), 0.0, app),
+        "shape": str(_handed(ogc.get("shot_name"), "Straight", app) or "Straight"),
     }
 
 
@@ -60,14 +90,14 @@ def _club_shots(app):
     return subset or shots
 
 
-def _shape_consistency(shots, movement):
+def _shape_consistency(shots, movement, app=None):
     def cls(v):
         if v > 1.5:
             return 1
         if v < -1.5:
             return -1
         return 0
-    vals = [_movement(_values(s))[1] for s in shots[-15:] if _values(s)["carry"] > 0]
+    vals = [_movement(_values(s, app))[1] for s in shots[-15:] if _values(s, app)["carry"] > 0]
     if not vals:
         return 0, 0.0
     same = sum(1 for v in vals if cls(v) == cls(movement))
@@ -90,7 +120,7 @@ def _draw_dispersion(app, x0, y0, x1, y1, shots):
     c = app.canvas
     club = (app.current_shot or {}).get("club") or app.current_club
     _panel(app, x0, y0, x1, y1, "DISPERSION", f"{club} · carry landing pattern")
-    points = [(_values(s), s) for s in shots]
+    points = [(_values(s, app), s) for s in shots]
     points = [(v, s) for v, s in points if v["carry"] > 0]
     if not points:
         return
@@ -148,7 +178,7 @@ def _draw_shape(app, x0, y0, x1, y1, v, shots):
     c = app.canvas
     _panel(app, x0, y0, x1, y1, "SHOT SHAPE & MOVEMENT")
     start, move = _movement(v)
-    consistency, move_std = _shape_consistency(shots, move)
+    consistency, move_std = _shape_consistency(shots, move, app)
     c.create_text(x0 + 16, y0 + 42, text=v["shape"], fill=theme.TEXT,
                   font=(theme.ui_font(), 18, "bold"), anchor="nw")
     direction = "Right to left" if move < -1.5 else ("Left to right" if move > 1.5 else "Minimal curve")
@@ -280,7 +310,7 @@ def _draw_bottom(app, x0, y0, x1, y1, shots):
     tx0, tx1 = rx1 + gap, x1
 
     _panel(app, sx0, y0, sx1, y1, "SESSION SUMMARY")
-    vals = [_values(s) for s in shots]
+    vals = [_values(s, app) for s in shots]
     vals = [v for v in vals if v["carry"] > 0]
     if vals:
         avg = lambda key: statistics.mean(v[key] for v in vals)
@@ -310,7 +340,7 @@ def _draw_bottom(app, x0, y0, x1, y1, shots):
         xx += tw * frac
     row_y = y0 + 63
     for shot in recent:
-        v = _values(shot)
+        v = _values(shot, app)
         selected = shot is app.current_shot
         try:
             idx = app.session_shots.index(shot)
@@ -336,14 +366,14 @@ def _draw_bottom(app, x0, y0, x1, y1, shots):
         app.overview_viewall_rect = (bb[0] - 8, bb[1] - 6, bb[2] + 8, bb[3] + 6)
 
     _panel(app, tx0, y0, tx1, y1, "TENDENCIES", f"Last {min(15, len(shots))} shots")
-    series = [_values(s) for s in shots[-15:]]
+    series = [_values(s, app) for s in shots[-15:]]
     starts = [_movement(v)[0] for v in series]
     moves = [_movement(v)[1] for v in series]
     offs = [v["offline"] for v in series]
     carries = [v["carry"] for v in series]
     cons = []
     for i, mv in enumerate(moves):
-        cons.append(_shape_consistency(shots[:max(1, len(shots) - len(series) + i + 1)], mv)[0])
+        cons.append(_shape_consistency(shots[:max(1, len(shots) - len(series) + i + 1)], mv, app)[0])
     rows = [("Start direction", starts, BLUE_LINE), ("Curve movement", moves, GOOD),
             ("Offline", offs, ORANGE), ("Carry", carries, BLUE_TEXT),
             ("Shape consistency", cons, getattr(theme, "GOLD", "#C89A4A"))]
@@ -374,7 +404,7 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
 
     shots_all = list(app.session_shots)
     shots = _club_shots(app)
-    v = _values(app.current_shot)
+    v = _values(app.current_shot, app)
     v.update({"carry": carry, "total": total, "ball": ball_speed, "smash": smash,
               "launch": launch, "spin": spin, "apex": apex, "offline": offline,
               "descent": descent, "hang": hang_time, "path": club_path,
