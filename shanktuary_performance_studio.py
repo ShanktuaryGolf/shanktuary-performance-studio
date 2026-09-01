@@ -49,6 +49,7 @@ from src.analytics.aim import (
     offset_from_shots,
     save_aim_offset,
 )
+from src.gspro import GsproPoller, locate_gspro_database_path, match_gspro_club
 from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
 
 # Configuration & Logging
@@ -305,6 +306,47 @@ def read_ws_frame(r):
 # Live Nova connection status, written by websocket_worker, read by the UI.
 nova_status = {"connected": False, "host": ""}
 
+# Live GSPro poller status, written by gspro_worker, read by the UI.
+gspro_status = {"connected": False, "db_path": "", "last_message": ""}
+
+
+def gspro_worker():
+    """Background thread: poll GSPro.db and feed new range shots into the
+    same shot_queue the Nova WebSocket worker uses (poll_queue() consumes).
+
+    Source selection (SPS_SHOT_SOURCE env var):
+      "nova"   -- default; GSPro polling is disabled entirely.
+      "gspro"  -- poll GSPro.db only; the Nova WebSocket thread still runs
+                  but its shots are ignored, so a host that feeds GSPro via
+                  a launch monitor never double-ingests one physical shot.
+      "both"   -- both sources ingest (only correct when they describe
+                  different shots, e.g. separate bays).
+    """
+    source = os.environ.get("SPS_SHOT_SOURCE", "nova").strip().lower()
+    if source != "gspro":
+        gspro_status["last_message"] = f"GSPro polling disabled (SPS_SHOT_SOURCE={source or 'nova'})"
+        return
+
+    db_path = locate_gspro_database_path()
+    gspro_status["db_path"] = db_path
+
+    def on_shot(payload, meta):
+        # poll_queue() stamps club/timestamp and validates like any Nova shot.
+        shot_queue.put(payload)
+
+    def on_status(message):
+        gspro_status["last_message"] = message
+        if "connected" in message:
+            gspro_status["connected"] = True
+        print(f"[gspro] {message}")
+
+    poller = GsproPoller(on_shot=on_shot, db_path=db_path, on_status=on_status)
+    try:
+        poller.run()
+    finally:
+        gspro_status["connected"] = False
+
+
 def websocket_worker():
     while True:
         s = None
@@ -357,7 +399,14 @@ def websocket_worker():
                     try:
                         msg = json.loads(text)
                         if msg.get("type") == "shot":
-                            shot_queue.put(msg)
+                            # When the GSPro poller is the chosen source, this
+                            # host's Nova feed describes the SAME physical
+                            # shots (the monitor feeds GSPro) — dropping them
+                            # here prevents double ingestion.
+                            if os.environ.get("SPS_SHOT_SOURCE", "nova").strip().lower() == "gspro":
+                                pass
+                            else:
+                                shot_queue.put(msg)
                     except json.JSONDecodeError:
                         pass
         except Exception as e:
@@ -2022,8 +2071,22 @@ class ShanktuaryApp:
         try:
             while True:
                 msg = shot_queue.get_nowait()
-                msg["club"] = self.current_club
-                msg["club_color"] = self.get_club_color(self.current_club)
+                if msg.get("_source") == "gspro":
+                    # GSPro reports its own club string (from ITS bag config,
+                    # e.g. "7i"). Trust it when it matches a real SPS bag
+                    # entry; otherwise fall back to the current selection —
+                    # never invent a phantom club name.
+                    raw_club = (msg.get("_gspro") or {}).get("club")
+                    matched = None
+                    if raw_club:
+                        bag_names = [c.get("name", "") for c in self.bag]
+                        matched = match_gspro_club(raw_club, bag_names)
+                    club_name = matched or self.current_club
+                else:
+                    # Nova doesn't report the club — SPS's selection is truth.
+                    club_name = self.current_club
+                msg["club"] = club_name
+                msg["club_color"] = self.get_club_color(club_name)
                 msg["timestamp"] = datetime.now().strftime("%I:%M %p")
                 self.nova_connected = True
                 self.validate_shot_payload(msg)
@@ -3453,6 +3516,11 @@ class ShanktuaryApp:
         if getattr(self, "_ogc_sync_warned", False):
             return False
         try:
+            # GSPro-sourced shots carry MEASURED club metrics from the launch
+            # monitor (via SimRead), not OGC's derived model — the identity
+            # below is specific to Nova payloads and must not be checked here.
+            if shot.get("_source") == "gspro":
+                return True
             ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
             if not isinstance(ogc, dict):
                 return True
@@ -7981,6 +8049,11 @@ class ShanktuaryApp:
 def main():
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
     t_ws.start()
+
+    # GSPro range-shot poller (no-op unless SPS_SHOT_SOURCE=gspro). Feeds the
+    # same shot_queue as Nova; see gspro_worker for source-selection rules.
+    t_gspro = threading.Thread(target=gspro_worker, daemon=True)
+    t_gspro.start()
 
     # Start OBS Studio Browser Source Overlay Server on port 9321
     obs_server.launch_obs_server_thread()

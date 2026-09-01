@@ -12,6 +12,12 @@ def main():
     # original entry point: Nova worker + local OBS/browser server + Tk UI.
     t_ws = threading.Thread(target=studio.websocket_worker, daemon=True)
     t_ws.start()
+
+    # GSPro range-shot poller (no-op unless SPS_SHOT_SOURCE=gspro). Feeds the
+    # same shot_queue as Nova; see studio.gspro_worker for source-selection.
+    t_gspro = threading.Thread(target=studio.gspro_worker, daemon=True)
+    t_gspro.start()
+
     studio.obs_server.launch_obs_server_thread()
 
     root = studio.tk.Tk()
