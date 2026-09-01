@@ -1,5 +1,6 @@
 name: Build Cross-Platform Standalone Binaries
 
+# Handoff CI validates repository-backed tests before packaging the redesigned app.
 on:
   push:
     branches:
