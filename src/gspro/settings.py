@@ -132,6 +132,7 @@ def load_settings(refresh=False):
         source = _normalise_source(stored.get("source")) or DEFAULT_SOURCE
         db_path = stored.get("db_path") if isinstance(stored.get("db_path"), str) else ""
         onboarded = bool(stored.get("onboarded", False))
+        always_show = bool(stored.get("always_show_splash", False))
 
         env_source = _normalise_source(os.environ.get("SPS_SHOT_SOURCE"))
         source_locked = env_source is not None
@@ -149,11 +150,13 @@ def load_settings(refresh=False):
             "source_locked": source_locked,
             "db_path_locked": db_path_locked,
             "onboarded": onboarded,
+            "always_show_splash": always_show,
         }
         return dict(_cache)
 
 
-def save_settings(source=None, db_path=None, onboarded=None):
+def save_settings(source=None, db_path=None, onboarded=None,
+                  always_show_splash=None):
     """Persist user choices and refresh the cache.
 
     Environment overrides are never written to disk — the stored value keeps
@@ -171,6 +174,8 @@ def save_settings(source=None, db_path=None, onboarded=None):
         stored["db_path"] = os.path.abspath(db_path.strip()) if db_path.strip() else ""
     if onboarded is not None:
         stored["onboarded"] = bool(onboarded)
+    if always_show_splash is not None:
+        stored["always_show_splash"] = bool(always_show_splash)
 
     path = _settings_path()
     if not _write_json(path, stored):

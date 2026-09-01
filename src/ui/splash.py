@@ -67,11 +67,14 @@ class SplashScreen:
         # since that is the non-default half of the pairing.
         self.source = "gspro" if settings["source"] in ("gspro", "both") else "nova"
         self.source_locked = settings["source_locked"]
+        self.always_show = bool(settings.get("always_show_splash", False))
 
         self.result = None
         self._club_menu_open = False
         self._hit_rects = []          # (x1, y1, x2, y2, action, payload)
         self._images = []             # keep PhotoImage refs alive
+        self._alive = True            # False once the window is destroyed
+        self._last_status_state = None
 
         self.win = tk.Toplevel(root)
         self.win.title("Welcome to Shanktuary")
@@ -122,6 +125,11 @@ class SplashScreen:
             pass
 
         self._draw()
+        # Live status while the user reads this screen: Nova connects about
+        # half a second after launch, so a static card would say "searching"
+        # for the entire session.
+        self._last_status_state = (self._nova_state(), self._gspro_state()[0])
+        self.win.after(500, self._poll_status)
 
     # -- helpers ---------------------------------------------------------
     def _rounded(self, x1, y1, x2, y2, r, fill, outline="", width=1):
@@ -199,6 +207,39 @@ class SplashScreen:
         settings = gspro_settings.load_settings(refresh=True)
         path = settings["db_path"] or locate_gspro_database_path()
         return os.path.isfile(path), path
+
+    def _nova_state(self):
+        """(connected, host) for the Nova link, or (False, "") if unknown.
+
+        Imported lazily so the splash stays importable without the studio
+        module (the renderers and tests build it standalone).
+        """
+        try:
+            import shanktuary_performance_studio as studio
+
+            return (bool(studio.nova_status.get("connected")),
+                    str(studio.nova_status.get("host") or ""))
+        except Exception:
+            return False, ""
+
+    def _poll_status(self):
+        """Repaint while the splash is open so status lines go live.
+
+        Nova connects ~0.5s after launch — typically while the user is still
+        reading this screen. Without polling the card would say "searching"
+        for the whole session and the user would think their monitor was
+        broken.
+        """
+        if not self._alive:
+            return
+        try:
+            state = (self._nova_state(), self._gspro_state()[0])
+            if state != self._last_status_state:
+                self._last_status_state = state
+                self._draw()
+            self.win.after(500, self._poll_status)
+        except tk.TclError:
+            self._alive = False
 
     # -- painting --------------------------------------------------------
     def _draw(self):
@@ -320,14 +361,21 @@ class SplashScreen:
             c.create_text((cx1 + cx2) // 2, y + 84, text=blurb, fill=theme.TEXT_3,
                           font=(theme.ui_font(), 9), anchor="center", justify="center")
 
-            # Honest availability line for GSPro: found or not, with no bluffing.
+            # Live availability line — the same honesty for both sources:
+            # say what is actually true right now, never a hopeful default.
             if key == "gspro":
                 if gspro_found:
                     note, col = "database found", theme.ACCENT_TEXT
                 else:
                     note, col = "database not found", theme.WARN
-                c.create_text((cx1 + cx2) // 2, y + card_h - 16, text=note,
-                              fill=col, font=(theme.ui_font(), 8), anchor="center")
+            else:
+                nova_up, nova_host = self._nova_state()
+                if nova_up:
+                    note, col = f"connected · {nova_host}", theme.ACCENT_TEXT
+                else:
+                    note, col = "searching…", theme.TEXT_3
+            c.create_text((cx1 + cx2) // 2, y + card_h - 16, text=note,
+                          fill=col, font=(theme.ui_font(), 8), anchor="center")
 
             if not self.source_locked:
                 self._hit((cx1, y, cx2, y + card_h), "source", key)
@@ -388,6 +436,33 @@ class SplashScreen:
 
         c.create_text((x + right) // 2, y, text="Your data is private and stays on this machine.",
                       fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="n")
+        y += 22
+
+        # "Show this on every launch" — the honest way to keep the setup
+        # screen. Some users want to confirm their monitor is live before
+        # every session; others want to get straight to hitting balls.
+        box = 13
+        label = "Show this screen on every launch"
+        # Centre the checkbox+label as a unit. Measure the text rather than
+        # guessing a pixel offset, which drifts with the resolved UI font.
+        probe = c.create_text(-1000, -1000, text=label,
+                              font=(theme.ui_font(), 8), anchor="w")
+        bbox = c.bbox(probe)
+        c.delete(probe)
+        text_w = (bbox[2] - bbox[0]) if bbox else 170
+        total_w = box + 9 + text_w
+        bx = (x + right) // 2 - total_w // 2
+        by = y
+        self._rounded(bx, by, bx + box, by + box, 3,
+                      fill=theme.ACCENT if self.always_show else theme.SURFACE,
+                      outline=theme.ACCENT_LINE if self.always_show else theme.HAIRLINE)
+        if self.always_show:
+            # Tick, drawn as lines (glyph coverage varies by font).
+            c.create_line(bx + 3, by + 7, bx + 5, by + 10, fill="#0B1410", width=2)
+            c.create_line(bx + 5, by + 10, bx + 10, by + 3, fill="#0B1410", width=2)
+        c.create_text(bx + box + 9, by + box // 2, text=label,
+                      fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
+        self._hit((bx - 4, by - 4, bx + total_w + 4, by + box + 4), "always")
 
         # Club dropdown paints last so it overlays the steps below it.
         if self._club_menu_open:
@@ -453,6 +528,9 @@ class SplashScreen:
                     self._club_menu_open = False
                 elif action == "club_menu":
                     self._club_menu_open = not self._club_menu_open
+                elif action == "always":
+                    self.always_show = not self.always_show
+                    self._club_menu_open = False
                 elif action == "club":
                     self.current_club = payload
                     self._club_menu_open = False
@@ -470,11 +548,13 @@ class SplashScreen:
         self.result = {
             "source": self.source,
             "club": self.current_club,
+            "always_show": self.always_show,
         }
-        if not self.source_locked:
-            gspro_settings.save_settings(source=self.source, onboarded=True)
-        else:
-            gspro_settings.save_settings(onboarded=True)
+        gspro_settings.save_settings(
+            source=None if self.source_locked else self.source,
+            onboarded=True,
+            always_show_splash=self.always_show,
+        )
         self._close()
 
     def _on_close(self):
@@ -482,6 +562,7 @@ class SplashScreen:
         self._close()
 
     def _close(self):
+        self._alive = False          # stop the status poller
         try:
             self.win.grab_release()
         except Exception:
@@ -515,11 +596,13 @@ class SplashScreen:
 
 
 def should_show_splash():
-    """True when the user has not yet completed source onboarding.
+    """True when the setup splash should open on launch.
 
-    ``SPS_SKIP_SPLASH=1`` suppresses it (CI packaging smoke runs, and users
-    who never want it).
+    Shown when the user has not onboarded yet, or when they ticked "Show
+    this screen on every launch" (useful for confirming the launch monitor
+    is live before a session). ``SPS_SKIP_SPLASH=1`` overrides both.
     """
     if os.environ.get("SPS_SKIP_SPLASH", "").strip() in ("1", "true", "yes"):
         return False
-    return not gspro_settings.load_settings(refresh=True)["onboarded"]
+    settings = gspro_settings.load_settings(refresh=True)
+    return (not settings["onboarded"]) or settings.get("always_show_splash", False)

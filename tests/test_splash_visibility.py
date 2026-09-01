@@ -153,6 +153,90 @@ def test_club_subtitle_reports_only_real_bag_data(tk_root):
         sp._close()
 
 
+def test_the_every_launch_toggle_persists_and_controls_the_splash(tk_root):
+    """The "show every launch" checkbox must round-trip and take effect.
+
+    Nova connects ~0.5s AFTER launch, so a user who wants to confirm their
+    monitor is live before a session needs the setup screen every time.
+    """
+    import importlib
+    import json
+
+    from src.gspro import settings as gspro_settings
+    from src.ui import splash as splash_mod
+    from src.ui.splash import SplashScreen
+
+    def click(sp, action):
+        hits = [r for r in sp._hit_rects if r[4] == action]
+        assert hits, f"no hit target for {action!r}"
+        x1, y1, x2, y2, _, _ = hits[0]
+
+        class _Evt:
+            pass
+
+        evt = _Evt()
+        evt.x = (x1 + x2) // 2
+        evt.y = (y1 + y2) // 2
+        sp._on_click(evt)
+
+    sp = SplashScreen(tk_root, clubs=["7 Iron"], current_club="7 Iron")
+    tk_root.update()
+    assert sp.always_show is False, "should default to off"
+    click(sp, "always")
+    assert sp.always_show is True
+    click(sp, "start")
+
+    path = os.environ["SPS_SHOT_SOURCE_FILE"]
+    assert json.loads(open(path).read())["always_show_splash"] is True
+
+    importlib.reload(gspro_settings)
+    importlib.reload(splash_mod)
+    assert splash_mod.should_show_splash() is True, (
+        "ticked, but the splash would not reappear"
+    )
+
+    # Untick -> back to onboarding-only behaviour.
+    sp2 = SplashScreen(tk_root, clubs=["7 Iron"], current_club="7 Iron")
+    tk_root.update()
+    assert sp2.always_show is True, "checkbox state was not remembered"
+    click(sp2, "always")
+    click(sp2, "start")
+
+    importlib.reload(gspro_settings)
+    importlib.reload(splash_mod)
+    assert splash_mod.should_show_splash() is False
+
+
+def test_nova_card_reports_live_connection_state(tk_root):
+    """The Nova card must show real status, not a hopeful default."""
+    import shanktuary_performance_studio as studio
+    from src.ui.splash import SplashScreen
+
+    original = dict(studio.nova_status)
+    try:
+        studio.nova_status.update({"connected": False, "host": ""})
+        sp = SplashScreen(tk_root, clubs=["7 Iron"], current_club="7 Iron")
+        tk_root.update()
+
+        def texts():
+            return [sp.canvas.itemcget(i, "text")
+                    for i in sp.canvas.find_all()
+                    if sp.canvas.type(i) == "text"]
+
+        assert any("searching" in t for t in texts()), "no searching state shown"
+
+        studio.nova_status.update({"connected": True, "host": "10.0.0.5:2920"})
+        sp._poll_status()
+        tk_root.update()
+        assert any("10.0.0.5:2920" in t for t in texts()), (
+            "card did not go live when Nova connected"
+        )
+        sp._close()
+    finally:
+        studio.nova_status.clear()
+        studio.nova_status.update(original)
+
+
 def test_run_does_not_block_when_the_window_cannot_be_shown(tk_root):
     """If the splash truly cannot display, run() must return, not hang."""
     from src.ui.splash import SplashScreen

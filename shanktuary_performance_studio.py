@@ -2242,6 +2242,27 @@ class ShanktuaryApp:
                 self.draw_screen()
         except queue.Empty:
             pass
+
+        # Repaint when hardware connection state changes, not only when a
+        # shot lands. The worker threads update nova_status/gspro_status from
+        # the background, and Nova typically connects ~0.5s AFTER the first
+        # paint — so without this the UI kept showing "disconnected" forever
+        # even though shots would have arrived fine. Cheap: a tuple compare
+        # every 100ms, and draw_screen() only when it actually differs.
+        try:
+            status_now = (
+                nova_status.get("connected", False),
+                nova_status.get("host", ""),
+                gspro_status.get("enabled", False),
+                gspro_status.get("connected", False),
+                gspro_status.get("db_found", False),
+            )
+            if status_now != getattr(self, "_last_conn_status", None):
+                self._last_conn_status = status_now
+                self.draw_screen()
+        except Exception:
+            pass
+
         self.root.after(100, self.poll_queue)
 
     def poll_pressure_traces(self):
