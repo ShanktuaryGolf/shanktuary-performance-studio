@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shell_redesign as _base
 import shell_redesign_v4 as v4
 import shell_redesign_v7 as v7
 
@@ -79,7 +80,7 @@ def paint_sidebar(app, w, h):
         club = str(shot.get("club") or "—")
         carry = float(us.get("carry_distance_yards") or 0.0)
         ball = float(us.get("ball_speed_mph") or 0.0)
-        shape = str(ogc.get("shot_name") or "—")
+        shape = _base._shot_shape(ogc, app) or "—"
         ts = str(shot.get("timestamp") or "—")
 
         # Top line is vertically centred as one unit: number, club, carry + unit.

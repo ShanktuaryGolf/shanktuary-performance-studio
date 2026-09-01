@@ -13,6 +13,23 @@ BLUE_LINE = getattr(theme, "ACCENT_LINE", "#40A3FF")
 BLUE_TEXT = getattr(theme, "ACCENT_TEXT", "#78BAFF")
 
 
+def _shot_shape(ogc, app=None):
+    """Read shot_name, which is a dict keyed right_handed/left_handed.
+
+    str() on that dict paints the whole mapping onto the sidebar. Prefer the
+    production resolver when an app is available so a left-handed player sees
+    their own label; fall back to right_handed otherwise.
+    """
+    val = (ogc or {}).get("shot_name")
+    if app is not None:
+        resolver = getattr(app, "resolve_handed", None)
+        if resolver is not None:
+            return str(resolver(val, "") or "")
+    if isinstance(val, dict):
+        return str(val.get("right_handed", "") or "")
+    return str(val or "")
+
+
 def _mix_hex(a, b, t):
     try:
         aa = tuple(int(a[i:i + 2], 16) for i in (1, 3, 5))
@@ -204,7 +221,7 @@ def paint_sidebar(app, w, h):
         club = str(shot.get("club") or "—")
         carry = float(us.get("carry_distance_yards") or 0.0)
         ball = float(us.get("ball_speed_mph") or 0.0)
-        shape = str(ogc.get("shot_name") or "")
+        shape = _shot_shape(ogc, app)
         ts = str(shot.get("timestamp") or "")
 
         num_col = theme.TEXT if selected else theme.TEXT_3

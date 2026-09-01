@@ -263,6 +263,26 @@ def _draw_segment(c, x0, x1, y0, h, color, round_left=False, round_right=False):
         c.create_oval(x1 - h, y0, x1, y0 + h, fill=color, outline="")
 
 
+def _fit_shot_name(text, max_w, base_size=28, font_name=None):
+    """Largest font size at or below ``base_size`` whose text fits ``max_w``.
+
+    Shrinks rather than clips, so a long shot name stays readable and the
+    metric columns beside it stay where the layout put them.
+    """
+    name = font_name or _ui_font()
+    try:
+        import tkinter.font as tkfont
+    except Exception:
+        return base_size
+    for size in range(int(base_size), 13, -1):
+        try:
+            if tkfont.Font(family=name, size=size, weight="bold").measure(text) <= max_w:
+                return size
+        except Exception:
+            return base_size
+    return 14
+
+
 def _draw_shape_mix(c, x0, y0, x1, shots):
     counts, total = _shape_mix(shots)
     if not total:
@@ -546,8 +566,13 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
                   font=(_ui_font(), 12, "bold"), anchor="nw")
     c.create_text(ix + 78, y0 + 19, text=club, fill=BLUE_TEXT,
                   font=(_ui_font(), 16, "bold"), anchor="nw")
-    c.create_text(ix, y0 + 58, text=(shot_name or "Straight"), fill=SECTION_TEXT,
-                  font=(_ui_font(), 28, "bold"), anchor="nw")
+    # The identity column is width-capped by identity_w, but this label was
+    # drawn at a fixed 28pt with no budget, so a wide name like "Straight Fade"
+    # (306px) ran into the Carry metric. Shrink to fit rather than clip.
+    _shot_label = shot_name or "Straight"
+    c.create_text(ix, y0 + 58, text=_shot_label, fill=SECTION_TEXT,
+                  font=(_ui_font(), _fit_shot_name(_shot_label, identity_w - 40),
+                        "bold"), anchor="nw")
 
     mx0 = x0 + identity_w
     step = (x1 - mx0) / 6

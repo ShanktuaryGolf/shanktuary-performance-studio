@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shell_redesign as _base
 import shell_redesign as v3
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
@@ -205,7 +206,7 @@ def paint_sidebar(app, w, h):
         club = str(shot.get("club") or "—")
         carry = float(us.get("carry_distance_yards") or 0.0)
         ball = float(us.get("ball_speed_mph") or 0.0)
-        shape = str(ogc.get("shot_name") or "—")
+        shape = _base._shot_shape(ogc, app) or "—"
         ts = str(shot.get("timestamp") or "")
 
         # Number is a small circular locator, club and carry are the dominant facts.

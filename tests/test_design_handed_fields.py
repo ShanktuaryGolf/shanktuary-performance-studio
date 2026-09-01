@@ -113,3 +113,94 @@ def test_an_empty_shot_does_not_crash():
 
 def test_a_missing_open_golf_coach_block_does_not_crash():
     assert base._values({"vertical_launch_angle_degrees": 12.0})["path"] == 0.0
+
+
+# --- the same bug class in the shell/sidebar renderers -------------------
+
+def test_no_shell_renderer_stringifies_a_handed_field_directly():
+    """str(ogc.get("shot_name")) paints {'left_handed': ..., 'right_handed': ...}
+    straight onto the sidebar. It did, at (276, 262), over the shot list."""
+    import re
+    bad = []
+    for path in sorted(LEGACY.glob("*.py")):
+        src = path.read_text()
+        for n, line in enumerate(src.splitlines(), 1):
+            if re.search(r'str\(\s*ogc\.get\(\s*["\']shot_(name|rank)["\']', line):
+                bad.append(f"{path.name}:{n}")
+    assert not bad, "handed field stringified without resolving: " + ", ".join(bad)
+
+
+def test_shell_shot_name_helper_resolves_handedness():
+    import shell_redesign as shell
+
+    handed = {"right_handed": "Pull Fade", "left_handed": "Push Draw"}
+    assert shell._shot_shape({"shot_name": handed}) == "Pull Fade"
+    assert shell._shot_shape({"shot_name": handed}, FakeApp(True)) == "Push Draw"
+    assert shell._shot_shape({"shot_name": "Straight"}) == "Straight"
+    assert shell._shot_shape({}) == ""
+
+
+# --- hero band layout ----------------------------------------------------
+
+def test_the_shot_name_is_clamped_to_its_identity_column():
+    """"Straight Fade" at 28pt is wider than the identity column, so it ran
+    into the Carry metric. The renderer must shrink it, never overlap."""
+    tk = pytest.importorskip("tkinter")
+    import overview_redesign_v7 as v7
+
+    assert hasattr(v7, "_fit_shot_name"), "no helper to size the shot name"
+    try:
+        root = tk.Tk()  # tkfont.measure needs a root window
+    except Exception:
+        pytest.skip("no display")
+    try:
+        base = 28
+        assert v7._fit_shot_name("Straight Fade", 240, base) < base
+        assert v7._fit_shot_name("Draw", 240, base) == base
+    finally:
+        root.destroy()
+
+
+def test_no_hero_text_collides_on_the_default_shot_view():
+    """Renders the real app and checks the top band for overlapping text."""
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except Exception:
+        pytest.skip("no display")
+    try:
+        root.geometry("1600x950")
+        from src.ui.desktop import ShanktuaryDesktopApp
+
+        app = ShanktuaryDesktopApp(root)
+        app.view_mode = 9
+        app.draw_screen()
+        root.update_idletasks()
+
+        boxes = []
+        for item in app.canvas.find_all():
+            if app.canvas.type(item) != "text":
+                continue
+            b = app.canvas.bbox(item)
+            if b and 80 < b[1] < 200 and b[0] > 300:
+                boxes.append((b, app.canvas.itemcget(item, "text")))
+
+        # Tk bboxes include a pixel or two of glyph padding, and adjacent
+        # metric columns legitimately sit tight at narrow window widths. Only
+        # a substantial overlap in BOTH axes is a real collision -- the bug
+        # this guards against was a 306px label running ~90px into the next
+        # column.
+        clashes = []
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                a, _ = boxes[i]
+                d, _ = boxes[j]
+                ox = min(a[2], d[2]) - max(a[0], d[0])
+                oy = min(a[3], d[3]) - max(a[1], d[1])
+                if ox > 3 and oy > 3:
+                    clashes.append(
+                        f"{boxes[i][1][:18]!r}/{boxes[j][1][:18]!r} ({ox}x{oy}px)"
+                    )
+        assert not clashes, "overlapping hero text: " + ", ".join(clashes)
+    finally:
+        root.destroy()
