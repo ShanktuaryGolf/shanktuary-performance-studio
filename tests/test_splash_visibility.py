@@ -77,6 +77,26 @@ def test_splash_is_visible_even_when_the_root_is_withdrawn(tk_root):
         sp._close()
 
 
+def test_the_empty_root_stays_hidden_behind_the_splash(tk_root):
+    """The grey root window must not cover the splash.
+
+    Second bug in this area: hiding the root made the splash invisible, so
+    the root was left mapped — which put a blank grey window on top of the
+    splash instead. The working combination is a WITHDRAWN root plus an
+    explicit deiconify() on the splash, which maps it regardless of the
+    master's state. This asserts both halves at once.
+    """
+    tk_root.withdraw()
+    sp = _splash(tk_root)
+    try:
+        assert sp.win.winfo_ismapped(), "splash must be visible under a withdrawn root"
+        assert not tk_root.winfo_viewable(), (
+            "the empty root window is showing and will cover the splash"
+        )
+    finally:
+        sp._close()
+
+
 def test_run_does_not_block_when_the_window_cannot_be_shown(tk_root):
     """If the splash truly cannot display, run() must return, not hang."""
     from src.ui.splash import SplashScreen
