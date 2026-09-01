@@ -38,15 +38,19 @@ def main():
 
     # First run: ask which shot source this user actually owns before the
     # main window appears. GSPro users never touch an environment variable.
+    #
+    # The root is deliberately NOT withdrawn here. A transient child of a
+    # withdrawn root never gets mapped by the window manager, so the splash
+    # would be invisible while still blocking on wait_window — the app looks
+    # like it failed to start. Instead the root stays mapped but empty until
+    # the splash closes.
     splash_choice = None
     if should_show_splash():
-        root.withdraw()
         try:
             splash_choice = SplashScreen(root, clubs=list(studio.DEFAULT_CLUBS)).run()
         except Exception as exc:
             # A splash failure must never block the app the user paid for.
             print(f"[splash] skipped: {exc}")
-        root.deiconify()
         # Wake the supervisor so a GSPro choice starts polling immediately.
         studio.gspro_reconfigure.set()
 

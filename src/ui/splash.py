@@ -91,8 +91,32 @@ class SplashScreen:
         self.canvas.bind("<Button-1>", self._on_click)
 
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.win.transient(root)
-        self.win.grab_set()
+
+        # Only make the splash transient for a master that is actually on
+        # screen. A transient child of a WITHDRAWN root is never mapped by
+        # the window manager: the window is 1x1 and invisible, yet grab_set
+        # and wait_window still succeed, so the app hangs on a splash nobody
+        # can see. Reopened from the Tools menu the main window IS visible,
+        # and transient is the correct behaviour there.
+        try:
+            master_visible = bool(root.winfo_viewable())
+        except Exception:
+            master_visible = False
+        if master_visible:
+            self.win.transient(root)
+
+        self.win.update_idletasks()
+        self.win.deiconify()
+        self.win.lift()
+        self.win.focus_force()
+
+        # A grab on an unmapped window locks the app out of its own UI, so
+        # only take one once the window is really on screen.
+        try:
+            if self.win.winfo_viewable():
+                self.win.grab_set()
+        except tk.TclError:
+            pass
 
         self._draw()
 
@@ -189,9 +213,9 @@ class SplashScreen:
         except Exception:
             pass
 
-        c.create_text(text_x, y + 14, text="SHANKTUARY", fill=theme.ACCENT_TEXT,
+        c.create_text(text_x, y + 8, text="SHANKTUARY", fill=theme.ACCENT_TEXT,
                       font=(theme.ui_font(), 19, "bold"), anchor="nw")
-        c.create_text(text_x + 2, y + 42, text="P E R F O R M A N C E   S T U D I O",
+        c.create_text(text_x + 2, y + 40, text="P E R F O R M A N C E   S T U D I O",
                       fill=theme.TEXT_3, font=(theme.ui_font(), 7), anchor="nw")
         y += 108
 
@@ -410,7 +434,24 @@ class SplashScreen:
             pass
 
     def run(self):
-        """Block until the splash closes; returns the chosen settings or None."""
+        """Block until the splash closes; returns the chosen settings or None.
+
+        If the window never became viewable (no WM, odd remote display), do
+        not wait on it — a hidden modal that blocks forever looks exactly
+        like the app failing to launch. Fall through with defaults instead.
+        """
+        try:
+            if not self.win.winfo_exists():
+                return None
+            if not self.win.winfo_viewable():
+                self.win.update()
+            if not self.win.winfo_viewable():
+                print("[splash] window could not be displayed; continuing without it")
+                self._close()
+                return None
+        except tk.TclError:
+            return None
+
         self.root.wait_window(self.win)
         return self.result
 
