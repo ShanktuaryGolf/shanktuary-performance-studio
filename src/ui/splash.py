@@ -54,10 +54,13 @@ class SplashScreen:
 
     W, H = 1100, 620
 
-    def __init__(self, root, clubs=None, current_club="7 Iron"):
+    def __init__(self, root, clubs=None, current_club="7 Iron", club_specs=None):
         self.root = root
         self.clubs = list(clubs or ["Driver", "5 Iron", "7 Iron", "9 Iron", "PW"])
         self.current_club = current_club if current_club in self.clubs else self.clubs[0]
+        # Optional {club_name: {"brand":..., "model":..., "loft_deg":...}} so
+        # the club row can show the user's real gear instead of a placeholder.
+        self.club_specs = club_specs or {}
 
         settings = gspro_settings.load_settings(refresh=True)
         # Pre-select what the user already chose; "both" highlights GSPro
@@ -168,6 +171,29 @@ class SplashScreen:
     def _hit(self, rect, action, payload=None):
         self._hit_rects.append((rect[0], rect[1], rect[2], rect[3], action, payload))
 
+    def _club_subtitle(self, club):
+        """Brand/model/loft line for a club, or "" when unknown.
+
+        Only reports what the bag actually stores — an unspecced club shows
+        nothing rather than an invented model name.
+        """
+        spec = self.club_specs.get(club) or {}
+        if not isinstance(spec, dict):
+            return ""
+        parts = []
+        gear = " ".join(
+            str(spec.get(k, "")).strip() for k in ("brand", "model")
+        ).strip()
+        if gear:
+            parts.append(gear)
+        try:
+            loft = float(spec.get("loft_deg") or 0)
+            if loft > 0:
+                parts.append(f"{loft:g}°")
+        except (TypeError, ValueError):
+            pass
+        return "  ·  ".join(parts)
+
     def _gspro_state(self):
         """(found, path) for the GSPro database, honestly reported."""
         settings = gspro_settings.load_settings(refresh=True)
@@ -255,21 +281,14 @@ class SplashScreen:
         right = self.w - 44
         y = 40
 
-        # Progress dots — three steps, all visible on one screen.
-        c.create_text((x + right) // 2, y, text="S T E P   1   O F   3",
+        # Caption only — no "STEP 1 OF 3" counter or progress dots.
+        # All three numbered steps live on THIS screen, so a wizard counter
+        # promised two more screens that never existed. The numbered circles
+        # below carry the sequence on their own. (The approved mockup shows
+        # both, which is an inconsistency in the mockup itself.)
+        c.create_text((x + right) // 2, y + 8, text="S E S S I O N   S E T U P",
                       fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="center")
-        y += 20
-        dot_cx = (x + right) // 2
-        for i, dx in enumerate((-60, 0, 60)):
-            fill = theme.ACCENT_LINE if i == 0 else theme.HAIRLINE
-            c.create_oval(dot_cx + dx - 4, y - 4, dot_cx + dx + 4, y + 4,
-                          fill=fill, outline="")
-        c.create_line(dot_cx - 56, y, dot_cx + 56, y, fill=theme.HAIRLINE)
-        for i, dx in enumerate((-60, 0, 60)):
-            fill = theme.ACCENT_LINE if i == 0 else theme.HAIRLINE
-            c.create_oval(dot_cx + dx - 4, y - 4, dot_cx + dx + 4, y + 4,
-                          fill=fill, outline="")
-        y += 30
+        y += 34
 
         # ---- Step 1: shot source -------------------------------------
         y = self._step_label(x, y, 1, "C O N N E C T   T O")
@@ -333,8 +352,18 @@ class SplashScreen:
         y = self._step_label(x, y, 2, "S E L E C T   C L U B")
         sel_h = 58
         self._rounded(x, y, right, y + sel_h, 10, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        c.create_text(x + 20, y + sel_h // 2, text=self.current_club.upper(),
-                      fill=theme.TEXT, font=(theme.ui_font(), 14, "bold"), anchor="w")
+        # Real gear from the user's bag when we have it (the mockup's
+        # "Mizuno JPX Forged" subtitle). Absent specs simply show no
+        # subtitle — never a made-up club model.
+        subtitle = self._club_subtitle(self.current_club)
+        if subtitle:
+            c.create_text(x + 20, y + 18, text=self.current_club.upper(),
+                          fill=theme.TEXT, font=(theme.ui_font(), 13, "bold"), anchor="w")
+            c.create_text(x + 20, y + 39, text=subtitle, fill=theme.TEXT_3,
+                          font=(theme.ui_font(), 8), anchor="w")
+        else:
+            c.create_text(x + 20, y + sel_h // 2, text=self.current_club.upper(),
+                          fill=theme.TEXT, font=(theme.ui_font(), 14, "bold"), anchor="w")
         # Chevron drawn as a polygon — the unicode arrow glyph is missing
         # from several Linux UI fonts and renders as a blank box.
         chx, chy = right - 26, y + sel_h // 2
@@ -365,25 +394,54 @@ class SplashScreen:
             self._draw_club_menu(x, club_row_y + sel_h + 4, right)
 
     def _draw_club_menu(self, x, y, right):
+        """Club list, laid out so EVERY club is reachable.
+
+        A single 9-item column silently hid the wedges and putter, and was
+        tall enough to flip upward over the club row. Two columns fit a full
+        15-club bag below the row with nothing truncated.
+        """
         c = self.canvas
-        row_h = 30
-        visible = self.clubs[:9]
-        menu_h = row_h * len(visible) + 8
-        # Flip upward if the list would run off the bottom edge.
+        clubs = list(self.clubs)
+        if not clubs:
+            return
+
+        row_h = 28
+        cols = 2 if len(clubs) > 8 else 1
+        rows = -(-len(clubs) // cols)          # ceil
+        menu_h = row_h * rows + 8
+        col_w = (right - x) // cols
+
+        # Keep the menu on screen; only flip up if it genuinely cannot fit.
         if y + menu_h > self.h - 8:
             y = max(8, self.h - 8 - menu_h)
-        self._rounded(x, y, right, y + menu_h, 8, fill=theme.SURFACE_2 if hasattr(theme, "SURFACE_2") else theme.SURFACE,
+
+        self._rounded(x, y, right, y + menu_h, 8,
+                      fill=getattr(theme, "SURFACE_2", theme.SURFACE),
                       outline=theme.HAIRLINE)
-        cy = y + 4
-        for club in visible:
+
+        for i, club in enumerate(clubs):
+            col = i // rows
+            row = i % rows
+            cx1 = x + col * col_w
+            cx2 = cx1 + col_w
+            cy = y + 4 + row * row_h
+
             active = club == self.current_club
             if active:
-                self._rounded(x + 4, cy, right - 4, cy + row_h, 6, fill=theme.ACCENT_DEEP)
-            c.create_text(x + 18, cy + row_h // 2, text=club,
+                self._rounded(cx1 + 4, cy, cx2 - 4, cy + row_h, 6,
+                              fill=theme.ACCENT_DEEP)
+            c.create_text(cx1 + 14, cy + row_h // 2, text=club,
                           fill=theme.ACCENT_TEXT if active else theme.TEXT_2,
-                          font=(theme.ui_font(), 10), anchor="w")
-            self._hit((x, cy, right, cy + row_h), "club", club)
-            cy += row_h
+                          font=(theme.ui_font(), 9), anchor="w")
+            sub = self._club_subtitle(club)
+            if sub:
+                # Loft alone in two-column mode — the full brand/model line
+                # does not fit in half the width without colliding.
+                short = sub.split("·")[-1].strip() if cols > 1 else sub
+                c.create_text(cx2 - 12, cy + row_h // 2, text=short,
+                              fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                              anchor="e")
+            self._hit((cx1, cy, cx2, cy + row_h), "club", club)
 
     # -- interaction -----------------------------------------------------
     def _on_click(self, event):

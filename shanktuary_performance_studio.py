@@ -416,6 +416,27 @@ def gspro_worker():
         gspro_reconfigure.clear()
 
 
+def load_bag_specs_for_splash():
+    """Read {club_name: spec} from the saved session file.
+
+    The startup splash runs before ShanktuaryApp exists, so it cannot use
+    get_bag_club(). Returns {} on any problem — the splash then shows plain
+    club names rather than failing or inventing gear.
+    """
+    try:
+        with open(SESSION_LOG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    specs = {}
+    for club in data.get("bag", []) or []:
+        if isinstance(club, dict) and club.get("name"):
+            specs[str(club["name"])] = club
+    return specs
+
+
 def websocket_worker():
     while True:
         s = None
@@ -898,8 +919,14 @@ class ShanktuaryApp:
             return
 
         try:
+            specs = {}
+            for name in self.clubs:
+                club = self.get_bag_club(name)
+                if isinstance(club, dict):
+                    specs[name] = club
             choice = SplashScreen(
-                self.root, clubs=list(self.clubs), current_club=self.current_club
+                self.root, clubs=list(self.clubs), current_club=self.current_club,
+                club_specs=specs,
             ).run()
         except Exception as exc:
             print(f"[splash] failed to open: {exc}")

@@ -97,6 +97,62 @@ def test_the_empty_root_stays_hidden_behind_the_splash(tk_root):
         sp._close()
 
 
+def test_every_club_in_a_full_bag_is_reachable_and_selectable(tk_root):
+    """A 15-club bag must be fully clickable.
+
+    The dropdown originally rendered self.clubs[:9], silently hiding the
+    wedges and putter — a user simply could not pick their SW. Two columns
+    fit the whole bag; this walks every entry and checks the click maps to
+    the right club (a column-index bug would select the wrong one).
+    """
+    from src.ui.splash import SplashScreen
+
+    bag = ["Driver", "3 Wood", "5 Wood", "3 Hybrid", "4 Iron", "5 Iron",
+           "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "GW", "SW", "LW",
+           "Putter"]
+    sp = SplashScreen(tk_root, clubs=bag, current_club="7 Iron")
+    try:
+        for target in bag:
+            sp._club_menu_open = True
+            sp._draw()
+            hits = [r for r in sp._hit_rects if r[4] == "club" and r[5] == target]
+            assert hits, f"{target} has no hit target — it is unreachable"
+
+            x1, y1, x2, y2, _, _ = hits[0]
+
+            class _Evt:
+                pass
+
+            evt = _Evt()
+            evt.x = (x1 + x2) // 2
+            evt.y = (y1 + y2) // 2
+            sp._on_click(evt)
+            assert sp.current_club == target, (
+                f"clicking {target} selected {sp.current_club}"
+            )
+    finally:
+        sp._close()
+
+
+def test_club_subtitle_reports_only_real_bag_data(tk_root):
+    """Gear text must come from the bag, never be invented."""
+    from src.ui.splash import SplashScreen
+
+    specs = {
+        "7 Iron": {"brand": "Callaway", "model": "Paradym X", "loft_deg": 27.5},
+        "Mystery Club": {},
+    }
+    sp = SplashScreen(tk_root, clubs=["7 Iron", "Mystery Club"],
+                      current_club="7 Iron", club_specs=specs)
+    try:
+        assert sp._club_subtitle("7 Iron") == "Callaway Paradym X  ·  27.5°"
+        # No specs -> no subtitle, rather than a placeholder model name.
+        assert sp._club_subtitle("Mystery Club") == ""
+        assert sp._club_subtitle("Not In Bag") == ""
+    finally:
+        sp._close()
+
+
 def test_run_does_not_block_when_the_window_cannot_be_shown(tk_root):
     """If the splash truly cannot display, run() must return, not hang."""
     from src.ui.splash import SplashScreen

@@ -49,7 +49,11 @@ def main():
     if should_show_splash():
         root.withdraw()
         try:
-            splash_choice = SplashScreen(root, clubs=list(studio.DEFAULT_CLUBS)).run()
+            bag_specs = studio.load_bag_specs_for_splash()
+            clubs = list(bag_specs) or list(studio.DEFAULT_CLUBS)
+            splash_choice = SplashScreen(
+                root, clubs=clubs, club_specs=bag_specs
+            ).run()
         except Exception as exc:
             # A splash failure must never block the app the user paid for.
             print(f"[splash] skipped: {exc}")
