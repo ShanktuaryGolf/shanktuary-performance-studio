@@ -161,6 +161,17 @@ class GsproPoller:
         except Exception:
             pass  # a broken status callback must never kill the poll loop
 
+    def _status_once(self, message):
+        """Emit a status line only when it differs from the last one.
+
+        The idle/enriching branches are reached on every poll; repeating them
+        twice a second forever buries real events in noise.
+        """
+        if message == getattr(self, "_last_status", None):
+            return
+        self._last_status = message
+        self._status(message)
+
     def _read_row(self):
         rows = read_latest(self.db_path, limit=1)
         return rows[0] if rows else None
@@ -188,12 +199,18 @@ class GsproPoller:
         polls_since_status = 0
 
         while not self._stop:
+            # Every path through this loop must pause: without it the poller
+            # spins a CPU core flat out and floods the log with status lines.
+            time.sleep(self.poll_interval_s)
+            if self._stop:
+                break
+
             try:
                 row = self._read_row()
             except Exception as exc:
                 if baseline_row_id is None and polls_since_status % 12 == 0:
                     self._status(f"[gspro] database unavailable ({exc}); retrying")
-                time.sleep(self.poll_interval_s)
+                polls_since_status += 1
                 continue
 
             polls_since_status += 1
@@ -205,11 +222,10 @@ class GsproPoller:
                 continue
 
             if row is None or row["id"] <= baseline_row_id:
-                if polls_since_status % 6 == 0:
-                    self._status(
-                        f"[gspro] waiting for a fresh GSPro range shot "
-                        f"(last row {row['id'] if row else baseline_row_id})"
-                    )
+                self._status_once(
+                    f"[gspro] waiting for a fresh GSPro range shot "
+                    f"(last row {row['id'] if row else baseline_row_id})"
+                )
                 continue
 
             # New row — but it may still be missing the distance fields that
@@ -231,10 +247,9 @@ class GsproPoller:
                 first_seen = pending_since.setdefault(row["id"], now)
                 timed_out = (PENDING_TIMEOUT_S > 0
                              and now - first_seen >= PENDING_TIMEOUT_S)
-                if not timed_out and polls_since_status % 6 == 0:
-                    self._status(f"[gspro] row {row['id']} still enriching "
-                                 f"(waiting for distance fields)")
                 if not timed_out:
+                    self._status_once(f"[gspro] row {row['id']} still enriching "
+                                      f"(waiting for distance fields)")
                     continue
 
             # Complete, or past the pending timeout — emit exactly once.

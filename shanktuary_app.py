@@ -4,7 +4,7 @@
 import threading
 
 import shanktuary_performance_studio as studio
-from src.ui import ShanktuaryDesktopApp
+from src.ui import ShanktuaryDesktopApp, SplashScreen, should_show_splash
 
 
 def main():
@@ -13,8 +13,9 @@ def main():
     t_ws = threading.Thread(target=studio.websocket_worker, daemon=True)
     t_ws.start()
 
-    # GSPro range-shot poller (no-op unless SPS_SHOT_SOURCE=gspro). Feeds the
-    # same shot_queue as Nova; see studio.gspro_worker for source-selection.
+    # GSPro range-shot poller. This is a supervisor: it starts and stops the
+    # poll loop as the user's shot source changes, so choosing GSPro on the
+    # splash takes effect without an app restart.
     t_gspro = threading.Thread(target=studio.gspro_worker, daemon=True)
     t_gspro.start()
 
@@ -35,7 +36,25 @@ def main():
     root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
     root.minsize(1100, 720)
 
+    # First run: ask which shot source this user actually owns before the
+    # main window appears. GSPro users never touch an environment variable.
+    splash_choice = None
+    if should_show_splash():
+        root.withdraw()
+        try:
+            splash_choice = SplashScreen(root, clubs=list(studio.DEFAULT_CLUBS)).run()
+        except Exception as exc:
+            # A splash failure must never block the app the user paid for.
+            print(f"[splash] skipped: {exc}")
+        root.deiconify()
+        # Wake the supervisor so a GSPro choice starts polling immediately.
+        studio.gspro_reconfigure.set()
+
     app = ShanktuaryDesktopApp(root)  # noqa: F841 - Tk callbacks retain it
+    if splash_choice and splash_choice.get("club") in getattr(app, "clubs", []):
+        app.current_club = splash_choice["club"]
+        app.draw_screen()
+
     try:
         root.mainloop()
     except KeyboardInterrupt:

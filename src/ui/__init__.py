@@ -6,5 +6,6 @@ system applied on top of the hardware/data/persistence implementation in
 """
 
 from .desktop import ShanktuaryDesktopApp
+from .splash import SplashScreen, should_show_splash
 
-__all__ = ["ShanktuaryDesktopApp"]
+__all__ = ["ShanktuaryDesktopApp", "SplashScreen", "should_show_splash"]

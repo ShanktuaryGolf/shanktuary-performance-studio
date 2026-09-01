@@ -50,6 +50,7 @@ from src.analytics.aim import (
     save_aim_offset,
 )
 from src.gspro import GsproPoller, locate_gspro_database_path, match_gspro_club
+from src.gspro import settings as gspro_settings
 from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
 
 # Configuration & Logging
@@ -306,45 +307,113 @@ def read_ws_frame(r):
 # Live Nova connection status, written by websocket_worker, read by the UI.
 nova_status = {"connected": False, "host": ""}
 
-# Live GSPro poller status, written by gspro_worker, read by the UI.
-gspro_status = {"connected": False, "db_path": "", "last_message": ""}
+# Live GSPro poller status, written by gspro_worker, read by the UI
+# (draw_tools_menu's HARDWARE rows and the top header status dot).
+gspro_status = {
+    "connected": False,
+    "db_path": "",
+    "last_message": "",
+    "enabled": False,
+    "db_found": False,
+    "shots": 0,
+}
+
+# Set by the UI when the shot source changes, so the supervisor below can
+# start/stop polling without an app restart.
+gspro_reconfigure = threading.Event()
+
+
+def apply_shot_source(source=None, db_path=None, onboarded=None):
+    """Persist a shot-source change and wake the GSPro supervisor.
+
+    The single entry point the UI calls; keeps disk state, the in-process
+    cache, and the running poller consistent.
+    """
+    settings = gspro_settings.save_settings(
+        source=source, db_path=db_path, onboarded=onboarded
+    )
+    gspro_reconfigure.set()
+    return settings
 
 
 def gspro_worker():
-    """Background thread: poll GSPro.db and feed new range shots into the
-    same shot_queue the Nova WebSocket worker uses (poll_queue() consumes).
+    """Supervisor thread: run the GSPro poller whenever the user's shot
+    source includes GSPro, and stop it when it does not.
 
-    Source selection (SPS_SHOT_SOURCE env var):
+    Shots feed the same shot_queue the Nova WebSocket worker uses, so
+    poll_queue() consumes both identically.
+
+    Source selection is persisted user configuration (src/gspro/settings.py),
+    chosen in the UI and overridable with the SPS_SHOT_SOURCE env var:
       "nova"   -- default; GSPro polling is disabled entirely.
       "gspro"  -- poll GSPro.db only; the Nova WebSocket thread still runs
                   but its shots are ignored, so a host that feeds GSPro via
                   a launch monitor never double-ingests one physical shot.
       "both"   -- both sources ingest (only correct when they describe
                   different shots, e.g. separate bays).
-    """
-    source = os.environ.get("SPS_SHOT_SOURCE", "nova").strip().lower()
-    if source != "gspro":
-        gspro_status["last_message"] = f"GSPro polling disabled (SPS_SHOT_SOURCE={source or 'nova'})"
-        return
 
-    db_path = locate_gspro_database_path()
-    gspro_status["db_path"] = db_path
+    Unlike the original env-var-only version this loop never returns: a user
+    who starts in Nova mode and later picks GSPro in the UI gets polling
+    without restarting the app.
+    """
+    poller = None
+    poller_thread = None
 
     def on_shot(payload, meta):
         # poll_queue() stamps club/timestamp and validates like any Nova shot.
+        gspro_status["shots"] = gspro_status.get("shots", 0) + 1
         shot_queue.put(payload)
 
     def on_status(message):
         gspro_status["last_message"] = message
         if "connected" in message:
             gspro_status["connected"] = True
+        elif "unavailable" in message or "stopped" in message:
+            gspro_status["connected"] = False
         print(f"[gspro] {message}")
 
-    poller = GsproPoller(on_shot=on_shot, db_path=db_path, on_status=on_status)
-    try:
-        poller.run()
-    finally:
+    def stop_poller():
+        nonlocal poller, poller_thread
+        if poller is not None:
+            poller.stop()
+            if poller_thread is not None:
+                poller_thread.join(timeout=3.0)
+        poller = None
+        poller_thread = None
         gspro_status["connected"] = False
+
+    while True:
+        enabled = gspro_settings.gspro_enabled()
+        db_path = gspro_settings.effective_db_path() if enabled else ""
+        gspro_status["enabled"] = enabled
+        gspro_status["db_path"] = db_path
+        gspro_status["db_found"] = bool(db_path) and os.path.isfile(db_path)
+
+        running = poller_thread is not None and poller_thread.is_alive()
+        wanted = enabled
+
+        if running and (not wanted or poller.db_path != db_path):
+            # Disabled, or the user pointed us at a different database.
+            stop_poller()
+            running = False
+
+        if wanted and not running:
+            if not gspro_status["db_found"]:
+                gspro_status["last_message"] = (
+                    f"GSPro database not found at {db_path}"
+                )
+            poller = GsproPoller(on_shot=on_shot, db_path=db_path, on_status=on_status)
+            poller_thread = threading.Thread(target=poller.run, daemon=True)
+            poller_thread.start()
+        elif not wanted:
+            source = gspro_settings.effective_source()
+            gspro_status["last_message"] = f"GSPro polling disabled (source={source})"
+
+        # Wake immediately on a UI change, otherwise re-check periodically so
+        # a database that appears later (GSPro installed/launched after SPS)
+        # is picked up on its own.
+        gspro_reconfigure.wait(timeout=5.0)
+        gspro_reconfigure.clear()
 
 
 def websocket_worker():
@@ -403,9 +472,7 @@ def websocket_worker():
                             # host's Nova feed describes the SAME physical
                             # shots (the monitor feeds GSPro) — dropping them
                             # here prevents double ingestion.
-                            if os.environ.get("SPS_SHOT_SOURCE", "nova").strip().lower() == "gspro":
-                                pass
-                            else:
+                            if gspro_settings.nova_enabled():
                                 shot_queue.put(msg)
                     except json.JSONDecodeError:
                         pass
@@ -817,6 +884,35 @@ class ShanktuaryApp:
                 self.current_shot = None
             self.show_session_dropdown = False
             self.draw_screen()
+
+    def open_shot_source_picker(self):
+        """Reopen the splash so the user can change shot source or club.
+
+        Imported lazily: src.ui imports this module, so a module-level import
+        here would be circular.
+        """
+        try:
+            from src.ui.splash import SplashScreen
+        except Exception as exc:
+            print(f"[splash] unavailable: {exc}")
+            return
+
+        try:
+            choice = SplashScreen(
+                self.root, clubs=list(self.clubs), current_club=self.current_club
+            ).run()
+        except Exception as exc:
+            print(f"[splash] failed to open: {exc}")
+            return
+
+        # Wake the GSPro supervisor whether or not the source changed — the
+        # user may have fixed the database path outside the app.
+        gspro_reconfigure.set()
+        if choice:
+            club = choice.get("club")
+            if club and club in self.clubs:
+                self.current_club = club
+        self.draw_screen()
 
     def clear_session(self):
         sess = self.get_active_session()
@@ -2702,6 +2798,8 @@ class ShanktuaryApp:
                         # Setup lives in the balance-hardware modal; the rail's
                         # Setup slot and this action both route here.
                         self.show_balance_hardware_modal = True
+                    elif action == "open_shot_source":
+                        self.open_shot_source_picker()
                     elif action == "clear_session":
                         self.clear_session()
                     break
@@ -3393,15 +3491,34 @@ class ShanktuaryApp:
         else:
             brand_right = brand_x + (50 if brand_text == "STUDIO" else 150)
         
-        # Status Box — live Nova link state from the WebSocket worker
+        # Status Box — live shot-source link state. Which source is named
+        # depends on what the user actually connected: a GSPro-only user
+        # should never be told to look for a Nova they do not own.
         nova_up = nova_status["connected"]
-        if avail_w < 1050 and not self.sidebar_collapsed:
-            status_text = "● Nova" if nova_up else "● Ready"
+        gspro_on = gspro_status.get("enabled", False)
+        gspro_up = gspro_status.get("connected", False)
+
+        if gspro_on and not gspro_settings.nova_enabled():
+            source_up = gspro_up
+            source_name = "GSPro"
+        elif gspro_on:
+            source_up = nova_up or gspro_up
+            if nova_up and gspro_up:
+                source_name = "Nova + GSPro"
+            elif gspro_up:
+                source_name = "GSPro"
+            else:
+                source_name = "Nova"
         else:
-            status_text = "● Nova Ready" if nova_up else "● Ready"
+            source_up = nova_up
+            source_name = "Nova"
+
+        if source_up:
+            status_text = source_name if (avail_w < 1050 and not self.sidebar_collapsed) else f"{source_name} Ready"
+        else:
+            status_text = "Ready"
         # A live dot plus plain text -- no bordered box.
-        status_col = theme.ACCENT_LINE if nova_up else theme.TEXT_3
-        status_text = status_text.replace("● ", "")
+        status_col = theme.ACCENT_LINE if source_up else theme.TEXT_3
 
         status_x1 = brand_right + 16
         self.canvas.create_oval(status_x1, 22, status_x1 + 8, 30, fill=status_col, outline="")
@@ -3802,10 +3919,26 @@ class ShanktuaryApp:
 
         rows = [
             ("Nova", nova_status["host"] if nova_up else "searching...", nova_up),
+        ]
+
+        # GSPro appears only when the user has actually chosen it as a shot
+        # source — a Nova-only user should not see a permanently dead row.
+        if gspro_status.get("enabled"):
+            gspro_up = gspro_status.get("connected", False)
+            if gspro_up:
+                shots = gspro_status.get("shots", 0)
+                gspro_value = f"polling · {shots} shot{'' if shots == 1 else 's'}"
+            elif not gspro_status.get("db_found"):
+                gspro_value = "database not found"
+            else:
+                gspro_value = "connecting..."
+            rows.append(("GSPro", gspro_value, gspro_up))
+
+        rows.append(
             ("Balance boards",
              ("2 paired · dual plate" if b_dual else "1 paired") if b_open else "not connected",
-             b_open),
-        ]
+             b_open)
+        )
         for label, value, ok in rows:
             self.canvas.create_oval(x1 + 22, curr_y + 5, x1 + 30, curr_y + 13,
                                     fill=theme.ACCENT_LINE if ok else theme.TEXT_3, outline="")
@@ -3816,10 +3949,18 @@ class ShanktuaryApp:
             curr_y += 24
 
         curr_y += 6
-        sb = (x1 + 12, curr_y, x2 - 12, curr_y + 38)
+        # Two side-by-side actions: hardware setup and the shot-source picker.
+        half = (x2 - x1 - 24 - 8) // 2
+        sb = (x1 + 12, curr_y, x1 + 12 + half, curr_y + 38)
         self.tools_menu_items.append((sb[0], sb[1], sb[2], sb[3], "open_setup"))
         self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=theme.SURFACE_2, outline="")
         self.canvas.create_text((sb[0] + sb[2]) // 2, (sb[1] + sb[3]) // 2, text="Open Setup",
+                                fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
+
+        ss = (sb[2] + 8, curr_y, x2 - 12, curr_y + 38)
+        self.tools_menu_items.append((ss[0], ss[1], ss[2], ss[3], "open_shot_source"))
+        self.canvas.create_rectangle(ss[0], ss[1], ss[2], ss[3], fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((ss[0] + ss[2]) // 2, (ss[1] + ss[3]) // 2, text="Shot Source",
                                 fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
 
         # Panel wraps whatever the walk above produced, with real padding

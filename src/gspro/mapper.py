@@ -143,7 +143,13 @@ def parse_shot_row(row):
         raise ValueError("DrivingRangeShot.ShotData JSON was not an object")
 
     fields = {}
+    # SimRead reads a lowercase "club" key while every other GSPro field is
+    # PascalCase. Accept either spelling: if the key case ever differs the
+    # only symptom is the club silently falling back to the UI selection,
+    # which quietly mis-attributes shots to the wrong club.
     club = _to_str(parsed.get("club"))
+    if club is None:
+        club = _to_str(parsed.get("Club"))
     if club is not None:
         fields["club"] = club
 

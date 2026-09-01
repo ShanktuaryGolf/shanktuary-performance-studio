@@ -26,9 +26,25 @@ from .mapper import (
     parse_shot_row,
 )
 from .poller import GsproPoller, read_latest
+from .settings import (
+    VALID_SOURCES,
+    effective_db_path,
+    effective_source,
+    gspro_enabled,
+    load_settings,
+    nova_enabled,
+    save_settings,
+)
 
 __all__ = [
     "GsproPoller",
+    "VALID_SOURCES",
+    "effective_db_path",
+    "effective_source",
+    "gspro_enabled",
+    "load_settings",
+    "nova_enabled",
+    "save_settings",
     "locate_gspro_database_path",
     "is_complete",
     "match_gspro_club",

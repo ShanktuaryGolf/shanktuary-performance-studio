@@ -227,9 +227,41 @@ def paint_top_header(app, w, h, offset_x=0):
     app.club_btn_rect = (right - club_w, y1, right, y2)
 
     club_rect = app.club_btn_rect
+    # Live shot-source state. This used to be a hardcoded green "Ready" dot,
+    # which claimed a connection even with nothing attached. Name whichever
+    # source is actually feeding shots so a GSPro-only user is never told to
+    # look for a Nova they do not own.
+    try:
+        import shanktuary_performance_studio as _studio
+
+        nova_up = _studio.nova_status.get("connected", False)
+        gspro_on = _studio.gspro_status.get("enabled", False)
+        gspro_up = _studio.gspro_status.get("connected", False)
+        nova_wanted = _studio.gspro_settings.nova_enabled()
+    except Exception:
+        nova_up = gspro_on = gspro_up = False
+        nova_wanted = True
+
+    if gspro_on and not nova_wanted:
+        up, label = gspro_up, ("GSPro" if gspro_up else "Ready")
+    elif gspro_on:
+        up = nova_up or gspro_up
+        if nova_up and gspro_up:
+            label = "Nova + GSPro"
+        elif gspro_up:
+            label = "GSPro"
+        elif nova_up:
+            label = "Nova"
+        else:
+            label = "Ready"
+    else:
+        up = nova_up
+        label = "Nova" if nova_up else "Ready"
+
     status_x = club_rect[0] - 82
-    c.create_oval(status_x, 23, status_x + 8, 31, fill=v9.GOOD, outline="")
-    c.create_text(status_x + 14, 27, text="Ready", fill=theme.TEXT_2,
+    c.create_oval(status_x, 23, status_x + 8, 31,
+                  fill=v9.GOOD if up else theme.TEXT_3, outline="")
+    c.create_text(status_x + 14, 27, text=label, fill=theme.TEXT_2,
                   font=(v9.v4._font(), 9, "bold"), anchor="w")
 
     v9._utility_button(c, app.club_btn_rect,
