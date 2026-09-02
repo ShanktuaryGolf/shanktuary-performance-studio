@@ -883,10 +883,6 @@
       }
     }
 
-    if (window.location.search.includes('edit=true')) {
-      toggleEditMode(true);
-    }
-
     function toggleEditMode(enable) {
       isEditMode = enable !== undefined ? enable : !isEditMode;
       document.body.classList.toggle('edit-mode', isEditMode);
@@ -2047,6 +2043,21 @@
     }
 
     window.addEventListener('resize', () => renderShotData());
+
+    // Deferred to the end of the script, not fired inline where the
+    // ?edit=true check used to sit (right after spsSetMetric). At that point
+    // in file order, SPS_DIVOT_L/W/CURVE and _spsDivotExtent hadn't been
+    // declared yet -- toggleEditMode() renders immediately, rendering draws
+    // the divot, and touching those consts before their `let`/`const` runs
+    // is a temporal-dead-zone ReferenceError. That error was uncaught and
+    // silently killed the rest of the script, including the widget
+    // mousedown/mousemove listeners registered further down -- so drag and
+    // the rotate toolbar looked broken with no console-visible cause tied
+    // to them. Calling it here, after every top-level const/let has run,
+    // fixes the ordering without restructuring the file.
+    if (window.location.search.includes('edit=true')) {
+      toggleEditMode(true);
+    }
     initWebSocket();
   </script>
 </body>
