@@ -743,6 +743,8 @@ class ShanktuaryApp:
         self.setup_aim_start_rect = None
         self.setup_aim_nudge_rects = []
         self.setup_aim_clear_rect = None
+        # Shot-source buttons on the Setup page (nova / gspro / both).
+        self.setup_source_btn_rects = []
         # Aim measurement modal: distance to the aim point and how far that
         # point sits off the target line. Two numbers a tape measure gives you,
         # because nobody can eyeball "2.4 degrees".
@@ -3134,6 +3136,18 @@ class ShanktuaryApp:
                 self.aim_modal_active_field = "distance"
                 self.draw_screen()
                 return
+
+            for ax0, ay0, ax1, ay1, key in getattr(
+                    self, "setup_source_btn_rects", []):
+                if ax0 <= event.x <= ax1 and ay0 <= event.y <= ay1:
+                    # Switch shot source from Setup — the same persisted
+                    # setting the splash writes, so a user who never wants
+                    # the splash can still choose GSPro.
+                    apply_shot_source(source=key)
+                    self.copy_feedback = f"Shot source: {key}"
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                    return
 
             for ax0, ay0, ax1, ay1, delta in self.setup_aim_nudge_rects:
                 if ax0 <= event.x <= ax1 and ay0 <= event.y <= ay1:
@@ -7742,12 +7756,36 @@ class ShanktuaryApp:
                                 text="devices & hardware", fill=theme.TEXT_3,
                                 font=(theme.ui_font(), 9), anchor="nw")
 
-        nova_up = bool(getattr(self, "nova_connected", False))
-        dot = theme.ACCENT if nova_up else theme.TEXT_3
+        # Real link state from the worker threads. self.nova_connected was
+        # only ever set when a SHOT arrived, so this page said "Not
+        # connected" on a live link until the user hit a ball — while the
+        # tools menu, reading nova_status, correctly showed it online.
+        nova_up = bool(nova_status.get("connected", False))
+        gspro_on = bool(gspro_status.get("enabled", False))
+        gspro_up = bool(gspro_status.get("connected", False))
+
+        if gspro_on and not gspro_settings.nova_enabled():
+            src_up, src_label = gspro_up, ("GSPro connected" if gspro_up
+                                           else "GSPro offline")
+        elif gspro_on:
+            src_up = nova_up or gspro_up
+            if nova_up and gspro_up:
+                src_label = "Nova + GSPro connected"
+            elif gspro_up:
+                src_label = "GSPro connected"
+            elif nova_up:
+                src_label = "Nova connected"
+            else:
+                src_label = "No source connected"
+        else:
+            src_up, src_label = nova_up, ("Nova connected" if nova_up
+                                          else "Nova offline")
+
+        dot = theme.ACCENT if src_up else theme.TEXT_3
         self.canvas.create_oval(x1 - 132, y + 6, x1 - 126, y + 12,
                                 fill=dot, outline="")
         self.canvas.create_text(x1 - 118, y + 4,
-                                text="Nova connected" if nova_up else "Nova offline",
+                                text=src_label,
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 8),
                                 anchor="nw")
         y += 40
@@ -7777,22 +7815,79 @@ class ShanktuaryApp:
         # ================= LEFT COLUMN =================
         ly = y
 
-        # --- launch monitor ---
-        lm_h = 132
-        card(lx0, ly, lx1, ly + lm_h, "LAUNCH MONITOR")
+        # --- launch monitor / shot source ---
+        lm_h = 186
+        card(lx0, ly, lx1, ly + lm_h, "SHOT SOURCE")
         rx1_cur = lx1
+
+        source = gspro_settings.effective_source()
+        locked = gspro_settings.load_settings()["source_locked"]
+
+        if source == "gspro":
+            dev_name = "GSPro"
+            dev_up = gspro_up
+            dev_state = ("Polling GSPro.db" if gspro_up else
+                         ("Database not found" if not gspro_status.get("db_found")
+                          else "Connecting..."))
+        elif source == "both":
+            dev_name = "Nova + GSPro"
+            dev_up = nova_up or gspro_up
+            dev_state = f"Nova {'up' if nova_up else 'down'} · GSPro {'up' if gspro_up else 'down'}"
+        else:
+            dev_name = "OpenLaunch Nova"
+            dev_up = nova_up
+            dev_state = "Connected" if nova_up else "Not connected"
+
         self.canvas.create_oval(lx0 + 18, ly + 36, lx0 + 28, ly + 46,
-                                fill=dot, outline="")
-        self.canvas.create_text(lx0 + 36, ly + 30, text="OpenLaunch Nova",
+                                fill=theme.ACCENT if dev_up else theme.TEXT_3,
+                                outline="")
+        self.canvas.create_text(lx0 + 36, ly + 30, text=dev_name,
                                 fill=theme.TEXT, font=(theme.ui_font(), 13),
                                 anchor="nw")
         self.canvas.create_text(lx0 + 36, ly + 50,
-                                text="Connected" if nova_up else "Not connected",
-                                fill=theme.ACCENT_TEXT if nova_up else theme.TEXT_3,
+                                text=dev_state,
+                                fill=theme.ACCENT_TEXT if dev_up else theme.TEXT_3,
                                 font=(theme.ui_font(), 8), anchor="nw")
-        host = getattr(obs_server, "NOVA_HOST", None) or "openlaunch-nova.local"
-        row(lx0, ly + 76, "Host", str(host))
+
+        if source == "gspro":
+            row(lx0, ly + 76, "Database",
+                gspro_status.get("db_path") or "(auto-locating)")
+        else:
+            host = getattr(obs_server, "NOVA_HOST", None) or "openlaunch-nova.local"
+            row(lx0, ly + 76, "Host", str(host))
         row(lx0, ly + 96, "Shots this session", str(len(self.session_shots)))
+
+        # Source switcher, so GSPro can be selected without the splash.
+        self.canvas.create_text(lx0 + 18, ly + 122, text="SOURCE",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                                anchor="nw")
+        self.setup_source_btn_rects = []
+        btn_y1, btn_y2 = ly + 140, ly + 168
+        btn_w = (lx1 - lx0 - 36 - 16) // 3
+        for i, (key, label) in enumerate((("nova", "Nova"),
+                                          ("gspro", "GSPro"),
+                                          ("both", "Both"))):
+            bx1 = lx0 + 18 + i * (btn_w + 8)
+            bx2 = bx1 + btn_w
+            active = source == key
+            self.canvas.create_rectangle(
+                bx1, btn_y1, bx2, btn_y2,
+                fill=theme.ACCENT_DEEP if active else theme.SURFACE_2,
+                outline=theme.ACCENT_LINE if active else theme.HAIRLINE)
+            self.canvas.create_text(
+                (bx1 + bx2) // 2, (btn_y1 + btn_y2) // 2, text=label,
+                fill=theme.ACCENT_TEXT if active else theme.TEXT_2,
+                font=(theme.ui_font(), 9, "bold"), anchor="center")
+            if not locked:
+                self.setup_source_btn_rects.append(
+                    (bx1, btn_y1, bx2, btn_y2, key))
+
+        if locked:
+            self.canvas.create_text(
+                lx0 + 18, ly + 172,
+                text="Locked by the SPS_SHOT_SOURCE environment variable",
+                fill=theme.WARN, font=(theme.ui_font(), 7), anchor="nw")
+
         ly += lm_h + 14
 
         # --- display ---
