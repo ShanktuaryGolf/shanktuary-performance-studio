@@ -9,6 +9,9 @@ def test_brand_assets_exist_in_source_checkout():
         "shanktuary_shield.png",
         "shanktuary_wordmark.png",
         "shanktuary_lockup.png",
+        "nova_logo.png",
+        "gspro_logo.png",
+        "iron_side.png",
     ):
         assert (root / name).is_file(), f"missing desktop brand asset: {name}"
 

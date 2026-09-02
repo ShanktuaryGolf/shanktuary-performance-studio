@@ -20,27 +20,31 @@ Behaviour:
   * "Start Session" persists the choice and wakes the poller supervisor, so
     no restart is needed.
 
-Rendering is plain Tk canvas drawing on the shipped `theme` palette, matching
-the rest of the desktop; the design's gold CTA is rendered in the app's
-established hunter-green accent so the splash does not introduce a second
-brand colour.
+Rendering uses the APPROVED desktop palette (navy/teal/gold — src/ui/tokens.py),
+matching the redesigned desktop shell, not the legacy compat `theme` module's
+hunter-green scheme. See DESIGN_SYSTEM.md. Brand imagery (shield/wordmark,
+Nova, GSPro logos) is the same approved PNGs used elsewhere in the app.
 """
 
 from __future__ import annotations
 
+import math
 import os
+import random
 import tkinter as tk
 
 import theme
 from src.gspro import settings as gspro_settings
 from src.gspro.locate import locate_gspro_database_path
+from src.ui import tokens
 
 from .asset_paths import asset_path
 
 # The two ingestion paths a user can choose between on the splash.
+# GSPro first, Nova second — matches the approved mockup's left-to-right order.
 SOURCE_CARDS = (
-    ("gspro", "GSPro", "Play on your favorite\nGSPro courses."),
-    ("nova", "NOVA", "Connect to your\nNOVA launch monitor."),
+    ("gspro", "gspro_logo.png", "Play on your favorite\nGSPro courses."),
+    ("nova", "nova_logo.png", "Connect to your\nNOVA launch monitor."),
 )
 
 
@@ -73,12 +77,14 @@ class SplashScreen:
         self._club_menu_open = False
         self._hit_rects = []          # (x1, y1, x2, y2, action, payload)
         self._images = []             # keep PhotoImage refs alive
+        self._image_cache = {}        # (path, target_h) -> PhotoImage, across redraws
+        self._hero_cache = {}         # (w, h) -> PhotoImage
         self._alive = True            # False once the window is destroyed
         self._last_status_state = None
 
         self.win = tk.Toplevel(root)
         self.win.title("Welcome to Shanktuary")
-        self.win.configure(bg=theme.BG)
+        self.win.configure(bg=tokens.PAGE_BG)
         self.win.resizable(False, False)
 
         scr_w = self.win.winfo_screenwidth()
@@ -91,7 +97,7 @@ class SplashScreen:
         )
 
         self.canvas = tk.Canvas(
-            self.win, width=w, height=h, bg=theme.BG, highlightthickness=0
+            self.win, width=w, height=h, bg=tokens.PAGE_BG, highlightthickness=0
         )
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self._on_click)
@@ -179,6 +185,28 @@ class SplashScreen:
     def _hit(self, rect, action, payload=None):
         self._hit_rects.append((rect[0], rect[1], rect[2], rect[3], action, payload))
 
+    def _load_image(self, attr_key, path, target_h):
+        """Load and scale a transparent PNG once per (path, height); cache across redraws."""
+        key = (path, int(target_h))
+        cached = self._image_cache.get(key)
+        if cached is not None:
+            self._images.append(cached)
+            return cached
+        try:
+            from PIL import Image, ImageTk
+
+            im = Image.open(path).convert("RGBA")
+            ratio = target_h / max(1, im.height)
+            target_w = max(1, round(im.width * ratio))
+            im = im.resize((target_w, int(target_h)), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(im)
+        except Exception:
+            photo = None
+        self._image_cache[key] = photo
+        if photo is not None:
+            self._images.append(photo)
+        return photo
+
     def _club_subtitle(self, club):
         """Brand/model/loft line for a club, or "" when unknown.
 
@@ -241,6 +269,146 @@ class SplashScreen:
         except tk.TclError:
             self._alive = False
 
+    # -- hero composite (left panel background art) ----------------------
+    def _hero_image(self, w, h):
+        """Dark navy panel: topo-contour texture + club-and-ball composite.
+
+        Built once per panel size with PIL, then cached as a PhotoImage.
+        Uses the approved flat iron_side.png cutout (no photoshoot asset
+        exists in the repo) composited with a procedural ball and a soft
+        vignette so it reads as one coherent hero image, not a sticker.
+        """
+        key = (int(w), int(h))
+        cached = self._hero_cache.get(key)
+        if cached is not None:
+            self._images.append(cached)
+            return cached
+
+        try:
+            from PIL import Image, ImageDraw, ImageFilter, ImageTk
+
+            def rgb(hexcol):
+                hexcol = hexcol.lstrip("#")
+                return tuple(int(hexcol[i:i + 2], 16) for i in (0, 2, 4))
+
+            teal_line = rgb(tokens.TEAL_LINE)
+
+            iw, ih = max(1, int(w)), max(1, int(h))
+            img = Image.new("RGB", (iw, ih), rgb(tokens.RAIL_BG))
+            px = img.load()
+            top = rgb("#122F3A")
+            bottom = rgb("#0A1E27")
+            for y in range(ih):
+                ty = y / max(1, ih - 1)
+                row = tuple(round(top[i] + (bottom[i] - top[i]) * ty) for i in range(3))
+                for x in range(iw):
+                    px[x, y] = row
+
+            d = ImageDraw.Draw(img, "RGBA")
+
+            def terrain(x):
+                broad = (ih * 0.065) * math.sin(x / 260.0 * math.tau + .4)
+                mid = (ih * 0.029) * math.sin(x / 120.0 * math.tau + 1.3)
+                fine = (ih * 0.011) * math.sin(x / 55.0 * math.tau + 2.1)
+                return broad + mid + fine
+
+            spacing = max(18, ih // 18)
+            bands = max(6, ih // spacing + 4)
+            for band in range(-2, bands):
+                base_y = band * spacing
+                scale = .9 + band * .01
+                pts = [(x, base_y + terrain(x) * scale) for x in range(-20, iw + 21, 8)]
+                alpha = 30 if band % 3 else 42
+                d.line(pts, fill=(teal_line[0], teal_line[1], teal_line[2], alpha), width=1)
+
+            # Club + ball composite, from the approved flat product cutout.
+            iron_path = asset_path("iron_side.png")
+            if os.path.isfile(iron_path):
+                iron = Image.open(iron_path).convert("RGBA")
+                target_h = int(ih * 0.46)
+                ratio = target_h / max(1, iron.height)
+                iron = iron.resize(
+                    (max(1, round(iron.width * ratio)), target_h),
+                    Image.Resampling.LANCZOS,
+                )
+                iron = iron.rotate(-18, expand=True, resample=Image.Resampling.BICUBIC)
+
+                ball_d = max(8, int(ih * 0.15))
+                ball = self._build_ball(ball_d)
+
+                ball_x = int(iw * 0.30)
+                ball_y = int(ih * 0.60)
+
+                iron_bbox = iron.getbbox() or (0, 0, iron.width, iron.height)
+                club_x = ball_x - int(iron.width * 0.18)
+                club_y = ball_y - iron_bbox[3] + int(ball_d * 0.42)
+                img.paste(iron, (club_x, club_y), iron)
+
+                shadow = Image.new("RGBA", (ball_d * 2, int(ball_d * 0.6)), (0, 0, 0, 0))
+                sd = ImageDraw.Draw(shadow)
+                sd.ellipse((0, 0, ball_d * 2, int(ball_d * 0.6)), fill=(0, 0, 0, 90))
+                shadow = shadow.filter(ImageFilter.GaussianBlur(6))
+                img.paste(
+                    shadow,
+                    (ball_x - ball_d // 2, ball_y + ball_d - int(ball_d * 0.25)),
+                    shadow,
+                )
+                img.paste(ball, (ball_x, ball_y), ball)
+
+            # Soft vignette — corners recede without crushing the panel.
+            vign = Image.new("L", (iw, ih), 200)
+            vd = ImageDraw.Draw(vign)
+            vd.ellipse((-iw * 0.35, -ih * 0.25, iw * 1.35, ih * 1.35), fill=255)
+            vign = vign.filter(ImageFilter.GaussianBlur(max(60, ih // 4)))
+            dark = Image.new("RGB", (iw, ih), rgb("#050F15"))
+            img = Image.composite(img, dark, vign)
+
+            photo = ImageTk.PhotoImage(img)
+        except Exception:
+            photo = None
+
+        self._hero_cache[key] = photo
+        if photo is not None:
+            self._images.append(photo)
+        return photo
+
+    @staticmethod
+    def _build_ball(diameter):
+        """A simple lit/dimpled sphere — no photo asset exists for this."""
+        from PIL import Image, ImageDraw
+
+        im = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
+        px = im.load()
+        r = diameter / 2
+        cx, cy = r, r
+        lx, ly = r * 0.60, r * 0.50
+        for y in range(diameter):
+            for x in range(diameter):
+                dx, dy = x - cx, y - cy
+                dist = math.hypot(dx, dy)
+                if dist > r:
+                    continue
+                ldx, ldy = x - lx, y - ly
+                ldist = math.hypot(ldx, ldy)
+                light = max(0.0, 1.0 - ldist / (r * 1.1))
+                base = 175 + int(80 * light)
+                edge_fade = 1.0 - (dist / r) ** 4 * 0.20
+                val = max(100, min(255, int(base * edge_fade)))
+                a = 255
+                if dist > r - 1.2:
+                    a = int(255 * (r - dist))
+                px[x, y] = (val, val, val, a)
+        d = ImageDraw.Draw(im, "RGBA")
+        rnd = random.Random(7)
+        for _ in range(max(60, int(diameter * diameter * 0.02))):
+            ang = rnd.uniform(0, math.tau)
+            rad = rnd.uniform(0, r * 0.94)
+            x = cx + rad * math.cos(ang)
+            y = cy + rad * math.sin(ang)
+            if 0 <= x < diameter and 0 <= y < diameter:
+                d.ellipse((x - 1, y - 1, x + 1, y + 1), fill=(60, 60, 60, 55))
+        return im
+
     # -- painting --------------------------------------------------------
     def _draw(self):
         self.canvas.delete("all")
@@ -249,7 +417,7 @@ class SplashScreen:
 
         # Paint the page background explicitly rather than relying on the
         # canvas's own bg, which some X/Wayland setups leave unpainted.
-        self.canvas.create_rectangle(0, 0, self.w, self.h, fill=theme.BG, outline="")
+        self.canvas.create_rectangle(0, 0, self.w, self.h, fill=tokens.PAGE_BG, outline="")
 
         split = int(self.w * 0.42)
         self._draw_left(split)
@@ -257,67 +425,62 @@ class SplashScreen:
 
     def _draw_left(self, split):
         c = self.canvas
-        c.create_rectangle(0, 0, split, self.h, fill=theme.RAIL, outline="")
-        c.create_line(split, 0, split, self.h, fill=theme.HAIRLINE)
+
+        hero = self._hero_image(split, self.h)
+        if hero is not None:
+            c.create_image(0, 0, image=hero, anchor="nw")
+        else:
+            c.create_rectangle(0, 0, split, self.h, fill=tokens.RAIL_BG, outline="")
+        c.create_line(split, 0, split, self.h, fill=tokens.HAIRLINE)
 
         # Brand: the square shield scales cleanly as an icon, with the
-        # wordmark set in live text. The full lockup PNG is 610px wide and
-        # its tagline turns to mush when squeezed into this panel, so it is
-        # deliberately not used here.
-        y = 46
+        # wordmark set in live text (gold, per the approved brand direction).
+        y = 40
         text_x = 40
-        try:
-            from PIL import Image, ImageTk
+        shield = self._load_image("shield", asset_path("shanktuary_shield.png"), 40)
+        if shield is not None:
+            c.create_image(40, y, image=shield, anchor="nw")
+            text_x = 40 + 40 + 12
 
-            img = Image.open(asset_path("shanktuary_shield.png")).convert("RGBA")
-            size = 64
-            resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
-            img = img.resize((size, size), resample)
-            photo = ImageTk.PhotoImage(img)
-            self._images.append(photo)
-            c.create_image(40, y, image=photo, anchor="nw")
-            text_x = 40 + size + 16
-        except Exception:
-            pass
+        c.create_text(text_x, y + 2, text="SHANKTUARY", fill=tokens.GOLD,
+                      font=(theme.ui_font(), 18, "bold"), anchor="nw")
+        c.create_text(text_x + 1, y + 26, text="P E R F O R M A N C E   G O L F   S T U D I O",
+                      fill=tokens.TEAL_TEXT, font=(theme.ui_font(), 7), anchor="nw")
+        y += 92
 
-        c.create_text(text_x, y + 8, text="SHANKTUARY", fill=theme.ACCENT_TEXT,
-                      font=(theme.ui_font(), 19, "bold"), anchor="nw")
-        c.create_text(text_x + 2, y + 40, text="P E R F O R M A N C E   S T U D I O",
-                      fill=theme.TEXT_3, font=(theme.ui_font(), 7), anchor="nw")
-        y += 108
-
-        c.create_text(40, y, text="W E L C O M E   T O", fill=theme.ACCENT_TEXT,
+        c.create_text(40, y, text="W E L C O M E   T O", fill=tokens.TEAL_TEXT,
                       font=(theme.ui_font(), 10), anchor="nw")
         y += 28
-        c.create_text(38, y, text="YOUR", fill=theme.TEXT,
+        c.create_text(38, y, text="YOUR", fill=tokens.TEXT,
                       font=(theme.ui_font(), 34, "bold"), anchor="nw")
         y += 44
-        c.create_text(38, y, text="SHANKTUARY.", fill=theme.TEXT,
+        c.create_text(38, y, text="SHANKTUARY.", fill=tokens.TEXT,
                       font=(theme.ui_font(), 34, "bold"), anchor="nw")
-        y += 62
+        y += 56
 
-        c.create_line(40, y, 96, y, fill=theme.ACCENT_LINE, width=2)
-        y += 24
-        c.create_text(40, y, text="Connect. Choose. Play.", fill=theme.TEXT,
+        c.create_line(40, y, 96, y, fill=tokens.GOLD, width=2)
+        y += 22
+        c.create_text(40, y, text="Connect. Choose. Play.", fill=tokens.TEXT,
                       font=(theme.ui_font(), 12, "bold"), anchor="nw")
-        y += 24
+        y += 22
         c.create_text(40, y, text="Let's get you ready to play your best.",
-                      fill=theme.TEXT_2, font=(theme.ui_font(), 10), anchor="nw")
+                      fill=tokens.TEXT_2, font=(theme.ui_font(), 10), anchor="nw")
 
-        c.create_text(40, self.h - 44, text="\u201c  I N   P U R S U I T   O F   P U R E .",
-                      fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="nw")
+        c.create_text(40, self.h - 32, text="\u201c  I N   P U R S U I T   O F   P U R E .",
+                      fill=tokens.TEAL_SOFT, font=(theme.ui_font(), 9), anchor="nw")
 
     def _step_label(self, x, y, number, text):
         c = self.canvas
-        c.create_oval(x, y, x + 20, y + 20, outline=theme.HAIRLINE, width=1)
-        c.create_text(x + 10, y + 10, text=str(number), fill=theme.TEXT_2,
+        c.create_oval(x, y, x + 20, y + 20, outline=tokens.HAIRLINE, width=1)
+        c.create_text(x + 10, y + 10, text=str(number), fill=tokens.TEXT_2,
                       font=(theme.ui_font(), 9), anchor="center")
-        c.create_text(x + 32, y + 10, text=text, fill=theme.TEXT_2,
+        c.create_text(x + 32, y + 10, text=text, fill=tokens.TEXT_2,
                       font=(theme.ui_font(), 9), anchor="w")
         return y + 34
 
     def _draw_right(self, split):
         c = self.canvas
+        c.create_rectangle(split, 0, self.w, self.h, fill=tokens.PAGE_BG, outline="")
         x = split + 44
         right = self.w - 44
         y = 40
@@ -328,7 +491,7 @@ class SplashScreen:
         # below carry the sequence on their own. (The approved mockup shows
         # both, which is an inconsistency in the mockup itself.)
         c.create_text((x + right) // 2, y + 8, text="S E S S I O N   S E T U P",
-                      fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="center")
+                      fill=tokens.TEXT_3, font=(theme.ui_font(), 8), anchor="center")
         y += 34
 
         # ---- Step 1: shot source -------------------------------------
@@ -338,42 +501,48 @@ class SplashScreen:
         card_w = (right - x - gap) // 2
         gspro_found, gspro_path = self._gspro_state()
 
-        for i, (key, title, blurb) in enumerate(SOURCE_CARDS):
+        for i, (key, logo_name, blurb) in enumerate(SOURCE_CARDS):
             cx1 = x + i * (card_w + gap)
             cx2 = cx1 + card_w
             selected = self.source == key
+            # Gold = current/active, per DESIGN_SYSTEM.md — one selection
+            # rule for both cards rather than a per-brand accent colour.
             self._rounded(
                 cx1, y, cx2, y + card_h, 10,
-                fill=theme.ACCENT_DEEP if selected else theme.SURFACE,
-                outline=theme.ACCENT_LINE if selected else theme.HAIRLINE,
+                fill=tokens.ACTIVE_BG if selected else tokens.SURFACE,
+                outline=tokens.GOLD if selected else tokens.HAIRLINE,
             )
             # Radio indicator
             rx = cx2 - 26
             c.create_oval(rx - 8, y + 14, rx + 8, y + 30,
-                          outline=theme.ACCENT_LINE if selected else theme.HAIRLINE, width=1)
+                          outline=tokens.GOLD if selected else tokens.HAIRLINE, width=1)
             if selected:
                 c.create_oval(rx - 4, y + 18, rx + 4, y + 26,
-                              fill=theme.ACCENT_LINE, outline="")
+                              fill=tokens.GOLD, outline="")
 
-            c.create_text((cx1 + cx2) // 2, y + 46, text=title,
-                          fill=theme.TEXT if selected else theme.TEXT_2,
-                          font=(theme.ui_font(), 20, "bold"), anchor="center")
-            c.create_text((cx1 + cx2) // 2, y + 84, text=blurb, fill=theme.TEXT_3,
+            logo = self._load_image(key, asset_path(logo_name), 30)
+            if logo is not None:
+                c.create_image((cx1 + cx2) // 2, y + 46, image=logo, anchor="center")
+            else:
+                c.create_text((cx1 + cx2) // 2, y + 46, text=key.upper(),
+                              fill=tokens.TEXT if selected else tokens.TEXT_2,
+                              font=(theme.ui_font(), 20, "bold"), anchor="center")
+            c.create_text((cx1 + cx2) // 2, y + 84, text=blurb, fill=tokens.TEXT_3,
                           font=(theme.ui_font(), 9), anchor="center", justify="center")
 
             # Live availability line — the same honesty for both sources:
             # say what is actually true right now, never a hopeful default.
             if key == "gspro":
                 if gspro_found:
-                    note, col = "database found", theme.ACCENT_TEXT
+                    note, col = "database found", tokens.TEAL_TEXT
                 else:
                     note, col = "database not found", theme.WARN
             else:
                 nova_up, nova_host = self._nova_state()
                 if nova_up:
-                    note, col = f"connected · {nova_host}", theme.ACCENT_TEXT
+                    note, col = f"connected · {nova_host}", tokens.TEAL_TEXT
                 else:
-                    note, col = "searching…", theme.TEXT_3
+                    note, col = "searching…", tokens.TEXT_3
             c.create_text((cx1 + cx2) // 2, y + card_h - 16, text=note,
                           fill=col, font=(theme.ui_font(), 8), anchor="center")
 
@@ -388,35 +557,35 @@ class SplashScreen:
             y += 18
 
         if self.source == "gspro" and not gspro_found:
-            c.create_text(x, y, text=f"Looked in: {gspro_path}", fill=theme.TEXT_3,
+            c.create_text(x, y, text=f"Looked in: {gspro_path}", fill=tokens.TEXT_3,
                           font=(theme.ui_font(), 8), anchor="nw")
             y += 16
             c.create_text(x, y, text="Set SPS_GSPRO_DB to point at your GSPro.db if it lives elsewhere.",
-                          fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+                          fill=tokens.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
             y += 16
         y += 12
 
         # ---- Step 2: club --------------------------------------------
         y = self._step_label(x, y, 2, "S E L E C T   C L U B")
         sel_h = 58
-        self._rounded(x, y, right, y + sel_h, 10, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self._rounded(x, y, right, y + sel_h, 10, fill=tokens.SURFACE, outline=tokens.HAIRLINE)
         # Real gear from the user's bag when we have it (the mockup's
         # "Mizuno JPX Forged" subtitle). Absent specs simply show no
         # subtitle — never a made-up club model.
         subtitle = self._club_subtitle(self.current_club)
         if subtitle:
             c.create_text(x + 20, y + 18, text=self.current_club.upper(),
-                          fill=theme.TEXT, font=(theme.ui_font(), 13, "bold"), anchor="w")
-            c.create_text(x + 20, y + 39, text=subtitle, fill=theme.TEXT_3,
+                          fill=tokens.TEXT, font=(theme.ui_font(), 13, "bold"), anchor="w")
+            c.create_text(x + 20, y + 39, text=subtitle, fill=tokens.TEXT_3,
                           font=(theme.ui_font(), 8), anchor="w")
         else:
             c.create_text(x + 20, y + sel_h // 2, text=self.current_club.upper(),
-                          fill=theme.TEXT, font=(theme.ui_font(), 14, "bold"), anchor="w")
+                          fill=tokens.TEXT, font=(theme.ui_font(), 14, "bold"), anchor="w")
         # Chevron drawn as a polygon — the unicode arrow glyph is missing
         # from several Linux UI fonts and renders as a blank box.
         chx, chy = right - 26, y + sel_h // 2
         c.create_polygon(chx - 6, chy - 3, chx + 6, chy - 3, chx, chy + 4,
-                         fill=theme.TEXT_2, outline="")
+                         fill=tokens.TEXT_2, outline="")
         self._hit((x, y, right, y + sel_h), "club_menu")
         club_row_y = y
         y += sel_h + 22
@@ -424,7 +593,7 @@ class SplashScreen:
         # ---- Step 3: start -------------------------------------------
         y = self._step_label(x, y, 3, "Y O U ' R E   R E A D Y")
         btn_h = 52
-        self._rounded(x, y, right, y + btn_h, 10, fill=theme.ACCENT)
+        self._rounded(x, y, right, y + btn_h, 10, fill=tokens.GOLD)
         c.create_text((x + right) // 2, y + btn_h // 2, text="START SESSION",
                       fill="#0B1410", font=(theme.ui_font(), 13, "bold"), anchor="center")
         ax, ay = right - 30, y + btn_h // 2
@@ -435,7 +604,7 @@ class SplashScreen:
         y += btn_h + 18
 
         c.create_text((x + right) // 2, y, text="Your data is private and stays on this machine.",
-                      fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="n")
+                      fill=tokens.TEXT_3, font=(theme.ui_font(), 8), anchor="n")
         y += 22
 
         # "Show this on every launch" — the honest way to keep the setup
@@ -454,14 +623,14 @@ class SplashScreen:
         bx = (x + right) // 2 - total_w // 2
         by = y
         self._rounded(bx, by, bx + box, by + box, 3,
-                      fill=theme.ACCENT if self.always_show else theme.SURFACE,
-                      outline=theme.ACCENT_LINE if self.always_show else theme.HAIRLINE)
+                      fill=tokens.GOLD if self.always_show else tokens.SURFACE,
+                      outline=tokens.GOLD if self.always_show else tokens.HAIRLINE)
         if self.always_show:
             # Tick, drawn as lines (glyph coverage varies by font).
             c.create_line(bx + 3, by + 7, bx + 5, by + 10, fill="#0B1410", width=2)
             c.create_line(bx + 5, by + 10, bx + 10, by + 3, fill="#0B1410", width=2)
         c.create_text(bx + box + 9, by + box // 2, text=label,
-                      fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
+                      fill=tokens.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
         self._hit((bx - 4, by - 4, bx + total_w + 4, by + box + 4), "always")
 
         # Club dropdown paints last so it overlays the steps below it.
@@ -491,8 +660,7 @@ class SplashScreen:
             y = max(8, self.h - 8 - menu_h)
 
         self._rounded(x, y, right, y + menu_h, 8,
-                      fill=getattr(theme, "SURFACE_2", theme.SURFACE),
-                      outline=theme.HAIRLINE)
+                      fill=tokens.SURFACE_2, outline=tokens.HAIRLINE)
 
         for i, club in enumerate(clubs):
             col = i // rows
@@ -504,9 +672,9 @@ class SplashScreen:
             active = club == self.current_club
             if active:
                 self._rounded(cx1 + 4, cy, cx2 - 4, cy + row_h, 6,
-                              fill=theme.ACCENT_DEEP)
+                              fill=tokens.ACTIVE_BG)
             c.create_text(cx1 + 14, cy + row_h // 2, text=club,
-                          fill=theme.ACCENT_TEXT if active else theme.TEXT_2,
+                          fill=tokens.GOLD if active else tokens.TEXT_2,
                           font=(theme.ui_font(), 9), anchor="w")
             sub = self._club_subtitle(club)
             if sub:
@@ -514,7 +682,7 @@ class SplashScreen:
                 # does not fit in half the width without colliding.
                 short = sub.split("·")[-1].strip() if cols > 1 else sub
                 c.create_text(cx2 - 12, cy + row_h // 2, text=short,
-                              fill=theme.TEXT_3, font=(theme.ui_font(), 8),
+                              fill=tokens.TEXT_3, font=(theme.ui_font(), 8),
                               anchor="e")
             self._hit((cx1, cy, cx2, cy + row_h), "club", club)
 
