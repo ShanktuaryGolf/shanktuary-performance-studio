@@ -192,7 +192,10 @@ def paint_sidebar(app, w, h):
     bottom = h - 52
     for real_idx, shot in _filtered_shots(app):
         selected = real_idx == app.selected_shot_index
-        rh = 116 if selected else 52
+        # Must match v8's selected height (132). v8 repaints this card on
+        # top; when the two disagreed, v4's shorter body showed as a band
+        # under v8's content and the last detail row sat on the seam.
+        rh = 132 if selected else 52
         if y + rh > bottom:
             break
 

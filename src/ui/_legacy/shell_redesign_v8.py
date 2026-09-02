@@ -66,7 +66,11 @@ def paint_sidebar(app, w, h):
     bottom = h - 52
     for real_idx, shot in v4._filtered_shots(app):
         selected = real_idx == app.selected_shot_index
-        rh = 120 if selected else 52
+        # 132, not 120: the three detail rows start at y+57 and step 24px,
+        # so the last one ("Time") ends at y+124. At 120 the card cut
+        # through that row's descenders and the time looked clipped along
+        # the bottom edge. 132 clears it with real padding underneath.
+        rh = 132 if selected else 52
         if y + rh > bottom:
             break
 

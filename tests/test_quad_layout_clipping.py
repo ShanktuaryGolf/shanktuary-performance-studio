@@ -172,6 +172,79 @@ def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
     )
 
 
+def test_selected_card_is_tall_enough_for_its_last_row(quad):
+    """Detail rows must fit INSIDE the card, not run off its bottom edge.
+
+    The earlier padding fix only checked horizontal margins and passed while
+    the real problem was vertical: the selected card was 120px but its three
+    detail rows end at y+124, so "Time" was clipped along the bottom border.
+    """
+    _root, app = quad
+    c = app.canvas
+
+    cards = getattr(app, "design_shot_card_rects", [])
+    if not cards:
+        pytest.skip("no shot cards rendered")
+    sel_idx = app.selected_shot_index
+    card = next((r for r in cards if r[4] == sel_idx), None)
+    if card is None:
+        pytest.skip("selected card not on screen")
+
+    # The visible card body: the widest filled rect spanning this card.
+    body_bottom = None
+    for item in c.find_all():
+        if c.type(item) != "rectangle":
+            continue
+        co = c.coords(item)
+        if len(co) != 4:
+            continue
+        x1, y1, x2, y2 = co
+        if x1 < 320 and (x2 - x1) > 150 and y1 >= card[1] - 6 and y2 <= card[3] + 8:
+            body_bottom = max(body_bottom or 0, y2)
+    if body_bottom is None:
+        pytest.skip("could not locate the card body")
+
+    # Every label/value belonging to this card must end above that edge.
+    for item in c.find_all():
+        if c.type(item) != "text":
+            continue
+        text = c.itemcget(item, "text")
+        if text not in ("Time", "Shape", "Ball Speed") and not (
+                text.endswith(" PM") or text.endswith(" AM")):
+            continue
+        bb = c.bbox(item)
+        if not bb or bb[0] > 320:
+            continue
+        # Only rows inside this card's vertical span.
+        if not (card[1] <= bb[1] < body_bottom):
+            continue
+        assert bb[3] <= body_bottom, (
+            f"{text!r} bottom {bb[3]} runs {bb[3] - body_bottom}px past the "
+            f"card edge {body_bottom} — the row is clipped"
+        )
+
+
+def test_both_card_layers_agree_on_the_selected_height(quad):
+    """v4 and v8 both paint this card; a height mismatch shows as a seam."""
+    import shell_redesign_v4 as v4
+    import shell_redesign_v8 as v8
+    import inspect
+
+    def selected_height(module):
+        src = inspect.getsource(module.paint_sidebar)
+        for line in src.splitlines():
+            if "if selected else 52" in line:
+                return int(line.split("=")[1].split("if")[0].strip())
+        return None
+
+    h4 = selected_height(v4)
+    h8 = selected_height(v8)
+    assert h4 == h8, (
+        f"selected card height differs: v4={h4} v8={h8} — the shorter body "
+        f"shows as a band under the taller layer's content"
+    )
+
+
 def test_shot_card_values_clear_the_card_edge(quad):
     """Card values need real padding, not 4px of breathing room."""
     _root, app = quad
