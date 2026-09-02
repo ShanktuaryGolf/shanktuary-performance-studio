@@ -189,15 +189,31 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
     # --- Q2: remove duplicated backspin. Show actual club-delivery inputs only
     # when the shot payload contains them.
     q2_top = mid_y
-    c.create_rectangle(gut_r - int(175 * fs), q2_top + int(18 * fs),
-                       gut_r + 2, q2_top + int(95 * fs),
-                       fill=theme.BG, outline="")
     shot = app.current_shot or {}
     ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
     dyn = _handed(app, ogc.get("dynamic_loft_degrees") or
                   (shot.get("dynamic_loft_degrees") if isinstance(shot, dict) else None), 0.0)
     aoa = _handed(app, ogc.get("angle_of_attack_degrees") or
                   (shot.get("angle_of_attack_degrees") if isinstance(shot, dict) else None), 0.0)
+
+    # Mask only the strip these right-aligned labels occupy. The old fixed
+    # 175x77 block reached far left of the widest label ("DYNAMIC LOFT",
+    # ~100px) and down past the trajectory apex, erasing the top of the
+    # ball-flight arc so it looked cut off mid-curve.
+    rows = int(abs(dyn) > 0.05) + int(abs(aoa) > 0.05)
+    if rows:
+        mask_w = 0
+        for label in ("DYNAMIC LOFT", "ATTACK ANGLE"):
+            probe = c.create_text(-4000, -4000, text=label, font=cap_f, anchor="w")
+            bb = c.bbox(probe)
+            c.delete(probe)
+            if bb:
+                mask_w = max(mask_w, bb[2] - bb[0])
+        mask_w = int(mask_w + 16 * fs)
+        mask_bottom = q2_top + int(34 * fs) + (rows - 1) * int(40 * fs) + int(26 * fs)
+        c.create_rectangle(gut_r - mask_w, q2_top + int(18 * fs),
+                           gut_r + 2, mask_bottom,
+                           fill=theme.BG, outline="")
     yy = q2_top + int(34 * fs)
     if abs(dyn) > 0.05:
         c.create_text(gut_r, yy, text="DYNAMIC LOFT", fill=theme.TEXT_3,
@@ -279,10 +295,24 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
     # is exactly the trap production documents at the same spot.
     cap_bb = c.bbox(cap_id)
     chip_x = (cap_bb[2] + int(12 * fs)) if cap_bb else gut_l3 + int(118 * fs)
-    c.create_rectangle(chip_x, cap_y - int(8 * fs),
-                       chip_x + int((62 if state != "direction" else 116) * fs),
-                       cap_y + int(9 * fs), fill=theme.SURFACE_2, outline="")
-    c.create_text(chip_x + int((31 if state != "direction" else 58) * fs), cap_y,
+
+    # Size the chip to the LABEL, not to a hardcoded width. "DIRECTION
+    # ESTIMATE" needs ~258px but the old constant reserved 116*fs (~214px),
+    # so the centred text spilled ~22px past each end of its own badge --
+    # eating the gap and colliding with "IMPACT LOCATION" on the left while
+    # hanging outside the box on the right.
+    probe = c.create_text(-4000, -4000, text=state_label, font=small_bold,
+                          anchor="w")
+    probe_bb = c.bbox(probe)
+    c.delete(probe)
+    label_w = (probe_bb[2] - probe_bb[0]) if probe_bb else int(62 * fs)
+    pad_x = int(10 * fs)
+    chip_w = label_w + pad_x * 2
+
+    c.create_rectangle(chip_x, cap_y - int(9 * fs),
+                       chip_x + chip_w,
+                       cap_y + int(10 * fs), fill=theme.SURFACE_2, outline="")
+    c.create_text(chip_x + chip_w // 2, cap_y,
                   text=state_label, fill=state_col, font=small_bold,
                   anchor="center")
 

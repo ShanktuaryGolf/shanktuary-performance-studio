@@ -111,7 +111,11 @@ def paint_sidebar(app, w, h):
                 ry = y + 57 + ri * 24
                 c.create_text(x0 + 28, ry, text=label, fill=theme.TEXT_2,
                               font=(v4._font(), 9, "bold"), anchor="nw")
-                c.create_text(x1 - 24, ry, text=value, fill=theme.TEXT,
+                # The card body is drawn at x1-12 (inset 12 from the sidebar
+                # edge), so "x1 - 24" left only ~19px of visible margin —
+                # tight enough that a long bold value like "06:24 PM" read
+                # as clipped against the border. x1-32 gives ~27px.
+                c.create_text(x1 - 32, ry, text=value, fill=theme.TEXT,
                               font=(v4._font(), 9, "bold"), anchor="ne")
 
         rect = (x0 + 8, y - 2, x1 - 8, y + rh + 2, real_idx)

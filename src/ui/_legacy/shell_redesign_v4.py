@@ -228,13 +228,16 @@ def paint_sidebar(app, w, h):
 
         if selected:
             detail_y = y + 54
+            # Values sit 28px from the card edge to match the 28px label
+            # inset opposite; at 24px the time crowded the border and read
+            # as clipped. v8 repaints these rows with the same inset.
             c.create_text(x0 + 28, detail_y, text="Ball Speed", fill=theme.TEXT_3,
                           font=(_font(), 8), anchor="nw")
-            c.create_text(x1 - 24, detail_y, text=f"{ball:.1f} mph", fill=theme.TEXT_2,
+            c.create_text(x1 - 32, detail_y, text=f"{ball:.1f} mph", fill=theme.TEXT_2,
                           font=(_font(), 9, "bold"), anchor="ne")
             c.create_text(x0 + 28, detail_y + 24, text="Shape", fill=theme.TEXT_3,
                           font=(_font(), 8), anchor="nw")
-            c.create_text(x1 - 24, detail_y + 24, text=shape, fill=theme.TEXT_2,
+            c.create_text(x1 - 32, detail_y + 24, text=shape, fill=theme.TEXT_2,
                           font=(_font(), 9, "bold"), anchor="ne")
             c.create_text(x0 + 28, detail_y + 49, text=ts, fill=theme.TEXT_3,
                           font=(_font(), 8), anchor="nw")
