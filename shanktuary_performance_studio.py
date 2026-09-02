@@ -3096,9 +3096,11 @@ class ShanktuaryApp:
                     elif action == "set_mode_2" or action == "set_mode_0":
                         self.set_mode(0)
                     elif action == "open_setup":
-                        # Setup lives in the balance-hardware modal; the rail's
-                        # Setup slot and this action both route here.
-                        self.show_balance_hardware_modal = True
+                        # Route to the Setup page (view_mode 10), which now
+                        # owns board pairing, alignment, and tare -- the old
+                        # balance-hardware modal was a dead end that never
+                        # reached it.
+                        self.set_mode(10)
                     elif action == "open_shot_source":
                         self.open_shot_source_picker()
                     elif action == "clear_session":
