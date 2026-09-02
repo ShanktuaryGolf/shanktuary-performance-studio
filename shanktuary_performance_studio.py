@@ -587,6 +587,8 @@ class ShanktuaryApp:
         self.sidebar_filter_btn_rect = None   # [ 🎯 Filter: All Clubs ▼ ]
         self.sidebar_clear_btn_rect = None    # [ 🗑️ Clear Session ]
         self.sidebar_shot_card_rects = []     # (x1, y1, x2, y2, shot_idx_in_session)
+        self.shot_delete_btn_rects = []       # (x1, y1, x2, y2, shot_idx_in_session) [ ✕ ]
+        self.design_shot_delete_rects = []    # same, for the desktop-redesign card layout
         self.session_menu_items = []          # (x1, y1, x2, y2, sess_idx)
         self.filter_menu_items = []           # (x1, y1, x2, y2, club_name)
 
@@ -649,6 +651,7 @@ class ShanktuaryApp:
         self.spec_editor_loft = ""
         self.spec_editor_lie = ""
         self.spec_editor_shaft = ""
+        self.spec_editor_notes = ""
         self.spec_editor_active_field = "brand" # "name", "category", "brand", "model", "loft", "lie", "shaft"
         self.spec_editor_box_rect = None
         self.spec_editor_save_rect = None
@@ -656,6 +659,7 @@ class ShanktuaryApp:
         self.spec_editor_cancel_rect = None
         self.spec_editor_cat_chips = []       # (x1, y1, x2, y2, cat_name)
         self.spec_editor_field_rects = {}     # field_name -> (x1, y1, x2, y2)
+        self.spec_editor_notes_edit_rect = None
 
         # Mode 2: 3D Range Viewport State
         self.range_launch_web_rect = None
@@ -895,6 +899,47 @@ class ShanktuaryApp:
         self.root.after(2000, self.clear_copy_feedback)
         self.draw_screen()
 
+    def edit_session_notes(self):
+        """Toplevel + Text editor for the active session's freeform notes."""
+        sess = self.get_active_session()
+        if not sess:
+            return
+
+        try:
+            top = tk.Toplevel(self.root)
+            top.title("Session Notes")
+            top.configure(bg=theme.SURFACE)
+            top.geometry("420x260")
+            top.transient(self.root)
+
+            text = tk.Text(top, wrap="word", font=(theme.ui_font(), 10))
+            text.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+            text.insert("1.0", sess.get("notes", ""))
+            text.focus_set()
+
+            def _save():
+                self._save_session_notes(text.get("1.0", "end-1c"))
+                top.destroy()
+
+            btn_row = tk.Frame(top, bg=theme.SURFACE)
+            btn_row.pack(fill="x", padx=10, pady=(0, 10))
+            tk.Button(btn_row, text="Save", command=_save).pack(side="right", padx=(6, 0))
+            tk.Button(btn_row, text="Cancel", command=top.destroy).pack(side="right")
+        except Exception as exc:
+            print(f"[!] Session notes editor failed: {exc}")
+
+    def _save_session_notes(self, text):
+        """Core notes-write, split out so tests can call it without a Toplevel."""
+        sess = self.get_active_session()
+        if not sess:
+            return
+        sess["notes"] = text
+        self.show_session_dropdown = False
+        self.save_session_to_file()
+        self.copy_feedback = "✓ Session notes saved"
+        self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+
     def delete_session(self, session_idx, confirm=True):
         """Delete a session, with confirmation when it holds shots.
 
@@ -955,6 +1000,48 @@ class ShanktuaryApp:
         self.show_session_dropdown = False
         self.save_session_to_file()
         self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+        return True
+
+    def delete_shot(self, shot_idx, confirm=True):
+        """Hard-delete a single shot from the active session's shot list.
+
+        This is NOT the soft "excluded" flag used by get_filtered_shots() —
+        the shot is removed from the underlying data entirely.
+        """
+        shots = self.session_shots
+        if not (0 <= shot_idx < len(shots)):
+            return False
+
+        if confirm:
+            try:
+                from tkinter import messagebox
+                ok = messagebox.askyesno(
+                    "Delete shot",
+                    f"Delete shot #{shot_idx + 1}? This cannot be undone.",
+                    parent=self.root,
+                )
+            except Exception as exc:
+                print(f"[!] Delete shot confirmation failed: {exc}")
+                return False
+            if not ok:
+                return False
+
+        shots.pop(shot_idx)
+
+        if shots:
+            if self.selected_shot_index == shot_idx:
+                self.selected_shot_index = len(shots) - 1
+                self.current_shot = shots[-1]
+            elif self.selected_shot_index > shot_idx:
+                self.selected_shot_index -= 1
+        else:
+            self.selected_shot_index = -1
+            self.current_shot = None
+
+        self.copy_feedback = f"✓ Deleted shot #{shot_idx + 1}"
+        self.save_session_to_file()
+        self.root.after(2500, self.clear_copy_feedback)
         self.draw_screen()
         return True
 
@@ -1299,7 +1386,7 @@ class ShanktuaryApp:
                 return c
         return None
 
-    def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None, lie_deg=None):
+    def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None, lie_deg=None, notes=None):
         c = self.get_bag_club(club_name)
         if c:
             if brand is not None: c["brand"] = str(brand)
@@ -1316,6 +1403,7 @@ class ShanktuaryApp:
                     c["lie_deg"] = 0.0
             if shaft is not None: c["shaft"] = str(shaft)
             if category is not None: c["category"] = str(category)
+            if notes is not None: c["notes"] = str(notes)
             if new_name is not None and new_name.strip():
                 clean_name = new_name.strip()
                 old_name = c["name"]
@@ -1329,7 +1417,7 @@ class ShanktuaryApp:
             self.save_session_to_file()
             self.draw_screen()
 
-    def add_club_to_bag(self, name, category=None, brand="", model="", loft_deg=0.0, shaft="", lie_deg=0.0):
+    def add_club_to_bag(self, name, category=None, brand="", model="", loft_deg=0.0, shaft="", lie_deg=0.0, notes=""):
         clean_name = name.strip() if name else ""
         if not clean_name:
             return
@@ -1346,7 +1434,7 @@ class ShanktuaryApp:
 
         existing = self.get_bag_club(clean_name)
         if existing:
-            self.update_club_specs(clean_name, brand=brand, model=model, loft_deg=loft_val, shaft=shaft, category=category, lie_deg=lie_val)
+            self.update_club_specs(clean_name, brand=brand, model=model, loft_deg=loft_val, shaft=shaft, category=category, lie_deg=lie_val, notes=notes)
             return
         club_dict = {
             "name": clean_name,
@@ -1355,7 +1443,8 @@ class ShanktuaryApp:
             "model": model,
             "loft_deg": loft_val,
             "lie_deg": lie_val,
-            "shaft": shaft
+            "shaft": shaft,
+            "notes": notes or "",
         }
         self.bag.append(club_dict)
         if clean_name not in self.clubs:
@@ -1888,6 +1977,7 @@ class ShanktuaryApp:
             lie = c.get("lie_deg", 0.0)
             self.spec_editor_lie = f"{lie:.1f}" if lie else ""
             self.spec_editor_shaft = c.get("shaft", "")
+            self.spec_editor_notes = c.get("notes", "")
             self.spec_editor_active_field = "brand"
         else:
             self.spec_editor_orig_name = ""
@@ -1898,9 +1988,45 @@ class ShanktuaryApp:
             self.spec_editor_loft = ""
             self.spec_editor_lie = ""
             self.spec_editor_shaft = ""
+            self.spec_editor_notes = ""
             self.spec_editor_active_field = "name"
 
         self.show_spec_editor_modal = True
+        self.draw_screen()
+
+    def edit_club_spec_notes(self):
+        """Toplevel + Text editor for the notes field on the spec editor modal.
+
+        Only touches self.spec_editor_notes (in-memory draft state) — actual
+        persistence happens when the user hits Save Specs, same as every
+        other field on this modal.
+        """
+        try:
+            top = tk.Toplevel(self.root)
+            top.title("Club Notes")
+            top.configure(bg=theme.SURFACE)
+            top.geometry("420x260")
+            top.transient(self.root)
+
+            text = tk.Text(top, wrap="word", font=(theme.ui_font(), 10))
+            text.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+            text.insert("1.0", self.spec_editor_notes or "")
+            text.focus_set()
+
+            def _save():
+                self._save_club_spec_notes(text.get("1.0", "end-1c"))
+                top.destroy()
+
+            btn_row = tk.Frame(top, bg=theme.SURFACE)
+            btn_row.pack(fill="x", padx=10, pady=(0, 10))
+            tk.Button(btn_row, text="Save", command=_save).pack(side="right", padx=(6, 0))
+            tk.Button(btn_row, text="Cancel", command=top.destroy).pack(side="right")
+        except Exception as exc:
+            print(f"[!] Club notes editor failed: {exc}")
+
+    def _save_club_spec_notes(self, text):
+        """Core notes-write, split out so tests can call it without a Toplevel."""
+        self.spec_editor_notes = text
         self.draw_screen()
 
     def save_spec_editor_values(self):
@@ -1928,7 +2054,8 @@ class ShanktuaryApp:
                 lie_deg=lie_val,
                 shaft=self.spec_editor_shaft.strip(),
                 category=self.spec_editor_category,
-                new_name=name
+                new_name=name,
+                notes=self.spec_editor_notes,
             )
         else:
             self.add_club_to_bag(
@@ -1938,7 +2065,8 @@ class ShanktuaryApp:
                 model=self.spec_editor_model.strip(),
                 loft_deg=loft_val,
                 lie_deg=lie_val,
-                shaft=self.spec_editor_shaft.strip()
+                shaft=self.spec_editor_shaft.strip(),
+                notes=self.spec_editor_notes,
             )
         self.show_spec_editor_modal = False
         self.copy_feedback = f"✓ Saved {name} Specs"
@@ -2164,6 +2292,29 @@ class ShanktuaryApp:
         # Action Buttons
         btn_y1 = y2 - 52
         btn_y2 = btn_y1 + 32
+
+        # Notes row -- lives in the free band between the last input box
+        # (ends y1+434) and the action buttons (btn_y1 = y2-52).
+        notes_y = y1 + 434
+        notes_label_y = notes_y + 14
+        self.canvas.create_text(x1 + 35, notes_label_y, text="Notes:", fill=theme.TEXT_2, font=(theme.ui_font(), 8, "bold"), anchor="w")
+        notes_preview = (self.spec_editor_notes or "").replace("\n", " ").strip()
+        notes_font = (theme.ui_font(), 8)
+        max_preview_w = modal_w - 190
+        if notes_preview:
+            if self._text_width(notes_preview, notes_font) > max_preview_w:
+                while notes_preview and self._text_width(notes_preview + "…", notes_font) > max_preview_w:
+                    notes_preview = notes_preview[:-1]
+                notes_preview += "…"
+        else:
+            notes_preview = "(none)"
+        self.canvas.create_text(x1 + 85, notes_label_y, text=notes_preview, fill=theme.TEXT_3 if notes_preview == "(none)" else theme.TEXT, font=notes_font, anchor="w")
+
+        notes_btn_x1, notes_btn_x2 = x2 - 115, x2 - 35
+        notes_btn_y1, notes_btn_y2 = notes_y + 2, notes_y + 24
+        self.spec_editor_notes_edit_rect = (notes_btn_x1, notes_btn_y1, notes_btn_x2, notes_btn_y2)
+        self.canvas.create_rectangle(notes_btn_x1, notes_btn_y1, notes_btn_x2, notes_btn_y2, fill=theme.SURFACE_2, outline=theme.HAIRLINE)
+        self.canvas.create_text((notes_btn_x1 + notes_btn_x2) // 2, (notes_btn_y1 + notes_btn_y2) // 2, text="Edit Notes", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
 
         # Save Button
         save_x1 = cx - 180
@@ -2845,6 +2996,9 @@ class ShanktuaryApp:
                     self.spec_editor_active_field = f_key
                     self.draw_screen()
                     return
+            if self.spec_editor_notes_edit_rect and self.spec_editor_notes_edit_rect[0] <= event.x <= self.spec_editor_notes_edit_rect[2] and self.spec_editor_notes_edit_rect[1] <= event.y <= self.spec_editor_notes_edit_rect[3]:
+                self.edit_club_spec_notes()
+                return
             if self.spec_editor_save_rect and self.spec_editor_save_rect[0] <= event.x <= self.spec_editor_save_rect[2] and self.spec_editor_save_rect[1] <= event.y <= self.spec_editor_save_rect[3]:
                 self.save_spec_editor_values()
                 return
@@ -2898,6 +3052,8 @@ class ShanktuaryApp:
                         self.rename_active_session()
                     elif s_idx == -3:
                         self.delete_empty_sessions()
+                    elif s_idx == -4:
+                        self.edit_session_notes()
                     elif s_idx <= -1000:
                         # Per-row ✕ delete (encoded as -1000 - index).
                         self.delete_session(-1000 - s_idx)
@@ -2994,6 +3150,13 @@ class ShanktuaryApp:
             if self.sidebar_clear_btn_rect and self.sidebar_clear_btn_rect[0] <= event.x <= self.sidebar_clear_btn_rect[2] and self.sidebar_clear_btn_rect[1] <= event.y <= self.sidebar_clear_btn_rect[3]:
                 self.clear_session()
                 return
+
+            # Check Shot Delete (✕) Clicks -- before card selection, so the
+            # ✕ never falls through to "select this shot" instead.
+            for x1, y1, x2, y2, shot_idx in self.shot_delete_btn_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.delete_shot(shot_idx)
+                    return
 
             # Check Shot Card Clicks
             for x1, y1, x2, y2, shot_idx in self.sidebar_shot_card_rects:
@@ -3464,6 +3627,7 @@ class ShanktuaryApp:
         card_gap = 6
 
         self.sidebar_shot_card_rects.clear()
+        self.shot_delete_btn_rects.clear()
 
         if not filtered_shots:
             self.canvas.create_text(sb_w // 2, 220, text="NO SHOTS RECORDED", fill="#353A4B", font=(theme.ui_font(), 10, "bold"))
@@ -3529,6 +3693,12 @@ class ShanktuaryApp:
                 # model saturates, so repeating it on every card is noise.
                 self.canvas.create_text(20, cy1 + 54, text=t_stamp, fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
+                # Delete ✕ -- bottom-right corner, clear of the top-right
+                # carry text and the timestamp on the bottom-left.
+                del_x1, del_y1, del_x2, del_y2 = sb_w - 30, cy2 - 20, sb_w - 10, cy2 - 2
+                self.canvas.create_text((del_x1 + del_x2) // 2, (del_y1 + del_y2) // 2, text="✕", fill=theme.TEXT_3, font=(theme.ui_font(), 9))
+                self.shot_delete_btn_rects.append((del_x1, del_y1, del_x2, del_y2, real_idx))
+
         # 5. Footer (y: h - 42 to h)
         clear_y1, clear_y2 = h - 38, h - 8
         self.sidebar_clear_btn_rect = (10, clear_y1, sb_w - 10, clear_y2)
@@ -3553,6 +3723,10 @@ class ShanktuaryApp:
             (x1 + dx, y1, x2 + dx, y2, idx)
             for (x1, y1, x2, y2, idx) in self.sidebar_shot_card_rects
         ]
+        self.shot_delete_btn_rects = [
+            (x1 + dx, y1, x2 + dx, y2, idx)
+            for (x1, y1, x2, y2, idx) in self.shot_delete_btn_rects
+        ]
 
     def draw_session_dropdown(self, w, h):
         # Sidebar palette, not the old dark-theme greys. This panel sits on
@@ -3573,6 +3747,7 @@ class ShanktuaryApp:
                       (empty_count == 1 and
                        not self.sessions[self.active_session_index].get("shots")
                        and len(self.sessions) > 1)) else 2
+        extra += 1  # Session notes row is always present
         total_items = len(self.sessions) + extra
         box_h = total_items * item_h + 10
         x2, y2 = x1 + box_w, y1 + box_h
@@ -3627,6 +3802,14 @@ class ShanktuaryApp:
                                     text="Clear empty sessions", fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 9), anchor="w")
             row += 1
+
+        # Session Notes item
+        notes_iy1 = y1 + 5 + (row * item_h)
+        notes_iy2 = notes_iy1 + item_h - 2
+        self.session_menu_items.append((x1 + 4, notes_iy1, x2 - 4, notes_iy2, -4))
+        self.canvas.create_rectangle(x1 + 4, notes_iy1, x2 - 4, notes_iy2, fill=row_bg, outline="")
+        self.canvas.create_text(x1 + 14, (notes_iy1 + notes_iy2) // 2, text="📝 Session notes", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
+        row += 1
 
         # Rename Active Session item
         ren_iy1 = y1 + 5 + (row * item_h)
@@ -6505,6 +6688,10 @@ class ShanktuaryApp:
                         _by = cy1 + (card_h - 15) // 2 if card_h < 50 else cy1 + 4
                         self.canvas.create_rectangle(badge_x1, _by, badge_x2, _by + 15, fill=theme.ACCENT_DEEP, outline="")
                         self.canvas.create_text((badge_x1 + badge_x2) // 2, _by + 7, text="ACTIVE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
+                    elif c.get("notes"):
+                        # Notes indicator only when the ACTIVE badge isn't
+                        # already occupying this corner of the card.
+                        self.canvas.create_text(cx2 - 136, cy1 + 12, text="📝", font=(theme.ui_font(), 9))
 
                     # Action buttons: Edit Specs, Move Up, Move Down
                     # Centre the buttons in the row so they line up on both

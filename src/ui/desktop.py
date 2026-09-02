@@ -99,6 +99,7 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         # These are referenced by overridden painters during base __init__.
         self.design_sidebar_toggle_rect = None
         self.design_shot_card_rects = []
+        self.design_shot_delete_rects = []
         self.design_mode_rects = {}
         self.design_club_btn_rect = None
         self.design_dexterity_btn_rect = None
@@ -266,6 +267,11 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
             return
 
         if not getattr(self, "sidebar_collapsed", False):
+            for x1, y1, x2, y2, shot_idx in getattr(self, "design_shot_delete_rects", []):
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    self.delete_shot(shot_idx)
+                    return
+
             for x1, y1, x2, y2, shot_idx in getattr(self, "design_shot_card_rects", []):
                 if x1 <= x <= x2 and y1 <= y <= y2:
                     if 0 <= shot_idx < len(self.session_shots):

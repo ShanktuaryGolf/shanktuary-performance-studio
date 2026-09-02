@@ -43,6 +43,7 @@ def paint_nav(app, h):
 def paint_sidebar(app, w, h):
     if getattr(app, "sidebar_collapsed", False):
         app.design_shot_card_rects = []
+        app.design_shot_delete_rects = []
         return
 
     # Keep the accepted shell material, session controls and headings.
@@ -62,6 +63,7 @@ def paint_sidebar(app, w, h):
     # Repaint the shot cards over v4 so the geometry and hierarchy are exact.
     app.design_shot_card_rects = []
     app.sidebar_shot_card_rects = []
+    app.design_shot_delete_rects = []
     y = 184
     bottom = h - 52
     for real_idx, shot in v4._filtered_shots(app):
@@ -99,9 +101,18 @@ def paint_sidebar(app, w, h):
         c.create_text(x0 + 58, top_cy, text=club,
                       fill=theme.TEXT if selected else _mix(theme.TEXT_2, theme.TEXT, .05),
                       font=(v4._font(), 11, "bold"), anchor="w")
-        c.create_text(x1 - 22, top_cy, text=f"{carry:.1f} yds",
+        # Carry text is nudged in from the card's right edge to leave the
+        # delete ✕ its own hitbox in the corner, rather than overlapping it.
+        c.create_text(x1 - 38, top_cy, text=f"{carry:.1f} yds",
                       fill=theme.TEXT if selected else theme.TEXT_2,
                       font=(v4._font(), 11, "bold"), anchor="e")
+
+        del_cx, del_cy = x1 - 18, top_cy
+        c.create_text(del_cx, del_cy, text="✕", fill=theme.TEXT_2,
+                      font=(v4._font(), 9), anchor="center")
+        app.design_shot_delete_rects.append(
+            (del_cx - 10, del_cy - 10, del_cx + 10, del_cy + 10, real_idx)
+        )
 
         if selected:
             # Labels need to be labels, not ghost metadata. Values remain a
