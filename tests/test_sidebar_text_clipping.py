@@ -162,3 +162,43 @@ def test_new_session_button_survives_and_stays_clear_of_the_label(app):
     root.update()
 
     assert len(application.sessions) == before + 1, "+ button no longer works"
+
+
+def test_session_button_uses_the_sidebar_palette_not_the_old_grey(app):
+    """The repaint must use the sidebar's own colour family.
+
+    Filling this button with theme.SURFACE_2 (#1D2127, a grey from the older
+    dark theme) against the redesigned blue-teal sidebar (#091B24) rendered
+    as a black box. Assert the fill stays in the sidebar's family: close to
+    the surrounding background, and never a neutral grey.
+    """
+    root, application = app
+    application.get_active_session()["name"] = "Session 1 - 7 Iron"
+    application.draw_screen()
+    root.update()
+
+    canvas = application.canvas
+    rect = application.sidebar_session_btn_rect
+
+    fills = []
+    for item in canvas.find_all():
+        if canvas.type(item) != "rectangle":
+            continue
+        if [int(v) for v in canvas.coords(item)] == [int(v) for v in rect]:
+            fill = canvas.itemcget(item, "fill")
+            if fill:
+                fills.append(fill)
+    assert fills, "session button face is never painted"
+
+    fill = fills[-1]
+    r = int(fill[1:3], 16)
+    g = int(fill[3:5], 16)
+    b = int(fill[5:7], 16)
+
+    # The sidebar palette is blue-teal: blue clearly exceeds red. A neutral
+    # grey (r ~= g ~= b) is the bug.
+    assert b > r + 6, (
+        f"session button fill {fill} is not a sidebar blue-teal "
+        f"(r={r} g={g} b={b}) — this renders as a black/grey box"
+    )
+

@@ -128,32 +128,6 @@ def _filtered_shots(app):
     return pairs
 
 
-def _fit_text(canvas, text, max_px, font):
-    """Shorten ``text`` with an ellipsis until it fits ``max_px``.
-
-    Measures the real rendered width instead of assuming a character count:
-    the UI font is resolved at runtime, so "19 characters" is a different
-    pixel width on different machines.
-    """
-    text = str(text)
-    if max_px <= 0:
-        return ""
-
-    def width(s):
-        probe = canvas.create_text(-4000, -4000, text=s, font=font, anchor="nw")
-        bbox = canvas.bbox(probe)
-        canvas.delete(probe)
-        return (bbox[2] - bbox[0]) if bbox else 0
-
-    if width(text) <= max_px:
-        return text
-    for n in range(len(text) - 1, 0, -1):
-        candidate = text[:n].rstrip() + "…"
-        if width(candidate) <= max_px:
-            return candidate
-    return "…"
-
-
 def paint_sidebar(app, w, h):
     if app.sidebar_collapsed:
         return

@@ -5,7 +5,6 @@ replacing the old church-era header art with the exact new horizontal lockup
 asset and fixing the duplicate New Session + control.
 """
 
-import shell_redesign_v4 as v4
 import shell_redesign_v9 as v9
 import shell_redesign_v11 as v11
 import shell_redesign_v13 as v13
@@ -14,6 +13,34 @@ import theme
 
 NAV_RAIL_W = v13.NAV_RAIL_W
 COLLAPSED_GUTTER_W = v13.COLLAPSED_GUTTER_W
+
+
+def _fit_text(canvas, text, max_px, font):
+    """Shorten ``text`` with an ellipsis until it fits ``max_px``.
+
+    Measures the real rendered width instead of assuming a character count:
+    the UI font is resolved at runtime, so "19 characters" is a different
+    pixel width on different machines. Defined here rather than imported
+    from v4 — v4 imports this module's ancestors, so importing it back
+    would be circular.
+    """
+    text = str(text)
+    if max_px <= 0:
+        return ""
+
+    def width(s):
+        probe = canvas.create_text(-4000, -4000, text=s, font=font, anchor="nw")
+        bbox = canvas.bbox(probe)
+        canvas.delete(probe)
+        return (bbox[2] - bbox[0]) if bbox else 0
+
+    if width(text) <= max_px:
+        return text
+    for n in range(len(text) - 1, 0, -1):
+        candidate = text[:n].rstrip() + "…"
+        if width(candidate) <= max_px:
+            return candidate
+    return "…"
 
 
 def paint_nav(app, h):
@@ -73,10 +100,10 @@ def paint_sidebar(app, w, h):
         avail = chevron_x - text_left - 6
 
         c.create_rectangle(sr[0], sr[1], sr[2], sr[3],
-                           fill=theme.SURFACE_2, outline="")
+                           fill=v13.SIDEBAR_ROW, outline="")
         c.create_text(text_left, control_y,
-                      text=v4._fit_text(c, title, avail,
-                                        (theme.ui_font(), 9, "bold")),
+                      text=_fit_text(c, title, avail,
+                                     (theme.ui_font(), 9, "bold")),
                       fill=theme.TEXT_2,
                       font=(theme.ui_font(), 9, "bold"), anchor="nw")
         c.create_text(chevron_x, control_y + 1, text="⌄", fill=theme.TEXT_3,
