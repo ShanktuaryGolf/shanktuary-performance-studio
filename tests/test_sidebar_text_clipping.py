@@ -29,6 +29,15 @@ tk = pytest.importorskip("tkinter")
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SPS_SHOT_SOURCE_FILE", str(tmp_path / "s.json"))
     monkeypatch.setenv("SPS_SKIP_SPLASH", "1")
+
+    # Redirect session persistence to a throwaway file. Without this, a test
+    # that clicks "+" writes new sessions into the USER'S real
+    # shanktuary_session_history.json — which is exactly how six junk
+    # "Session N - 7 Iron" entries with 0 shots ended up in it.
+    import shanktuary_performance_studio as studio
+
+    monkeypatch.setattr(studio, "SESSION_LOG_PATH", str(tmp_path / "history.json"))
+
     from src.ui import ShanktuaryDesktopApp
 
     try:

@@ -893,6 +893,96 @@ class ShanktuaryApp:
         self.root.after(2000, self.clear_copy_feedback)
         self.draw_screen()
 
+    def delete_session(self, session_idx, confirm=True):
+        """Delete a session, with confirmation when it holds shots.
+
+        Rules that keep this from destroying data:
+          * Never delete the last remaining session — clear it instead, so
+            the app always has somewhere to put the next shot.
+          * A session WITH shots always asks first; an empty one does not
+            (deleting nothing is not a decision worth interrupting for).
+          * The active index is re-pointed so it can never dangle past the
+            end of the list.
+        """
+        if not (0 <= session_idx < len(self.sessions)):
+            return False
+
+        sess = self.sessions[session_idx]
+        name = sess.get("name", "Session")
+        shot_count = len(sess.get("shots", []))
+
+        if confirm and shot_count:
+            try:
+                from tkinter import messagebox
+
+                ok = messagebox.askyesno(
+                    "Delete session",
+                    f"Delete '{name}' and its {shot_count} shot"
+                    f"{'' if shot_count == 1 else 's'}?\n\n"
+                    "This cannot be undone.",
+                    parent=self.root,
+                )
+            except Exception as exc:
+                print(f"[!] Delete confirmation failed: {exc}")
+                return False
+            if not ok:
+                return False
+
+        if len(self.sessions) == 1:
+            # Last session: empty it rather than leaving the app with none.
+            sess["shots"] = []
+            self.selected_shot_index = -1
+            self.current_shot = None
+            self.copy_feedback = f"Cleared '{name}'"
+        else:
+            self.sessions.pop(session_idx)
+            if self.active_session_index > session_idx:
+                self.active_session_index -= 1
+            elif self.active_session_index == session_idx:
+                self.active_session_index = min(session_idx,
+                                                len(self.sessions) - 1)
+            shots = self.session_shots
+            if shots:
+                self.selected_shot_index = len(shots) - 1
+                self.current_shot = shots[-1]
+            else:
+                self.selected_shot_index = -1
+                self.current_shot = None
+            self.copy_feedback = f"Deleted '{name}'"
+
+        self.show_session_dropdown = False
+        self.save_session_to_file()
+        self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+        return True
+
+    def delete_empty_sessions(self):
+        """Remove every session with no shots, keeping the active one.
+
+        Empty sessions accumulate from stray "+" clicks and clutter the
+        list. Nothing with shots in it is ever touched.
+        """
+        if len(self.sessions) <= 1:
+            return 0
+
+        active = self.sessions[self.active_session_index]
+        keep = [s for s in self.sessions
+                if s.get("shots") or s is active]
+        removed = len(self.sessions) - len(keep)
+        if not removed:
+            return 0
+
+        self.sessions[:] = keep
+        self.active_session_index = self.sessions.index(active)
+        self.show_session_dropdown = False
+        self.save_session_to_file()
+        self.copy_feedback = (
+            f"Removed {removed} empty session{'' if removed == 1 else 's'}"
+        )
+        self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+        return removed
+
     def switch_session(self, session_idx):
         if 0 <= session_idx < len(self.sessions):
             self.active_session_index = session_idx
@@ -2804,6 +2894,11 @@ class ShanktuaryApp:
                         self.create_new_session()
                     elif s_idx == -2:
                         self.rename_active_session()
+                    elif s_idx == -3:
+                        self.delete_empty_sessions()
+                    elif s_idx <= -1000:
+                        # Per-row ✕ delete (encoded as -1000 - index).
+                        self.delete_session(-1000 - s_idx)
                     else:
                         self.switch_session(s_idx)
                     return
@@ -3446,46 +3541,94 @@ class ShanktuaryApp:
         ]
 
     def draw_session_dropdown(self, w, h):
+        # Sidebar palette, not the old dark-theme greys. This panel sits on
+        # the redesigned blue-teal drawer; theme.SURFACE (#16191E) read as a
+        # grey slab against it.
+        panel_bg = "#0B1D27"
+        row_bg = "#0D1F29"
+        row_sel = "#18313A"
+        edge = "#24434C"
+        gold = "#D4A24F"
+
         box_w = self.sidebar_width - 20
         x1, y1 = 10, 88
         item_h = 28
-        total_items = len(self.sessions) + 2  # +1 for Rename, +1 for + New Session
+        empty_count = sum(1 for s in self.sessions if not s.get("shots"))
+        # rows: sessions + Rename + New, plus "clear empty" when it applies
+        extra = 3 if (empty_count > 1 or
+                      (empty_count == 1 and
+                       not self.sessions[self.active_session_index].get("shots")
+                       and len(self.sessions) > 1)) else 2
+        total_items = len(self.sessions) + extra
         box_h = total_items * item_h + 10
         x2, y2 = x1 + box_w, y1 + box_h
 
         self.canvas.create_rectangle(x1 + 3, y1 + 3, x2 + 3, y2 + 3, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=panel_bg, outline=edge)
 
         self.session_menu_items.clear()
         for idx, sess in enumerate(self.sessions):
             iy1 = y1 + 5 + (idx * item_h)
             iy2 = iy1 + item_h - 2
-            self.session_menu_items.append((x1 + 4, iy1, x2 - 4, iy2, idx))
 
             is_sel = (idx == self.active_session_index)
-            bg = theme.SURFACE_2 if is_sel else theme.SURFACE
+            bg = row_sel if is_sel else row_bg
             s_name = sess.get("name", f"Session {idx+1}")
             shot_cnt = len(sess.get("shots", []))
 
             self.canvas.create_rectangle(x1 + 4, iy1, x2 - 4, iy2, fill=bg, outline="")
             if is_sel:
                 self.canvas.create_rectangle(x1 + 4, iy1, x1 + 7, iy2, fill=theme.ACCENT_LINE, outline="")
-            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=s_name, fill=theme.TEXT if is_sel else theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
-            self.canvas.create_text(x2 - 12, (iy1 + iy2) // 2, text=f"{shot_cnt}", fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="e")
 
-        # ✏️ Rename Active Session item
-        ren_iy1 = y1 + 5 + (len(self.sessions) * item_h)
+            # Delete control on the right of each row. The active session is
+            # deletable too (the handler re-points the index), but the very
+            # last remaining session is cleared rather than removed.
+            del_x2 = x2 - 8
+            del_x1 = del_x2 - 22
+            self.canvas.create_text((del_x1 + del_x2) // 2, (iy1 + iy2) // 2,
+                                    text="✕", fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 9), anchor="center")
+            # Row click = switch; the ✕ zone is registered first so it wins.
+            self.session_menu_items.append((del_x1, iy1, del_x2, iy2, -1000 - idx))
+            self.session_menu_items.append((x1 + 4, iy1, del_x1 - 2, iy2, idx))
+
+            # Shot count sits left of the ✕ so the two never collide.
+            self.canvas.create_text(x1 + 14, (iy1 + iy2) // 2, text=s_name,
+                                    fill=theme.TEXT if is_sel else theme.TEXT_2,
+                                    font=(theme.ui_font(), 9), anchor="w")
+            self.canvas.create_text(del_x1 - 8, (iy1 + iy2) // 2,
+                                    text=f"{shot_cnt}",
+                                    fill=theme.TEXT_3 if shot_cnt else "#5A7078",
+                                    font=(theme.ui_font(), 9), anchor="e")
+
+        row = len(self.sessions)
+
+        # Optional: clear out empty sessions in one go.
+        if extra == 3:
+            ce_iy1 = y1 + 5 + (row * item_h)
+            ce_iy2 = ce_iy1 + item_h - 2
+            self.session_menu_items.append((x1 + 4, ce_iy1, x2 - 4, ce_iy2, -3))
+            self.canvas.create_rectangle(x1 + 4, ce_iy1, x2 - 4, ce_iy2, fill=row_bg, outline="")
+            self.canvas.create_text(x1 + 14, (ce_iy1 + ce_iy2) // 2,
+                                    text="Clear empty sessions", fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 9), anchor="w")
+            row += 1
+
+        # Rename Active Session item
+        ren_iy1 = y1 + 5 + (row * item_h)
         ren_iy2 = ren_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, ren_iy1, x2 - 4, ren_iy2, -2))
-        self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_rectangle(x1 + 4, ren_iy1, x2 - 4, ren_iy2, fill=row_bg, outline="")
         self.canvas.create_text(x1 + 14, (ren_iy1 + ren_iy2) // 2, text="Rename session", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="w")
+        row += 1
 
         # + Add New Session item
-        add_iy1 = y1 + 5 + ((len(self.sessions) + 1) * item_h)
+        add_iy1 = y1 + 5 + (row * item_h)
         add_iy2 = add_iy1 + item_h - 2
         self.session_menu_items.append((x1 + 4, add_iy1, x2 - 4, add_iy2, -1))
-        self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2, fill=theme.ACCENT, outline="")
-        self.canvas.create_text(x1 + 14, (add_iy1 + add_iy2) // 2, text="＋  New session", fill="#EAF5EE", font=(theme.ui_font(), 9, "bold"), anchor="w")
+        self.canvas.create_rectangle(x1 + 4, add_iy1, x2 - 4, add_iy2,
+                                     fill="#10252E", outline=gold, width=1)
+        self.canvas.create_text(x1 + 14, (add_iy1 + add_iy2) // 2, text="＋  New session", fill="#E3BC70", font=(theme.ui_font(), 9, "bold"), anchor="w")
 
     def draw_filter_dropdown(self, w, h):
         box_w = 180
