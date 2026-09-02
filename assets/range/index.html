@@ -6,12 +6,29 @@
     <title>3D Driving Range - Shanktuary Studio</title>
     <link rel="stylesheet" href="/assets/theme.css">
     <style>
-        /* Range HUD. Colors come from /assets/theme.css (generated from theme.py).
-           Only range-local additions are defined here: glass surfaces that must
-           let the 3D scene show through, which the flat desktop tokens don't cover. */
+        /* Range HUD. Base tokens come from /assets/theme.css, but this page
+           overrides them to the APPROVED desktop palette (navy/teal/gold,
+           src/ui/tokens.py) instead of the legacy hunter-green/grey compat
+           theme -- theme.css itself stays untouched since overlay.html and
+           config.html still consume it directly. See DESIGN_SYSTEM.md. */
         :root {
-            --glass:       rgba(14, 16, 19, 0.72);
-            --glass-2:     rgba(29, 33, 39, 0.86);
+            --bg:            #0A2029;  /* Page Navy */
+            --surface:       #0D2731;  /* Surface */
+            --surface-2:     #15333D;  /* Raised Surface */
+            --hairline:      #2A4C55;  /* Hairline */
+            --text:          #F3F6FA;  /* Primary Text */
+            --text-2:        #B3BEC2;  /* Secondary Text */
+            --text-3:        #70868C;  /* Muted Text */
+            --accent-deep:   #18313A;  /* Active/selected background */
+            --accent:        #D4A24F;  /* Antique Gold -- current/active/primary */
+            --accent-line:   #E3BC70;  /* Light Gold -- highlight strokes */
+            --accent-text:   #D4A24F;  /* Antique Gold -- labels on selected state */
+            --warn:          #F5A524;
+            --danger:        #E34A4A;
+            --guide:         #456D76;
+
+            --glass:       rgba(10, 32, 41, 0.72);
+            --glass-2:     rgba(21, 51, 61, 0.86);
             --glass-line:  rgba(255, 255, 255, 0.10);
             --mono: 'Consolas', 'SF Mono', 'DejaVu Sans Mono', monospace;
         }
@@ -59,15 +76,17 @@
         #nav > * { pointer-events: auto; }
 
         #nav-logo {
-            font-weight: 800;
-            font-size: 0.95rem;
-            letter-spacing: 0.4px;
-            color: var(--text);
+            display: flex;
+            align-items: center;
             margin-right: 6px;
             cursor: pointer;
             white-space: nowrap;
         }
-        #nav-logo span { color: var(--accent-text); }
+        #nav-logo img {
+            height: 28px;
+            width: auto;
+            display: block;
+        }
 
         .nav-tab {
             font-size: 0.86rem;
@@ -1277,7 +1296,7 @@
 
     <!-- ================= Top navigation ================= -->
     <div id="nav">
-        <div id="nav-logo" title="Shanktuary Performance Studio">SHANKTUARY <span>STUDIO</span></div>
+        <div id="nav-logo" title="Shanktuary Performance Studio"><img src="/assets/shanktuary_lockup.png" alt="Shanktuary Performance Studio"></div>
         <div class="nav-tab active" data-tab="range">Range</div>
         <div class="nav-tab" data-tab="metrics" id="tab-metrics">Metrics</div>
         <div class="nav-tab" data-tab="modes" id="tab-modes">Modes</div>
