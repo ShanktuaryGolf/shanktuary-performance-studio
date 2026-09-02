@@ -4184,6 +4184,14 @@ class ShanktuaryApp:
                                     fill=val_col, font=val_font, anchor="w")
 
     def draw_club_dropdown(self, w, h):
+        # Same blue-teal palette as the session dropdown -- both are
+        # drawer-attached menus, not standalone panels, and the old grey
+        # theme.SURFACE colors read as a mismatched leftover next to them.
+        panel_bg = "#0B1D27"
+        row_bg = "#0D1F29"
+        row_sel = "#18313A"
+        edge = "#24434C"
+
         box_w = 180
         x1 = self.club_btn_rect[0] if self.club_btn_rect else w - 245
         x2 = x1 + box_w
@@ -4195,7 +4203,7 @@ class ShanktuaryApp:
         y2 = y1 + box_h
 
         self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y2 + 4, fill="#08090C", outline="")
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=panel_bg, outline=edge)
         self.canvas.create_text(x1 + 14, y1 + 12, text="ACTIVE CLUB", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
 
         self.club_menu_items.clear()
@@ -4205,7 +4213,7 @@ class ShanktuaryApp:
             self.club_menu_items.append((x1 + 6, iy1, x2 - 6, iy2, club_name))
 
             is_sel = (club_name == self.current_club)
-            bg = theme.SURFACE_2 if is_sel else theme.SURFACE
+            bg = row_sel if is_sel else row_bg
             txt_col = theme.TEXT if is_sel else theme.TEXT_2
 
             self.canvas.create_rectangle(x1 + 6, iy1, x2 - 6, iy2, fill=bg, outline="")
@@ -4215,18 +4223,25 @@ class ShanktuaryApp:
 
         # Divider & Add Custom Club Action
         div_y = y1 + 22 + (total_items * item_h) + 2
-        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill=theme.HAIRLINE, width=1)
+        self.canvas.create_line(x1 + 6, div_y, x2 - 6, div_y, fill=edge, width=1)
 
         btn_y1 = div_y + 4
         btn_y2 = btn_y1 + 22
         self.club_menu_items.append((x1 + 6, btn_y1, x2 - 6, btn_y2, "__add_custom__"))
-        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill=theme.SURFACE_2, outline="")
+        self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill=row_sel, outline="")
         self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋  Add custom club", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="center")
 
     def draw_tools_flyout_menu(self, w, h):
         """Tools flyout. Every row states what it does -- navigation says
         where it opens, copy actions show the literal URL -- so open-vs-copy
         is scannable rather than read word by word."""
+        # Same blue-teal palette as the session/club dropdowns -- all three
+        # are drawer-attached menus and should read as one family, not a
+        # mix of the current theme and the old grey theme.SURFACE.
+        panel_bg = "#0B1D27"
+        row_sel = "#18313A"
+        edge = "#24434C"
+
         box_w = 372
         x2 = self.tools_btn_rect[2] if self.tools_btn_rect else w - 16
         x1 = x2 - box_w
@@ -4262,14 +4277,14 @@ class ShanktuaryApp:
         shadow = self.canvas.create_rectangle(x1 + 4, y1 + 4, x2 + 4, y1 + 4,
                                               fill="#08090C", outline="")
         panel = self.canvas.create_rectangle(x1, y1, x2, y1,
-                                             fill=theme.SURFACE, outline=theme.HAIRLINE)
+                                             fill=panel_bg, outline=edge)
 
         self.tools_menu_items.clear()
         curr_y = y1 + 16
 
         for s_idx, (title, items) in enumerate(sections):
             if s_idx > 0:
-                self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
+                self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=edge)
                 curr_y += div_h
             self.canvas.create_text(x1 + 20, curr_y, text=title, fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 8), anchor="w")
@@ -4280,7 +4295,7 @@ class ShanktuaryApp:
                 self.tools_menu_items.append((r[0], r[1], r[2], r[3], action))
                 if primary:
                     self.canvas.create_rectangle(r[0], r[1], r[2], r[3],
-                                                 fill=theme.SURFACE_2, outline="")
+                                                 fill=row_sel, outline="")
                 self.canvas.create_text(x1 + 26, r[1] + 13, text=label,
                                         fill=theme.TEXT if primary else theme.TEXT_2,
                                         font=(theme.ui_font(), 10), anchor="w")
@@ -4291,7 +4306,7 @@ class ShanktuaryApp:
         # Hardware status -- Nova and the balance boards answer the same
         # question ("is my hardware talking to me"), so they sit together.
         curr_y += 4
-        self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=theme.HAIRLINE)
+        self.canvas.create_line(x1 + 20, curr_y, x2 - 20, curr_y, fill=edge)
         curr_y += 18
         self.canvas.create_text(x1 + 20, curr_y, text="HARDWARE", fill=theme.TEXT_3,
                                 font=(theme.ui_font(), 8), anchor="w")
@@ -4341,13 +4356,13 @@ class ShanktuaryApp:
         half = (x2 - x1 - 24 - 8) // 2
         sb = (x1 + 12, curr_y, x1 + 12 + half, curr_y + 38)
         self.tools_menu_items.append((sb[0], sb[1], sb[2], sb[3], "open_setup"))
-        self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=theme.SURFACE_2, outline="")
+        self.canvas.create_rectangle(sb[0], sb[1], sb[2], sb[3], fill=row_sel, outline="")
         self.canvas.create_text((sb[0] + sb[2]) // 2, (sb[1] + sb[3]) // 2, text="Open Setup",
                                 fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
 
         ss = (sb[2] + 8, curr_y, x2 - 12, curr_y + 38)
         self.tools_menu_items.append((ss[0], ss[1], ss[2], ss[3], "open_shot_source"))
-        self.canvas.create_rectangle(ss[0], ss[1], ss[2], ss[3], fill=theme.SURFACE_2, outline="")
+        self.canvas.create_rectangle(ss[0], ss[1], ss[2], ss[3], fill=row_sel, outline="")
         self.canvas.create_text((ss[0] + ss[2]) // 2, (ss[1] + ss[3]) // 2, text="Shot Source",
                                 fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10), anchor="center")
 
