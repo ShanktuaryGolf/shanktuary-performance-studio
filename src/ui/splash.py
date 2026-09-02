@@ -490,7 +490,13 @@ class SplashScreen:
 
         c.create_line(40, y, 96, y, fill=tokens.GOLD, width=2)
         y += 22
-        c.create_text(40, y, text="Connect. Choose. Play.", fill=tokens.TEXT,
+        # Same drop-shadow treatment as the tagline below -- this line sits
+        # over the composited hero photo too, and was already TEXT/bold but
+        # got the shadow added for consistent legibility across the image.
+        headline = "Connect. Choose. Play."
+        c.create_text(41, y + 1, text=headline, fill="#03080B",
+                      font=(theme.ui_font(), 12, "bold"), anchor="nw")
+        c.create_text(40, y, text=headline, fill=tokens.TEXT,
                       font=(theme.ui_font(), 12, "bold"), anchor="nw")
         y += 22
         # This line sits directly over the composited hero photo, whose
