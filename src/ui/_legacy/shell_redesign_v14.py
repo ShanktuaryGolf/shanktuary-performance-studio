@@ -5,6 +5,7 @@ replacing the old church-era header art with the exact new horizontal lockup
 asset and fixing the duplicate New Session + control.
 """
 
+import shell_redesign_v4 as v4
 import shell_redesign_v9 as v9
 import shell_redesign_v11 as v11
 import shell_redesign_v13 as v13
@@ -31,11 +32,16 @@ def paint_sidebar(app, w, h):
     control_y = 75
 
     # v4's accepted drawer hard-coded a filled + at the far right, while v13
-    # also repainted production's separate new-session rect. Remove both and
-    # redraw one deterministic control in the far-right position.
+    # also repainted production's separate new-session rect. Both are gone
+    # now (v13's copy was removed), so only production's own + underneath
+    # needs covering — and that cover must not extend over the session
+    # label, which reaches toward it.
     nr = getattr(app, "sidebar_new_sess_btn_rect", None)
     if nr:
         nx1, ny1, nx2, ny2 = nr
+        # Cover production's button only where the label does not run: the
+        # label baseline sits at control_y..control_y+14, and a full-height
+        # wipe here clipped its tail.
         c.create_rectangle(nx1 - 2, ny1 - 2, nx2 + 2, ny2 + 2,
                            fill=v13.SIDEBAR_BG, outline="")
 
@@ -51,6 +57,30 @@ def paint_sidebar(app, w, h):
 
     # Make the visible geometry the real click target as well.
     app.sidebar_new_sess_btn_rect = (bx1, by1, bx2, by2)
+
+    # Session label LAST. Everything above wipes rectangles over the drawer
+    # (production's + button position, the old + slot), and those wipes ran
+    # after v4 painted the label — clipping its tail to "Session 1 - 7 Iro".
+    # Repainting the button face and label here, once all covering is done,
+    # is the only ordering where nothing can eat it.
+    sr = getattr(app, "sidebar_session_btn_rect", None)
+    if sr:
+        active = app.get_active_session() if hasattr(app, "get_active_session") else {}
+        title = str(active.get("name", "Session"))
+        text_left = theme.RAIL_W + 18
+        # Free space runs to the chevron, which sits just left of the + button.
+        chevron_x = x1 - 66
+        avail = chevron_x - text_left - 6
+
+        c.create_rectangle(sr[0], sr[1], sr[2], sr[3],
+                           fill=theme.SURFACE_2, outline="")
+        c.create_text(text_left, control_y,
+                      text=v4._fit_text(c, title, avail,
+                                        (theme.ui_font(), 9, "bold")),
+                      fill=theme.TEXT_2,
+                      font=(theme.ui_font(), 9, "bold"), anchor="nw")
+        c.create_text(chevron_x, control_y + 1, text="⌄", fill=theme.TEXT_3,
+                      font=(theme.ui_font(), 10), anchor="nw")
 
 
 def paint_top_header(app, w, h, offset_x=0):

@@ -166,16 +166,12 @@ def paint_sidebar(app, w, h):
     c = app.canvas
     x1 = app.sidebar_width
 
-    # Replace the old solid-blue New Session button with a dark equipment
-    # control: gold is the action cue, not a giant filled block.
-    nr = getattr(app, "sidebar_new_sess_btn_rect", None)
-    if nr:
-        x0, y0, x2, y2 = nr
-        c.create_rectangle(x0, y0, x2, y2,
-                           fill="#10252E", outline=GOLD, width=1)
-        c.create_text((x0 + x2) / 2, (y0 + y2) / 2, text="+",
-                      fill=GOLD_LIGHT,
-                      font=(theme.ui_font(), 14, "bold"), anchor="center")
+    # New Session "+" is drawn by v14's paint_sidebar, which repositions it
+    # to x1-46 and owns the click rect. v13 used to paint its own copy at
+    # the production position (~x=200); v14 then covered that rect and drew
+    # the real one — but the stale copy was painted AFTER the session label
+    # and clipped its tail ("Session 1 - 7 Iro"). Drawing it once, in v14,
+    # removes the overlap entirely.
 
     # Make the outer drawer seam consistent with the new rail instead of the
     # older blue-gray shell line.

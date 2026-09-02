@@ -128,6 +128,32 @@ def _filtered_shots(app):
     return pairs
 
 
+def _fit_text(canvas, text, max_px, font):
+    """Shorten ``text`` with an ellipsis until it fits ``max_px``.
+
+    Measures the real rendered width instead of assuming a character count:
+    the UI font is resolved at runtime, so "19 characters" is a different
+    pixel width on different machines.
+    """
+    text = str(text)
+    if max_px <= 0:
+        return ""
+
+    def width(s):
+        probe = canvas.create_text(-4000, -4000, text=s, font=font, anchor="nw")
+        bbox = canvas.bbox(probe)
+        canvas.delete(probe)
+        return (bbox[2] - bbox[0]) if bbox else 0
+
+    if width(text) <= max_px:
+        return text
+    for n in range(len(text) - 1, 0, -1):
+        candidate = text[:n].rstrip() + "…"
+        if width(candidate) <= max_px:
+            return candidate
+    return "…"
+
+
 def paint_sidebar(app, w, h):
     if app.sidebar_collapsed:
         return
@@ -138,12 +164,11 @@ def paint_sidebar(app, w, h):
     _sidebar_material(app, x0, 0, x1, h)
     c.create_line(x1 - 1, 0, x1 - 1, h, fill=SOFT_LINE)
 
-    # Wordmark is intentionally allowed to stay uppercase as brand typography;
-    # the rest of the UI moves away from all-caps labels.
-    c.create_text(x0 + 18, 19, text="SHANKTUARY", fill=theme.TEXT,
-                  font=(_font(), 14, "bold"), anchor="nw")
-    c.create_text(x0 + 18, 43, text="PERFORMANCE GOLF", fill=BLUE_TEXT,
-                  font=(_font(), 7, "bold"), anchor="nw")
+    # Brand lives in the 52px top header (paint_top_header), which is drawn
+    # over this area. The v4-era sidebar wordmark at y=19/43 predates that
+    # header: it is now covered, leaving only the clipped bottom sliver of
+    # "PERFORMANCE GOLF" peeking out under the logo. Removed — the sidebar
+    # content below starts at y=52 and is unaffected.
 
     # Replace the production collapse oddity with a conventional chevron.
     tr = getattr(app, "sidebar_toggle_rect", None)
@@ -158,16 +183,17 @@ def paint_sidebar(app, w, h):
     fr = getattr(app, "sidebar_filter_btn_rect", None)
     active_sess = app.get_active_session() if hasattr(app, "get_active_session") else {}
     sess_title = str(active_sess.get("name", "Session"))
-    if len(sess_title) > 19:
-        sess_title = sess_title[:17] + "…"
+    # Ellipsizing happens in pixels below (_fit_text), against the space the
+    # "+" button actually leaves free.
 
     control_y = 75
     if sr:
-        # Paint at a stable location while keeping the production click target.
-        c.create_text(x0 + 18, control_y, text=sess_title, fill=theme.TEXT_2,
-                      font=(_font(), 9, "bold"), anchor="nw")
-        c.create_text(x1 - 66, control_y + 1, text="⌄", fill=theme.TEXT_3,
-                      font=(_font(), 10), anchor="nw")
+        # The session label and chevron are painted by v14's paint_sidebar,
+        # which runs after this one. It has to be last: several later passes
+        # wipe rectangles across this row, and anything drawn here gets its
+        # tail clipped ("Session 1 - 7 Iro"). Only the click target is set
+        # up here.
+        pass
     if nr:
         c.create_rectangle(x1 - 46, control_y - 6, x1 - 16, control_y + 24,
                            fill=BLUE, outline="")
