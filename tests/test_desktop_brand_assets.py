@@ -12,6 +12,7 @@ def test_brand_assets_exist_in_source_checkout():
         "nova_logo.png",
         "gspro_logo.png",
         "iron_side.png",
+        "golf_ball.png",
     ):
         assert (root / name).is_file(), f"missing desktop brand asset: {name}"
 

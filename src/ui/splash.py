@@ -321,7 +321,10 @@ class SplashScreen:
                 alpha = 30 if band % 3 else 42
                 d.line(pts, fill=(teal_line[0], teal_line[1], teal_line[2], alpha), width=1)
 
-            # Club + ball composite, from the approved flat product cutout.
+            # Club + ball composite. The ball is Sean's real product photo
+            # (assets/golf_ball.png -- a pre-cut RGBA), not a procedural
+            # approximation; the club is still the flat cutout, no photo
+            # asset exists for that yet.
             iron_path = asset_path("iron_side.png")
             if os.path.isfile(iron_path):
                 iron = Image.open(iron_path).convert("RGBA")
@@ -334,7 +337,7 @@ class SplashScreen:
                 iron = iron.rotate(-18, expand=True, resample=Image.Resampling.BICUBIC)
 
                 ball_d = max(8, int(ih * 0.15))
-                ball = self._build_ball(ball_d)
+                ball = self._load_ball(ball_d)
 
                 ball_x = int(iw * 0.30)
                 ball_y = int(ih * 0.60)
@@ -353,7 +356,8 @@ class SplashScreen:
                     (ball_x - ball_d // 2, ball_y + ball_d - int(ball_d * 0.25)),
                     shadow,
                 )
-                img.paste(ball, (ball_x, ball_y), ball)
+                if ball is not None:
+                    img.paste(ball, (ball_x, ball_y), ball)
 
             # Soft vignette — corners recede without crushing the panel.
             vign = Image.new("L", (iw, ih), 200)
@@ -373,8 +377,26 @@ class SplashScreen:
         return photo
 
     @staticmethod
+    def _load_ball(diameter):
+        """The real product photo (assets/golf_ball.png), sized to fit.
+
+        Falls back to a procedural lit/dimpled sphere only if the shipped
+        asset is somehow missing -- never silently draw nothing.
+        """
+        from PIL import Image
+
+        path = asset_path("golf_ball.png")
+        try:
+            if os.path.isfile(path):
+                im = Image.open(path).convert("RGBA")
+                return im.resize((diameter, diameter), Image.Resampling.LANCZOS)
+        except Exception:
+            pass
+        return SplashScreen._build_ball(diameter)
+
+    @staticmethod
     def _build_ball(diameter):
-        """A simple lit/dimpled sphere — no photo asset exists for this."""
+        """A simple lit/dimpled sphere — fallback only; see _load_ball."""
         from PIL import Image, ImageDraw
 
         im = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
