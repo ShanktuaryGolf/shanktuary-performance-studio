@@ -455,8 +455,10 @@ class SplashScreen:
             c.create_rectangle(0, 0, split, self.h, fill=tokens.RAIL_BG, outline="")
         c.create_line(split, 0, split, self.h, fill=tokens.HAIRLINE)
 
-        # Brand: the square shield scales cleanly as an icon, with the
-        # wordmark set in live text (gold, per the approved brand direction).
+        # Brand: approved gold wordmark image (matches Pictures/logo/shanktuary.png)
+        # plus a live-drawn tagline underneath, sized/spaced so the two never
+        # collide -- the old live-text wordmark ran straight into the tagline
+        # at some window sizes.
         y = 40
         text_x = 40
         shield = self._load_image("shield", asset_path("shanktuary_shield.png"), 40)
@@ -464,11 +466,17 @@ class SplashScreen:
             c.create_image(40, y, image=shield, anchor="nw")
             text_x = 40 + 40 + 12
 
-        c.create_text(text_x, y + 2, text="SHANKTUARY", fill=tokens.GOLD,
-                      font=(theme.ui_font(), 18, "bold"), anchor="nw")
-        c.create_text(text_x + 1, y + 26, text="P E R F O R M A N C E   G O L F   S T U D I O",
-                      fill=tokens.TEAL_TEXT, font=(theme.ui_font(), 7), anchor="nw")
-        y += 92
+        wordmark = self._load_image(
+            "wordmark_gold", asset_path("shanktuary_wordmark_gold.png"), 26
+        )
+        if wordmark is not None:
+            c.create_image(text_x, y, image=wordmark, anchor="nw")
+        else:
+            c.create_text(text_x, y + 2, text="SHANKTUARY", fill=tokens.GOLD,
+                          font=(theme.ui_font(), 18, "bold"), anchor="nw")
+        c.create_text(text_x + 1, y + 34, text="P E R F O R M A N C E   G O L F   S T U D I O",
+                      fill=tokens.TEAL_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="nw")
+        y += 100
 
         c.create_text(40, y, text="W E L C O M E   T O", fill=tokens.TEAL_TEXT,
                       font=(theme.ui_font(), 10), anchor="nw")
@@ -485,8 +493,15 @@ class SplashScreen:
         c.create_text(40, y, text="Connect. Choose. Play.", fill=tokens.TEXT,
                       font=(theme.ui_font(), 12, "bold"), anchor="nw")
         y += 22
-        c.create_text(40, y, text="Let's get you ready to play your best.",
-                      fill=tokens.TEXT_2, font=(theme.ui_font(), 10), anchor="nw")
+        # This line sits directly over the composited hero photo, whose
+        # brightness varies underneath it -- muted TEXT_2 at a light weight
+        # was unreadable in places. A dark drop-shadow plus a brighter,
+        # bolder fill keeps it legible against any part of the image.
+        tagline = "Let's get you ready to play your best."
+        c.create_text(41, y + 1, text=tagline, fill="#03080B",
+                      font=(theme.ui_font(), 10, "bold"), anchor="nw")
+        c.create_text(40, y, text=tagline,
+                      fill=tokens.TEXT, font=(theme.ui_font(), 10, "bold"), anchor="nw")
 
         c.create_text(40, self.h - 32, text="\u201c  I N   P U R S U I T   O F   P U R E .",
                       fill=tokens.TEAL_SOFT, font=(theme.ui_font(), 9), anchor="nw")
