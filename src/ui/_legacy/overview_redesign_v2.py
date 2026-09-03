@@ -286,16 +286,20 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
     c = app.canvas
     _panel(app, x0, y0, x1, y1, "CLUB DELIVERY")
     rows = [
-        ("Club path", f"{abs(v['path']):.1f}° {'in-to-out' if v['path'] >= 0 else 'out-to-in'}"),
-        ("Face to path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"),
-        ("Face to target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"),
+        ("Club path", f"{abs(v['path']):.1f}° {'in-to-out' if v['path'] >= 0 else 'out-to-in'}"
+                      if v.get("path_known", True) else "not measured"),
+        ("Face to path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"
+                         if v.get("face_path_known", True) else "not measured"),
+        ("Face to target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"
+                           if v.get("face_target_known", True) else "not measured"),
         ("Spin axis", f"{abs(v['axis']):.1f}° {'R' if v['axis'] > 0 else 'L'}"),
     ]
     yy = y0 + 42
     for label, val in rows:
         c.create_text(x0 + 14, yy, text=label, fill=theme.TEXT_3,
                       font=(theme.ui_font(), 8), anchor="nw")
-        c.create_text(x0 + 102, yy, text=val, fill=theme.TEXT,
+        c.create_text(x0 + 102, yy, text=val,
+                      fill=theme.TEXT if val != "not measured" else theme.TEXT_3,
                       font=(theme.ui_font(), 9), anchor="nw")
         yy += 19
 

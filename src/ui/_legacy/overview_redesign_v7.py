@@ -526,7 +526,9 @@ def _fmt_hla(hla):
 def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
                   launch, spin, apex, offline, descent, hang_time, club_path,
                   face_to_path, spin_axis, face_to_target=0.0, shot_name="",
-                  smash_clamped=False, offset_x=0, top_bar_h=52):
+                  smash_clamped=False, offset_x=0, top_bar_h=52,
+                  club_path_known=True, face_to_path_known=True,
+                  face_to_target_known=True):
     c = app.canvas
     _depth_background(app, offset_x, top_bar_h, offset_x + avail_w, h)
 

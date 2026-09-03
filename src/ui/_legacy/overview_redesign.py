@@ -52,6 +52,9 @@ def _num(val, default=0.0, app=None):
 def _values(shot, app=None):
     ogc = (shot or {}).get("open_golf_coach", {}) or {}
     us = ogc.get("us_customary_units", {}) or {}
+    # GSPro (and any source with no club-level sensor) simply omits these
+    # keys -- {} / None is "not measured", not "0 degrees". A shot missing
+    # them must not render as a fabricated dead-flush strike.
     return {
         "carry": float(us.get("carry_distance_yards") or 0.0),
         "total": float(us.get("total_distance_yards") or 0.0),
@@ -68,6 +71,9 @@ def _values(shot, app=None):
         "path": _num(ogc.get("club_path_degrees"), 0.0, app),
         "face_path": _num(ogc.get("club_face_to_path_degrees"), 0.0, app),
         "face_target": _num(ogc.get("club_face_to_target_degrees"), 0.0, app),
+        "path_known": ogc.get("club_path_degrees") not in (None, {}, ""),
+        "face_path_known": ogc.get("club_face_to_path_degrees") not in (None, {}, ""),
+        "face_target_known": ogc.get("club_face_to_target_degrees") not in (None, {}, ""),
         "shape": str(_handed(ogc.get("shot_name"), "Straight", app) or "Straight"),
     }
 

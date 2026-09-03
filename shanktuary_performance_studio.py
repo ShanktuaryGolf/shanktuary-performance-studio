@@ -4395,6 +4395,11 @@ class ShanktuaryApp:
 
             hand_key = "left_handed" if self.is_left_handed else "right_handed"
             path_data = ogc.get("club_path_degrees", {})
+            # GSPro (and any source that doesn't report club-level data) simply
+            # omits this key -- {} is "no data", not "0 degrees". Track that
+            # distinction so the quad view can say so honestly instead of
+            # drawing a fake dead-straight path.
+            club_path_known = path_data not in (None, {}, "")
             if isinstance(path_data, dict):
                 club_path = path_data.get(hand_key, path_data.get("right_handed", 0.0))
             else:
@@ -4402,6 +4407,7 @@ class ShanktuaryApp:
                 if self.is_left_handed: club_path = -club_path
 
             f2p_data = ogc.get("club_face_to_path_degrees", {})
+            face_to_path_known = f2p_data not in (None, {}, "")
             if isinstance(f2p_data, dict):
                 face_to_path = f2p_data.get(hand_key, f2p_data.get("right_handed", 0.0))
             else:
@@ -4409,6 +4415,7 @@ class ShanktuaryApp:
                 if self.is_left_handed: face_to_path = -face_to_path
 
             f2t_data = ogc.get("club_face_to_target_degrees", {})
+            face_to_target_known = f2t_data not in (None, {}, "")
             if isinstance(f2t_data, dict):
                 face_to_target = f2t_data.get(hand_key, f2t_data.get("right_handed", 0.0))
             else:
@@ -4451,8 +4458,11 @@ class ShanktuaryApp:
             dynamic_loft = dl_val.get(hand_key, dl_val.get("right_handed", 0.0)) if isinstance(dl_val, dict) else float(dl_val or 0.0)
         else:
             club_path = 0.0
+            club_path_known = False
             face_to_path = 0.0
+            face_to_path_known = False
             face_to_target = 0.0
+            face_to_target_known = False
             vert_launch = 0.0
             horiz_launch = 0.0
             sidespin = 0.0
@@ -4503,7 +4513,7 @@ class ShanktuaryApp:
             # Mode 1: Delivery (4-Quadrant Studio)
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h, club_path_known=club_path_known, face_to_path_known=face_to_path_known, face_to_target_known=face_to_target_known)
             else:
                 self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=(theme.ui_font(), 32, "bold"))
         elif self.view_mode == 2:
@@ -4543,7 +4553,9 @@ class ShanktuaryApp:
                     peak_height_yds, offline_yds, descent_angle, hang_time,
                     club_path, face_to_path, spin_axis, face_to_target,
                     shot_name, smash_clamped=smash_clamped, offset_x=offset_x,
-                    top_bar_h=52)
+                    top_bar_h=52, club_path_known=club_path_known,
+                    face_to_path_known=face_to_path_known,
+                    face_to_target_known=face_to_target_known)
             else:
                 self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#1D2621", font=(theme.ui_font(), 26))
         elif self.view_mode == 0:
@@ -4552,7 +4564,7 @@ class ShanktuaryApp:
         else:
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
             if self.current_shot:
-                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h)
+                self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h, club_path_known=club_path_known, face_to_path_known=face_to_path_known, face_to_target_known=face_to_target_known)
 
         # 4. Floating Overlay Menus (Top Layer)
         if self.show_session_dropdown:
@@ -5421,7 +5433,9 @@ class ShanktuaryApp:
                                club_speed, smash, launch, spin, apex, offline,
                                descent, hang_time, club_path, face_to_path,
                                spin_axis, face_to_target=0.0, shot_name="",
-                               smash_clamped=False, offset_x=0, top_bar_h=52):
+                               smash_clamped=False, offset_x=0, top_bar_h=52,
+                               club_path_known=True, face_to_path_known=True,
+                               face_to_target_known=True):
         """Landing view: this shot at a glance, plus session context.
 
         Layout follows the approved full-screen mockup -- header, primary
@@ -5564,9 +5578,12 @@ class ShanktuaryApp:
             ("Offline", f"{abs(offline):.1f} {'L' if offline < 0 else 'R'} yds"),
         ])
         card(x0 + card_w + gap, "CLUB DELIVERY", [
-            ("Club path", f"{abs(club_path):.1f}° {'in-to-out' if club_path > 0 else 'out-to-in'}"),
-            ("Face to target", f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}"),
-            ("Face to path", f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}"),
+            ("Club path", f"{abs(club_path):.1f}° {'in-to-out' if club_path > 0 else 'out-to-in'}"
+                          if club_path_known else "not measured"),
+            ("Face to target", f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}"
+                               if face_to_target_known else "not measured"),
+            ("Face to path", f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}"
+                             if face_to_path_known else "not measured"),
             ("Spin axis", f"{abs(spin_axis):.1f} {'R' if spin_axis > 0 else 'L'}"),
             ("Total spin", f"{int(spin)} rpm"),
         ], tag="DERIVED")
@@ -5965,7 +5982,7 @@ class ShanktuaryApp:
                   else f"{abs(dev):.1f}° from expected launch")
         return (side, detail, theme.WARN)
 
-    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108):
+    def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108, club_path_known=True, face_to_path_known=True, face_to_target_known=True):
         if isinstance(shot_rank, dict):
             shot_rank = shot_rank.get("left_handed" if self.is_left_handed else "right_handed", shot_rank.get("right_handed", "A"))
         shot_rank = str(shot_rank or "A")
@@ -6052,22 +6069,37 @@ class ShanktuaryApp:
                                 text="DERIVED", fill=theme.TEXT_3,
                                 font=cap_f, anchor="e")
 
-        path_val = f"{abs(club_path):.1f}° " + (
-            ("in-to-out" if club_path < 0 else "out-to-in") if self.is_left_handed
-            else ("in-to-out" if club_path > 0 else "out-to-in"))
-        annot(gut_l, q1_top + int(34 * font_scale), "CLUB PATH", path_val)
+        path_val = (
+            f"{abs(club_path):.1f}° " + (
+                ("in-to-out" if club_path < 0 else "out-to-in") if self.is_left_handed
+                else ("in-to-out" if club_path > 0 else "out-to-in"))
+        ) if club_path_known else "not measured"
+        annot(gut_l, q1_top + int(34 * font_scale), "CLUB PATH", path_val,
+              col=None if club_path_known else theme.TEXT_3)
         self.canvas.create_line(q1_cx - int(150 * scale), q1_cy, q1_cx + int(150 * scale), q1_cy, fill=theme.GUIDE, width=1, dash=(4, 4))
         
         overhead_h = int(140 * scale)
-        ov_img = self.get_rotated_overhead_asset(overhead_h, face_to_target, mirror=self.is_left_handed)
+        # Face-to-target rotates the club-head sprite; with no data, draw it
+        # square-on (0°) rather than implying a face angle nobody measured.
+        ov_img = self.get_rotated_overhead_asset(
+            overhead_h, face_to_target if face_to_target_known else 0.0,
+            mirror=self.is_left_handed,
+        )
         if ov_img:
             self.canvas.create_image(q1_cx, q1_cy, image=ov_img, anchor="c")
 
-        path_rad = math.radians(club_path)
-        arrow_len = int(75 * scale)
-        px1, py1 = self.rotate_point(q1_cx, q1_cy + arrow_len, q1_cx, q1_cy, path_rad)
-        px2, py2 = self.rotate_point(q1_cx, q1_cy - arrow_len, q1_cx, q1_cy, path_rad)
-        self.canvas.create_line(px1, py1, px2, py2, fill=theme.ACCENT_TEXT, width=max(3, int(3.5 * scale)), arrow=tk.LAST, arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
+        if club_path_known:
+            path_rad = math.radians(club_path)
+            arrow_len = int(75 * scale)
+            px1, py1 = self.rotate_point(q1_cx, q1_cy + arrow_len, q1_cx, q1_cy, path_rad)
+            px2, py2 = self.rotate_point(q1_cx, q1_cy - arrow_len, q1_cx, q1_cy, path_rad)
+            self.canvas.create_line(px1, py1, px2, py2, fill=theme.ACCENT_TEXT, width=max(3, int(3.5 * scale)), arrow=tk.LAST, arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
+        else:
+            # No directional arrow when the source never reported a path --
+            # a straight line here would silently claim a dead-flush swing.
+            arrow_len = int(75 * scale)
+            self.canvas.create_line(q1_cx, q1_cy + arrow_len, q1_cx, q1_cy - arrow_len,
+                                    fill=theme.TEXT_3, width=max(2, int(2.5 * scale)), dash=(3, 4))
 
         ball_offset_x = int(-50 * scale) if self.is_left_handed else int(50 * scale)
         ball_r = int(9 * scale)
@@ -6077,9 +6109,13 @@ class ShanktuaryApp:
         # its own y, so the last row needs that much clearance from q1_bot.
         face_y = q1_bot - pair_h * 2 - int(14 * font_scale)
         annot(gut_l, face_y, "FACE TO PATH",
-              f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}")
+              f"{abs(face_to_path):.1f}° {'open' if face_to_path > 0 else 'closed'}"
+              if face_to_path_known else "not measured",
+              col=None if face_to_path_known else theme.TEXT_3)
         annot(gut_l, face_y + pair_h, "FACE TO TARGET",
-              f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}")
+              f"{abs(face_to_target):.1f}° {'open' if face_to_target > 0 else 'closed'}"
+              if face_to_target_known else "not measured",
+              col=None if face_to_target_known else theme.TEXT_3)
         annot(gut_r, q1_cy + int(12 * font_scale), "SIDESPIN",
               f"{int(abs(sidespin))} rpm", anchor="e")
 

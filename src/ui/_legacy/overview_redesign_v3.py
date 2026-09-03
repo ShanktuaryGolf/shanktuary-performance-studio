@@ -101,24 +101,33 @@ def _draw_delivery_compact(app, x0, y0, x1, y1, v):
     c = app.canvas
     _panel(app, x0, y0, x1, y1, "CLUB DELIVERY")
     rows = [
-        ("Path", f"{abs(v['path']):.1f}° {'in→out' if v['path'] >= 0 else 'out→in'}"),
-        ("Face/path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"),
-        ("Face/target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"),
+        ("Path", f"{abs(v['path']):.1f}° {'in→out' if v['path'] >= 0 else 'out→in'}"
+                 if v.get("path_known", True) else "not measured"),
+        ("Face/path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"
+                      if v.get("face_path_known", True) else "not measured"),
+        ("Face/target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"
+                        if v.get("face_target_known", True) else "not measured"),
         ("Spin axis", f"{abs(v['axis']):.1f}° {'R' if v['axis'] > 0 else 'L'}"),
     ]
     yy = y0 + 42
     for label, value in rows:
         c.create_text(x0 + 10, yy, text=label.upper(), fill=theme.TEXT_3,
                       font=(theme.ui_font(), 6, "bold"), anchor="nw")
-        c.create_text(x0 + 72, yy - 1, text=value, fill=theme.TEXT,
+        c.create_text(x0 + 72, yy - 1, text=value,
+                      fill=theme.TEXT if value != "not measured" else theme.TEXT_3,
                       font=(theme.ui_font(), 8, "bold"), anchor="nw")
         yy += 20
 
-    # Mini path/face glyph: blue travel direction + orange clubface.
+    # Mini path/face glyph: blue travel direction + orange clubface. Skip
+    # when path is genuinely unmeasured -- a flat dashed guide with no
+    # travel-direction line makes the absence visible instead of drawing a
+    # deceptive dead-straight line as if it were real data.
     cx = x0 + (x1 - x0) * .74
     cy = y1 - 34
     span = min(38, (x1 - x0) * .17)
     c.create_line(cx - span, cy, cx + span, cy, fill=theme.GUIDE, dash=(3, 4))
+    if not v.get("path_known", True):
+        return
     pdy = -math.tan(math.radians(max(-12, min(12, v['path'])))) * span
     c.create_line(cx - span, cy + pdy, cx + span, cy - pdy,
                   fill=BLUE_LINE, width=2, arrow="last")
@@ -130,7 +139,9 @@ def _draw_delivery_compact(app, x0, y0, x1, y1, v):
 def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
                   launch, spin, apex, offline, descent, hang_time, club_path,
                   face_to_path, spin_axis, face_to_target=0.0, shot_name="",
-                  smash_clamped=False, offset_x=0, top_bar_h=52):
+                  smash_clamped=False, offset_x=0, top_bar_h=52,
+                  club_path_known=True, face_to_path_known=True,
+                  face_to_target_known=True):
     c = app.canvas
     _texture(app, offset_x, top_bar_h, offset_x + avail_w, h)
 

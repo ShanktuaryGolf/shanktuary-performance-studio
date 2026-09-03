@@ -33,20 +33,29 @@ def _handed(app, value, default=0.0):
         return _num(value, default)
 
 
-def _delivery_takeaway(app, path, face_path):
-    # Path signs are mirrored for LH in the production page.
-    in_to_out = path < 0 if getattr(app, "is_left_handed", False) else path > 0
-    if abs(path) <= 0.7:
-        p = "Neutral path"
-    else:
-        p = "In-to-out delivery" if in_to_out else "Out-to-in delivery"
+def _delivery_takeaway(app, path, face_path, path_known=True, face_path_known=True):
+    if not path_known and not face_path_known:
+        return "Club delivery not reported by this source"
 
-    if abs(face_path) <= 0.6:
-        f = "face nearly square to path"
-    elif face_path > 0:
-        f = "face open to path"
+    # Path signs are mirrored for LH in the production page.
+    if path_known:
+        in_to_out = path < 0 if getattr(app, "is_left_handed", False) else path > 0
+        if abs(path) <= 0.7:
+            p = "Neutral path"
+        else:
+            p = "In-to-out delivery" if in_to_out else "Out-to-in delivery"
     else:
-        f = "face closed to path"
+        p = "Path not reported"
+
+    if face_path_known:
+        if abs(face_path) <= 0.6:
+            f = "face nearly square to path"
+        elif face_path > 0:
+            f = "face open to path"
+        else:
+            f = "face closed to path"
+    else:
+        f = "face not reported"
     return f"{p} · {f}"
 
 
@@ -146,7 +155,8 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                      vert_launch, horiz_launch, sidespin, backspin, total_spin,
                      spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name,
                      shot_rank, smash, ball_speed=0.0, offset_x=0,
-                     top_bar_h=108):
+                     top_bar_h=108, club_path_known=True, face_to_path_known=True,
+                     face_to_target_known=True):
     """Overlay only the areas that need polish after production draws the page."""
     c = app.canvas
     avail_h = h - top_bar_h - 10
@@ -183,8 +193,11 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                   font=(theme.ui_font(), max(6, int(7 * fs)), "bold"),
                   anchor="center")
     c.create_text(gut_r, top_bar_h + int(39 * fs),
-                  text=_delivery_takeaway(app, club_path, face_to_path),
-                  fill=theme.ACCENT_TEXT, font=small_bold, anchor="e")
+                  text=_delivery_takeaway(app, club_path, face_to_path,
+                                          path_known=club_path_known,
+                                          face_path_known=face_to_path_known),
+                  fill=theme.ACCENT_TEXT if (club_path_known or face_to_path_known) else theme.TEXT_3,
+                  font=small_bold, anchor="e")
 
     # --- Q2: remove duplicated backspin. Show actual club-delivery inputs only
     # when the shot payload contains them.

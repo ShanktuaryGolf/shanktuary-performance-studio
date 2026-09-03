@@ -19,17 +19,26 @@ _mix = v7._mix
 
 
 def _delivery_takeaway(v):
+    path_known = v.get("path_known", True)
+    face_path_known = v.get("face_path_known", True)
+    if not path_known and not face_path_known:
+        return "Club delivery not reported by this source"
+
     path = float(v.get("path", 0.0))
     face_path = float(v.get("face_path", 0.0))
 
-    if path > 0.7:
+    if not path_known:
+        p = "Path not reported"
+    elif path > 0.7:
         p = "In-to-out delivery"
     elif path < -0.7:
         p = "Out-to-in delivery"
     else:
         p = "Neutral path"
 
-    if abs(face_path) <= 0.6:
+    if not face_path_known:
+        f = "face not reported"
+    elif abs(face_path) <= 0.6:
         f = "face nearly square to path"
     elif face_path > 0:
         f = "face open to path"
@@ -133,9 +142,12 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
 
     table_w = w * .43
     rows = [
-        ("Path", f"{abs(v['path']):.1f}° {'in→out' if v['path'] >= 0 else 'out→in'}"),
-        ("Face / Path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"),
-        ("Face / Target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"),
+        ("Path", f"{abs(v['path']):.1f}° {'in→out' if v['path'] >= 0 else 'out→in'}"
+                 if v.get("path_known", True) else "not measured"),
+        ("Face / Path", f"{abs(v['face_path']):.1f}° {'open' if v['face_path'] >= 0 else 'closed'}"
+                        if v.get("face_path_known", True) else "not measured"),
+        ("Face / Target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"
+                          if v.get("face_target_known", True) else "not measured"),
         ("Spin Axis", f"{abs(v['axis']):.1f}° {'R' if v['axis'] > 0 else 'L'}"),
     ]
 
@@ -143,7 +155,8 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
     for label, value in rows:
         c.create_text(x0, yy, text=label, fill=theme.TEXT_2,
                       font=(_ui_font(), 9), anchor="nw")
-        c.create_text(x0 + table_w * .47, yy - 1, text=value, fill=SECTION_TEXT,
+        c.create_text(x0 + table_w * .47, yy - 1, text=value,
+                      fill=SECTION_TEXT if value != "not measured" else theme.TEXT_3,
                       font=(_ui_font(), 10, "bold"), anchor="nw")
         yy += 24
 
@@ -158,26 +171,37 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
     c.create_text(cx, cy - length - 22, text="TARGET", fill=theme.TEXT_3,
                   font=(_ui_font(), 8, "bold"), anchor="s")
 
-    path_deg = max(-12.0, min(12.0, v["path"]))
-    dx = math.tan(math.radians(path_deg)) * length * mirror
-    x_start, y_start = cx - dx, cy + length
-    x_end, y_end = cx + dx, cy - length
-    c.create_line(x_start, y_start, x_end, y_end, fill=BLUE_LINE, width=3,
-                  arrow="last", arrowshape=(11, 13, 5))
-    c.create_text(x_end + (8 if mirror > 0 else -8), y_end + 8, text="PATH",
-                  fill=BLUE_TEXT, font=(_ui_font(), 8, "bold"),
-                  anchor="w" if mirror > 0 else "e")
+    if v.get("path_known", True):
+        path_deg = max(-12.0, min(12.0, v["path"]))
+        dx = math.tan(math.radians(path_deg)) * length * mirror
+        x_start, y_start = cx - dx, cy + length
+        x_end, y_end = cx + dx, cy - length
+        c.create_line(x_start, y_start, x_end, y_end, fill=BLUE_LINE, width=3,
+                      arrow="last", arrowshape=(11, 13, 5))
+        c.create_text(x_end + (8 if mirror > 0 else -8), y_end + 8, text="PATH",
+                      fill=BLUE_TEXT, font=(_ui_font(), 8, "bold"),
+                      anchor="w" if mirror > 0 else "e")
+    else:
+        # No fabricated dead-straight travel line -- a dashed neutral guide
+        # with no arrow makes the absence visible instead of implying data.
+        c.create_line(cx, cy + length, cx, cy - length,
+                      fill=theme.TEXT_3, width=2, dash=(3, 5))
+        c.create_text(cx + (10 if mirror > 0 else -10), cy - length + 8,
+                      text="PATH N/A", fill=theme.TEXT_3,
+                      font=(_ui_font(), 8, "bold"),
+                      anchor="w" if mirror > 0 else "e")
 
-    face_deg = max(-16.0, min(16.0, v["face_target"])) * mirror
-    theta = math.radians(face_deg)
-    half = 28
-    fx = math.cos(theta) * half
-    fy = math.sin(theta) * half
-    c.create_line(cx - fx, cy - fy, cx + fx, cy + fy, fill=ORANGE, width=4)
-    c.create_oval(cx - 4, cy - 4, cx + 4, cy + 4,
-                  fill=theme.TEXT_2, outline=theme.BG)
-    c.create_text(cx + fx + 7, cy + fy, text="FACE", fill=ORANGE,
-                  font=(_ui_font(), 8, "bold"), anchor="w")
+    if v.get("face_target_known", True):
+        face_deg = max(-16.0, min(16.0, v["face_target"])) * mirror
+        theta = math.radians(face_deg)
+        half = 28
+        fx = math.cos(theta) * half
+        fy = math.sin(theta) * half
+        c.create_line(cx - fx, cy - fy, cx + fx, cy + fy, fill=ORANGE, width=4)
+        c.create_oval(cx - 4, cy - 4, cx + 4, cy + 4,
+                      fill=theme.TEXT_2, outline=theme.BG)
+        c.create_text(cx + fx + 7, cy + fy, text="FACE", fill=ORANGE,
+                      font=(_ui_font(), 8, "bold"), anchor="w")
 
 
 def draw_overview(*args, **kwargs):
