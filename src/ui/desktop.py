@@ -242,6 +242,12 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
     def handle_mouse_press(self, event):
         x, y = event.x, event.y
 
+        # The board step-on prompt is a full-window takeover owned by the
+        # production class. The redesigned shell's hit rects are still live
+        # underneath it, so defer before testing any of them.
+        if getattr(self, "show_board_assign_modal", False):
+            return studio.ShanktuaryApp.handle_mouse_press(self, event)
+
         if getattr(self, "view_mode", None) == 3:
             for rect, submode in getattr(self, "design_dispersion_tab_rects", []):
                 if self._design_hit(rect, x, y):

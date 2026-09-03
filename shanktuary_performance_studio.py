@@ -739,6 +739,10 @@ class ShanktuaryApp:
         self.setup_step_b_rect = None
         self.setup_align_rect = None
         self.setup_stance_rect = None
+        # Full-screen step-on prompt for the dual-board assignment wizard.
+        self.show_board_assign_modal = False
+        self.board_modal_cancel_rect = None
+        self.board_modal_done_rect = None
         self.setup_tare_rect = None
         # Aim calibration: where the Nova points relative to the target line.
         # The device has no aim calibration of its own, so an off-square unit
@@ -1783,6 +1787,33 @@ class ShanktuaryApp:
         self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def handle_key_press(self, event):
+        # The step-on prompt owns the keyboard while it is up. Escape must
+        # always back out: a user who stepped on the wrong board first needs
+        # a way to restart rather than be stuck with it.
+        if self.show_board_assign_modal:
+            if event.keysym == "Escape":
+                self.show_board_assign_modal = False
+                pm = getattr(obs_server, "pressure_manager", None)
+                if pm:
+                    try:
+                        pm.reset_assignment_wizard()
+                    except Exception as e:
+                        print(f"[!] Could not reset assignment wizard: {e}")
+                self.copy_feedback = "Assignment cancelled"
+                self.root.after(2000, self.clear_copy_feedback)
+                self.draw_screen()
+                return "break"
+            if event.keysym in ("Return", "KP_Enter"):
+                wiz = None
+                pm = getattr(obs_server, "pressure_manager", None)
+                if pm:
+                    wiz = getattr(pm, "assignment_wizard", None)
+                if wiz and wiz.get_status().get("is_complete"):
+                    self.show_board_assign_modal = False
+                    self.draw_screen()
+                return "break"
+            return "break"
+
         if self.show_aim_modal:
             if event.keysym == "Escape":
                 self.show_aim_modal = False
@@ -2373,8 +2404,9 @@ class ShanktuaryApp:
 
                 # Views that render live pressure state need the repaint:
                 # Swing Lab (8) and Setup (10). Without this the calibration
-                # countdown is drawn once and frozen.
-                if self.view_mode in (8, 10):
+                # countdown is drawn once and frozen. The step-on prompt shows
+                # live per-board weight, so it needs the repaint from ANY view.
+                if self.view_mode in (8, 10) or self.show_board_assign_modal:
                     self.draw_screen()
         except Exception:
             pass
@@ -2585,6 +2617,14 @@ class ShanktuaryApp:
         return nx, ny
 
     def handle_mouse_hover(self, event):
+        # The step-on prompt covers the window; only its own buttons are live.
+        if self.show_board_assign_modal:
+            for r in (self.board_modal_done_rect, self.board_modal_cancel_rect):
+                if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                    self.canvas.config(cursor="hand2")
+                    return
+            self.canvas.config(cursor="")
+            return
         # 0a. In-Canvas Spec Editor Modal Hover
         if self.show_spec_editor_modal:
             for cx1, cy1, cx2, cy2, _ in self.spec_editor_cat_chips:
@@ -2802,6 +2842,32 @@ class ShanktuaryApp:
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
+        # 0. Board assignment prompt. Checked before anything else: it covers
+        # the whole window, so clicks must not fall through to the controls
+        # painted underneath it.
+        if self.show_board_assign_modal:
+            def _hit(r):
+                return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
+
+            pm = getattr(obs_server, "pressure_manager", None)
+            if _hit(self.board_modal_done_rect):
+                self.show_board_assign_modal = False
+                self.draw_screen()
+                return
+            if _hit(self.board_modal_cancel_rect):
+                self.show_board_assign_modal = False
+                if pm:
+                    try:
+                        pm.reset_assignment_wizard()
+                    except Exception as e:
+                        print(f"[!] Could not reset assignment wizard: {e}")
+                self.copy_feedback = "Assignment cancelled"
+                self.root.after(2000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+            # Swallow every other click while the prompt is up.
+            return
+
         # 0a. Rail Setup slot. Checked before the modal handler so the button
         # also closes the modal -- otherwise clicking it while open would be
         # swallowed by the modal's own hit testing and feel dead.
@@ -3217,6 +3283,11 @@ class ShanktuaryApp:
                         # rather than pretending the wizard started.
                         self.copy_feedback = st.get(
                             "message", "Step on the board under your LEFT foot")
+                        # Only take over the screen if it really started. On a
+                        # refusal the toast carries the reason and the Setup
+                        # page stays put.
+                        if st.get("phase") in ("waiting_left", "waiting_right"):
+                            self.show_board_assign_modal = True
                     self.root.after(4000, self.clear_copy_feedback)
                 self.draw_screen()
                 return
@@ -4561,6 +4632,12 @@ class ShanktuaryApp:
             self.draw_custom_club_modal(w, h)
         elif self.show_aim_modal:
             self.draw_aim_measure_modal(w, h)
+
+        # The step-on prompt outranks every other modal: the user is standing
+        # on a board several feet from the screen, and nothing else matters
+        # until they finish or cancel.
+        if self.show_board_assign_modal:
+            self.draw_board_assign_modal(w, h)
 
         # 6. Toast Notification (Always on Top)
         if self.copy_feedback:
@@ -7945,6 +8022,169 @@ class ShanktuaryApp:
                 self.canvas.create_line(bb[0] - 16, y1 + 12, bb[0] - 4, y1 + 12,
                                         fill=col, width=2)
                 lx = bb[0] - 24
+
+    def draw_board_assign_modal(self, w, h):
+        """Full-screen, room-readable prompt for the step-on assignment wizard.
+
+        The wizard's whole interaction happens with the user standing several
+        feet away, about to put a foot on a board -- not sitting at the
+        keyboard. A 7pt caption inside a sidebar card is unreadable from
+        there, so this takes over the screen and states the one thing that
+        matters in type large enough to read across a room.
+        """
+        pm = getattr(obs_server, "pressure_manager", None)
+        wiz = getattr(pm, "assignment_wizard", None) if pm else None
+        st = wiz.get_status() if wiz else {}
+        phase = st.get("phase", "idle")
+        w_a = float(st.get("board_a_weight", 0.0) or 0.0)
+        w_b = float(st.get("board_b_weight", 0.0) or 0.0)
+
+        # Dim everything behind so the instruction is the only thing competing
+        # for attention.
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="")
+
+        # Scale type to the window: this must stay legible on a garage TV as
+        # well as a laptop panel.
+        s = max(0.75, min(1.6, w / 1600.0))
+        f_head = max(28, int(52 * s))
+        f_sub = max(15, int(23 * s))
+        f_kg = max(22, int(40 * s))
+        f_label = max(11, int(15 * s))
+
+        cx = w // 2
+
+        if phase == "waiting_left":
+            headline = "Step on your LEFT board"
+            sub = "Put your LEFT foot on one board and leave it there"
+        elif phase == "waiting_right":
+            headline = "Now step on your RIGHT board"
+            sub = "Keep both feet down — the other board is your right"
+        elif phase == "complete":
+            headline = "Both boards assigned"
+            sub = "Left and right are set. You can step off."
+        else:
+            headline = "Board assignment"
+            sub = st.get("message", "")
+
+        head_col = theme.ACCENT_TEXT if phase != "complete" else theme.ACCENT
+
+        # Lay the block out from its true total height so it sits centred,
+        # rather than hanging off a hardcoded offset from the middle.
+        plate_w = int(min(300, w * 0.24))
+        plate_h = int(plate_w * 0.62)
+        gap = int(60 * s)
+        btn_h = int(46 * s)
+        gap_head = int(14 * s)      # headline -> subtitle
+        gap_plates = int(34 * s)    # subtitle -> plates
+        gap_dots = int(40 * s)      # plates -> progress dots
+        gap_btn = int(34 * s)       # dots -> button
+
+        block_h = (f_head + gap_head + f_sub + gap_plates + plate_h
+                   + gap_dots + gap_btn + btn_h)
+        y = max(int(40 * s), (h - block_h) // 2)
+
+        self.canvas.create_text(cx, y, text=headline,
+                                fill=head_col,
+                                font=(theme.ui_font(), f_head, "bold"),
+                                anchor="n")
+        y += f_head + gap_head
+        self.canvas.create_text(cx, y, text=sub,
+                                fill=theme.TEXT_2,
+                                font=(theme.ui_font(), f_sub), anchor="n")
+        y += f_sub + gap_plates
+
+        # Two live board plates. Seeing the weight jump on the plate you just
+        # stepped on is the confirmation that the app read the RIGHT board --
+        # which is the thing that used to be impossible to tell.
+        top = y
+
+        # Threshold mirrors BoardAssignmentWizard.WEIGHT_THRESHOLD.
+        thresh = float(getattr(wiz, "threshold", 5.0) or 5.0)
+
+        for i, (label, kg) in enumerate((("BOARD A", w_a), ("BOARD B", w_b))):
+            px1 = cx - plate_w - gap // 2 + i * (plate_w + gap)
+            px2 = px1 + plate_w
+            loaded = kg > thresh
+
+            # Highlight whichever plate is currently carrying weight, so the
+            # user gets immediate feedback that this specific board is live.
+            if loaded:
+                edge, face = theme.ACCENT_LINE, theme.ACCENT_DEEP
+            else:
+                edge, face = theme.HAIRLINE, theme.SURFACE_2
+
+            self.canvas.create_rectangle(px1, top, px2, top + plate_h,
+                                         fill=face, outline=edge, width=3 if loaded else 1)
+            self.canvas.create_text((px1 + px2) // 2, top + int(18 * s),
+                                    text=label, fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label), anchor="center")
+            self.canvas.create_text((px1 + px2) // 2, top + plate_h // 2 + int(4 * s),
+                                    text=f"{kg:.0f}",
+                                    fill=theme.TEXT if loaded else theme.TEXT_3,
+                                    font=(theme.ui_font(), f_kg, "bold"),
+                                    anchor="center")
+            self.canvas.create_text((px1 + px2) // 2,
+                                    top + plate_h // 2 + f_kg,
+                                    text="kg", fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label), anchor="center")
+
+            # Once a board has been claimed, say which foot owns it.
+            owned = ""
+            if wiz is not None:
+                board = wiz.board_a if i == 0 else wiz.board_b
+                if wiz.left_board is not None and board == wiz.left_board:
+                    owned = "LEFT"
+                elif wiz.right_board is not None and board == wiz.right_board:
+                    owned = "RIGHT"
+            if owned:
+                self.canvas.create_text((px1 + px2) // 2, top + plate_h - int(16 * s),
+                                        text=owned, fill=theme.ACCENT_TEXT,
+                                        font=(theme.ui_font(), f_label, "bold"),
+                                        anchor="center")
+
+        # Progress dots: two steps, so the user knows another one is coming.
+        dot_y = top + plate_h + gap_dots
+        r_dot = max(5, int(7 * s))
+        for i in range(2):
+            done = (phase == "complete") or (phase == "waiting_right" and i == 0)
+            here = (phase == "waiting_left" and i == 0) or \
+                   (phase == "waiting_right" and i == 1)
+            dx = cx - int(20 * s) + i * int(40 * s)
+            self.canvas.create_oval(dx - r_dot, dot_y - r_dot,
+                                    dx + r_dot, dot_y + r_dot,
+                                    fill=theme.ACCENT if (done or here) else theme.HAIRLINE,
+                                    outline=theme.ACCENT_LINE if here else "",
+                                    width=2 if here else 0)
+
+        # Actions. Escape / Cancel always works: a user who steps on the wrong
+        # board first must be able to back out rather than live with it.
+        btn_w = int(180 * s)
+        by1 = dot_y + gap_btn
+        if phase == "complete":
+            self.board_modal_done_rect = (cx - btn_w // 2, by1,
+                                          cx + btn_w // 2, by1 + btn_h)
+            self.board_modal_cancel_rect = None
+            self.canvas.create_rectangle(*self.board_modal_done_rect,
+                                         fill=theme.ACCENT_DEEP,
+                                         outline=theme.ACCENT_LINE, width=2)
+            self.canvas.create_text(cx, by1 + btn_h // 2, text="Done",
+                                    fill=theme.ACCENT_TEXT,
+                                    font=(theme.ui_font(), f_sub, "bold"),
+                                    anchor="center")
+        else:
+            self.board_modal_done_rect = None
+            self.board_modal_cancel_rect = (cx - btn_w // 2, by1,
+                                            cx + btn_w // 2, by1 + btn_h)
+            self.canvas.create_rectangle(*self.board_modal_cancel_rect,
+                                         fill=theme.SURFACE_2, outline=theme.HAIRLINE)
+            self.canvas.create_text(cx, by1 + btn_h // 2, text="Cancel",
+                                    fill=theme.TEXT_2,
+                                    font=(theme.ui_font(), f_sub), anchor="center")
+            self.canvas.create_text(cx, by1 + btn_h + int(22 * s),
+                                    text=f"Needs more than {thresh:.0f} kg to register  ·  Esc to cancel",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), max(9, int(11 * s))),
+                                    anchor="center")
 
     def draw_setup_viewport(self, avail_w, h, offset_x=0):
         """Setup / hardware view -- see the Setup view mockup.
