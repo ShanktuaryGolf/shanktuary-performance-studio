@@ -1,16 +1,75 @@
 """Unit tests for Windows Bluetooth MAC reverse-PIN calculations."""
 
+import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, '/home/sean/sps')
+from src.hardware.pressure import bluetooth_windows
 from src.hardware.pressure.bluetooth_windows import (
+    _normalize_mac,
     format_mac_display,
+    get_manual_mac_override,
     mac_has_zero_byte,
     mac_to_wii_pin,
     mac_to_wii_pin_bytes,
     mac_to_wii_pin_display,
 )
+
+
+class TestManualMacOverride(unittest.TestCase):
+    """Auto-detection can fail or be wrong; there must always be a manual way
+    to supply the host MAC, or the board simply cannot be paired."""
+
+    def setUp(self):
+        bluetooth_windows.get_host_bluetooth_mac.cache_clear()
+
+    def tearDown(self):
+        bluetooth_windows.get_host_bluetooth_mac.cache_clear()
+
+    def test_normalize_accepts_common_formats(self):
+        for raw in ("38:FC:98:3B:B4:DC", "38-FC-98-3B-B4-DC",
+                    "38FC983BB4DC", "38fc983bb4dc"):
+            self.assertEqual(_normalize_mac(raw), "38FC983BB4DC", raw)
+
+    def test_normalize_rejects_junk(self):
+        for raw in (None, "", "not-a-mac", "38FC98", "38FC983BB4DCFF", "ZZ:..."):
+            self.assertIsNone(_normalize_mac(raw), raw)
+
+    def test_env_override_wins(self):
+        with mock.patch.dict(os.environ,
+                             {"SHANKTUARY_BT_MAC": "38:FC:98:3B:B4:DC"}):
+            self.assertEqual(get_manual_mac_override(), "38FC983BB4DC")
+            self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
+                             "38FC983BB4DC")
+
+    def test_env_override_produces_expected_pin(self):
+        with mock.patch.dict(os.environ,
+                             {"SHANKTUARY_BT_MAC": "38FC983BB4DC"}):
+            mac = bluetooth_windows.get_host_bluetooth_mac()
+        assert mac is not None
+        self.assertEqual(mac_to_wii_pin(mac), "\xdc\xb4\x3b\x98\xfc\x38")
+
+    def test_bad_env_override_is_ignored(self):
+        with mock.patch.dict(os.environ, {"SHANKTUARY_BT_MAC": "garbage"}):
+            self.assertIsNone(get_manual_mac_override())
+
+    def test_registry_is_preferred_over_pnp_on_windows(self):
+        """The PnP path scrapes any 12 hex digits out of a device id, and a
+        BTHENUM id embeds the REMOTE address -- so it must never outrank the
+        authoritative registry value."""
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(bluetooth_windows.sys, "platform", "win32"), \
+                mock.patch.object(bluetooth_windows, "_try_registry",
+                                  return_value="AAAAAAAAAAAA") as reg, \
+                mock.patch.object(bluetooth_windows, "_try_powershell_pnp",
+                                  return_value="BBBBBBBBBBBB") as pnp:
+            bluetooth_windows.get_host_bluetooth_mac.cache_clear()
+            self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
+                             "AAAAAAAAAAAA")
+            reg.assert_called_once()
+            pnp.assert_not_called()
 
 
 class TestBluetoothPIN(unittest.TestCase):

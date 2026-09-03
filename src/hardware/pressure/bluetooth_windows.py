@@ -23,21 +23,30 @@ import sys
 def get_host_bluetooth_mac() -> str | None:
     """Return the local Bluetooth adapter MAC address as 12-char uppercase hex 'AABBCCDDEEFF'.
 
-    Tries multiple detection methods across Windows and Linux.
+    Tries multiple detection methods across Windows and Linux, most reliable
+    first. A manual override always wins -- see `get_manual_mac_override`.
     """
+    override = get_manual_mac_override()
+    if override:
+        return override
+
     if sys.platform == "win32":
-        # Method 1: PowerShell — Get-PnpDevice Bluetooth radio address
-        mac = _try_powershell_pnp()
+        # Method 1: Registry — BTHPORT LocalDeviceAddress. This is the
+        # authoritative record of the HOST radio address and is checked first.
+        mac = _try_registry()
         if mac:
             return mac
 
-        # Method 2: PowerShell NetAdapter
+        # Method 2: PowerShell NetAdapter (Bluetooth PAN adapter MAC).
         mac = _try_powershell_netadapter()
         if mac:
             return mac
 
-        # Method 3: Registry — BTHPORT parameters
-        mac = _try_registry()
+        # Method 3: PnP InstanceId scraping. LAST resort: it regex-matches any
+        # 12 hex digits in the id, and a BTHENUM id embeds the REMOTE device
+        # address -- so this can confidently return the wrong MAC and hand the
+        # user a PIN that will never pair. Only trust it if nothing else works.
+        mac = _try_powershell_pnp()
         if mac:
             return mac
 
@@ -50,6 +59,43 @@ def get_host_bluetooth_mac() -> str | None:
         if mac:
             return mac
 
+    return None
+
+
+def _normalize_mac(value) -> str | None:
+    """Return a clean 12-char uppercase hex MAC, or None if it isn't one."""
+    if not value:
+        return None
+    raw = str(value).replace(":", "").replace("-", "").replace(" ", "").upper()
+    if len(raw) == 12 and all(c in "0123456789ABCDEF" for c in raw):
+        return raw
+    return None
+
+
+def get_manual_mac_override() -> str | None:
+    """Read a user-supplied host adapter MAC.
+
+    Auto-detection can fail or (via the PnP path) be wrong, and without a PIN
+    the board simply cannot be paired -- so there must always be a manual way
+    out. Checked in order:
+
+      1. SHANKTUARY_BT_MAC environment variable
+      2. "host_bt_mac" in ~/.shanktuary/wbb_calibration.json
+
+    Accepts any of 'AA:BB:CC:DD:EE:FF', 'AA-BB-...', or bare hex.
+    """
+    env = _normalize_mac(os.environ.get("SHANKTUARY_BT_MAC"))
+    if env:
+        return env
+
+    try:
+        import json
+        cal = os.path.expanduser("~/.shanktuary/wbb_calibration.json")
+        if os.path.exists(cal):
+            with open(cal, "r", encoding="utf-8") as f:
+                return _normalize_mac(json.load(f).get("host_bt_mac"))
+    except Exception:
+        pass
     return None
 
 

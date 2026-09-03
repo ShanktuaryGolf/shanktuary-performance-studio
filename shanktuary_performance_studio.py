@@ -8328,10 +8328,20 @@ class ShanktuaryApp:
         else:
             self.setup_pin_copy_rect = None
             self.canvas.create_text(rx0 + 18, py,
-                                    text="Bluetooth adapter not detected — no PIN available",
+                                    text="Bluetooth adapter not detected — PIN unavailable",
                                     fill=theme.WARN,
+                                    font=(theme.ui_font(), 8), anchor="nw")
+            # Never leave the user stuck: without a PIN the board cannot be
+            # paired at all, so name the manual route explicitly.
+            self.canvas.create_text(rx0 + 18, py + 14,
+                                    text="Run diagnose_wbb.py, or set host_bt_mac in",
+                                    fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 7), anchor="nw")
-            py += 18
+            self.canvas.create_text(rx0 + 18, py + 25,
+                                    text="~/.shanktuary/wbb_calibration.json",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            py += 38
 
         # Two buttons: OS Bluetooth settings (where pairing actually happens)
         # and the platform pairing helper.

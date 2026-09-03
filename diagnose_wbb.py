@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Diagnostic script for Wii Balance Board on Windows."""
 
+import os
 import sys
 import time
+
+# The PIN helper lives in src/; make it importable when this script is run
+# directly from anywhere.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 print("=" * 60)
 print("  Wii Balance Board Windows Diagnostic Tool")
@@ -18,16 +23,21 @@ try:
 except ImportError:
     print("[✗] hidapi is NOT installed!")
     print("    Please run: pip install hidapi")
-    sys.exit(1)
+    print("    (The pairing PIN below does not need hidapi.)")
+    hid = None
 
 # 2. Enumerate all HID devices
-print("\nScanning for HID devices...")
-try:
-    devices = hid.enumerate()
-    print(f"Total HID devices found: {len(devices)}")
-except Exception as e:
-    print(f"[!] Error enumerating HID devices: {e}")
-    sys.exit(1)
+devices = []
+if hid is None:
+    print("\n[!] Skipping HID scan (hidapi unavailable).")
+else:
+    print("\nScanning for HID devices...")
+    try:
+        devices = hid.enumerate()
+        print(f"Total HID devices found: {len(devices)}")
+    except Exception as e:
+        print(f"[!] Error enumerating HID devices: {e}")
+        devices = []
 
 wbb_candidates = []
 for idx, d in enumerate(devices):
@@ -57,7 +67,10 @@ if not wbb_candidates:
     print("\nListing first 10 other HID devices found:")
     for d in devices[:10]:
         print(f"  VID: 0x{d.get('vendor_id', 0):04X} PID: 0x{d.get('product_id', 0):04X} | {d.get('product_string', '')} | {d.get('manufacturer_string', '')}")
-    sys.exit(0)
+    # Do NOT exit here. "No board found" is exactly when the user needs the
+    # pairing PIN printed at the end of this script -- exiting hid the one
+    # piece of information that unblocks them.
+    print("\n    The pairing PIN is printed at the end of this report.")
 
 # 3. Test opening each candidate
 print(f"\nTesting connection to {len(wbb_candidates)} board(s)...")
@@ -228,6 +241,93 @@ if len(wbb_candidates) >= 2:
     finally:
         dev1.close()
         dev2.close()
+
+print("\n" + "=" * 60)
+print("  BLUETOOTH PAIRING PIN")
+print("=" * 60)
+print("Windows asks for a PIN when you add the board. It is derived from")
+print("THIS PC's Bluetooth adapter MAC, so it is different on every machine.")
+print("A blinking board light means pairing never completed.\n")
+
+try:
+    from src.hardware.pressure.bluetooth_windows import (
+        _try_linux_bluetoothctl,
+        _try_linux_sysfs,
+        _try_powershell_netadapter,
+        _try_powershell_pnp,
+        _try_registry,
+        format_mac_display,
+        get_host_bluetooth_mac,
+        get_manual_mac_override,
+        mac_has_zero_byte,
+        mac_to_wii_pin_display,
+    )
+
+    override = get_manual_mac_override()
+    if override:
+        print(f"[i] Manual override in effect: {format_mac_display(override)}")
+        print("    (from SHANKTUARY_BT_MAC or host_bt_mac in wbb_calibration.json)\n")
+
+    # Show EVERY method's answer, not just the winner. If two disagree, the
+    # PnP one is the liar -- it scrapes any 12 hex digits out of a device id
+    # and a BTHENUM id contains the REMOTE address, not the host adapter.
+    if sys.platform == "win32":
+        methods = [
+            ("Registry BTHPORT (authoritative)", _try_registry),
+            ("PowerShell NetAdapter", _try_powershell_netadapter),
+            ("PowerShell PnP InstanceId (unreliable)", _try_powershell_pnp),
+        ]
+    else:
+        methods = [
+            ("Linux sysfs", _try_linux_sysfs),
+            ("Linux bluetoothctl", _try_linux_bluetoothctl),
+        ]
+
+    print("Detection methods:")
+    seen = {}
+    for label, fn in methods:
+        try:
+            got = fn()
+        except Exception as e:
+            got = None
+            print(f"  [!] {label}: raised {e}")
+        if got:
+            seen[label] = got
+            print(f"  [+] {label:40s} {format_mac_display(got)}")
+            print(f"      {'':40s} PIN: {mac_to_wii_pin_display(got)}")
+        else:
+            print(f"  [-] {label:40s} (no result)")
+
+    distinct = set(seen.values())
+    if len(distinct) > 1:
+        print("\n[!] Methods DISAGREE. Trust the registry value; if pairing")
+        print("    fails, try each PIN in turn.")
+
+    mac = get_host_bluetooth_mac()
+    print()
+    if mac:
+        print(f"  Adapter MAC : {format_mac_display(mac)}")
+        print(f"  PAIRING PIN : {mac_to_wii_pin_display(mac)}")
+        if mac_has_zero_byte(mac):
+            print("\n  [!] This PIN contains a NULL byte (shown as ␀). Some")
+            print("      Windows prompts cannot accept it. If pairing fails,")
+            print("      use a different Bluetooth adapter.")
+        print("\n  Enter that PIN when Windows asks. It is raw characters, not")
+        print("  digits -- copy it from the app's Setup page rather than")
+        print("  retyping it.")
+    else:
+        print("  [!] Could not determine the host adapter MAC.")
+        print("      Find it manually:")
+        print("        Windows : Settings > Bluetooth & devices > Device info")
+        print("                  or: reg query HKLM\\SYSTEM\\CurrentControlSet"
+              "\\Services\\BTHPORT\\Parameters /v LocalDeviceAddress")
+        print("        Linux   : bluetoothctl list")
+        print("      Then set it permanently, either:")
+        print("        set SHANKTUARY_BT_MAC=AABBCCDDEEFF")
+        print('        or add "host_bt_mac": "AABBCCDDEEFF" to')
+        print("        ~/.shanktuary/wbb_calibration.json")
+except Exception as e:
+    print(f"[!] PIN helper unavailable: {e}")
 
 print("\n" + "=" * 60)
 print("Diagnostic Complete.")
