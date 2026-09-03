@@ -348,6 +348,25 @@ obs_state = OBSState()
 
 CALIBRATION_FILE = os.path.expanduser("~/.shanktuary/wbb_calibration.json")
 
+# Placeholder identifiers the assignment wizard used to invent when a second
+# board was not actually enumerated. They are not device paths, and opening a
+# backend with one silently fell back to "first board matching the WBB
+# VID/PID" -- which is the SAME physical board the left handle already owns.
+# The result was an app that reported a configured dual setup while reading
+# one board twice. Treat them as "no device".
+_PLACEHOLDER_BOARD_IDS = frozenset({
+    "Board A", "Board B", b"Board A", b"Board B",
+})
+
+
+def _is_placeholder_board_id(value) -> bool:
+    """True when `value` is a wizard placeholder rather than a real device path."""
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes)) and not value:
+        return True
+    return value in _PLACEHOLDER_BOARD_IDS
+
 # --- Biomechanical Pressure Subsystem Manager ---
 class PressureManager:
     """Manages Wii Balance Board hardware, simulator, and 60Hz telemetry broadcasting."""
@@ -380,7 +399,11 @@ class PressureManager:
         self.thread = None
         self.latest_frame = None
         self.last_shot_trace = None
-        self.lock = threading.Lock()
+        # Reentrant: several public methods legitimately call one another
+        # while holding it (update_assignment_wizard -> start_assignment_wizard,
+        # set_board_mode -> _set_simulator_unlocked). A plain Lock deadlocks
+        # the calling thread outright on those paths.
+        self.lock = threading.RLock()
         self._load_calibration()
         self._init_subsystem()
 
@@ -404,7 +427,11 @@ class PressureManager:
             self._latest_raw_reading = None
             self._last_reconnect_attempt = 0.0
             try:
-                self.backend = self._create_hardware_backend()
+                # Honour a restored dual assignment. Calling
+                # _create_hardware_backend() bare would open a single board
+                # even when both are assigned, so the app came up in single
+                # mode until something else re-triggered the dual path.
+                self._set_simulator_unlocked(self.is_simulator)
             except Exception:
                 self.backend = None
             self.running = True
@@ -436,35 +463,32 @@ class PressureManager:
                         self._last_reconnect_attempt = now
                         with self.lock:
                             try:
-                                self.backend = self._create_hardware_backend()
+                                # Dual-aware: a bare _create_hardware_backend()
+                                # here would silently demote a configured dual
+                                # setup to one board after any dropout.
+                                self._set_simulator_unlocked(self.is_simulator)
                             except Exception:
                                 pass
                             backend = self.backend
 
-                # 1. Wizard multi-board polling
+                # 1. Wizard multi-board polling. Only a genuine two-backend
+                # setup drives the wizard. The old code fell back to splitting
+                # ONE board's left/right cells into board_a/board_b, so
+                # shifting weight on a single board walked the wizard all the
+                # way to "both boards assigned" -- a dual configuration the
+                # user did not have.
                 if wiz and wiz.phase in ("waiting_left", "waiting_right"):
-                    w_a = wiz.board_a_weight
-                    w_b = wiz.board_b_weight
                     if wiz_a and wiz_b:
+                        w_a = wiz.board_a_weight
+                        w_b = wiz.board_b_weight
                         rd_a = wiz_a.read()
                         rd_b = wiz_b.read()
                         if rd_a:
                             w_a = rd_a.total_weight
                         if rd_b:
                             w_b = rd_b.total_weight
-                    elif wiz_a and not wiz_b:
-                        rd_a = wiz_a.read()
-                        if rd_a:
-                            w_a = rd_a.top_left + rd_a.bottom_left
-                            w_b = rd_a.top_right + rd_a.bottom_right
-                    elif backend and backend.is_open:
-                        rd = backend.read()
-                        if rd:
-                            w_a = rd.top_left + rd.bottom_left
-                            w_b = rd.top_right + rd.bottom_right
-
-                    if w_a > 0.0 or w_b > 0.0:
-                        self.update_assignment_wizard(w_a, w_b)
+                        if w_a > 0.0 or w_b > 0.0:
+                            self.update_assignment_wizard(w_a, w_b)
 
                 # 2. Standard stream loop
                 if backend and backend.is_open:
@@ -577,6 +601,20 @@ class PressureManager:
                     self.stance_width_mm = float(data["stance_width_mm"])
                 if "board_mode" in data:
                     self.board_mode = data["board_mode"]
+                # Restore the physical left/right binding. _save_calibration
+                # has always written these, but nothing read them back, so a
+                # dual setup silently reverted to unassigned on every launch
+                # and the user had to re-run the wizard each session.
+                for key, attr in (("assigned_left", "assigned_left"),
+                                  ("assigned_right", "assigned_right")):
+                    val = data.get(key)
+                    if val and not _is_placeholder_board_id(val):
+                        setattr(self, attr, val)
+                if self.board_mode == "dual" and not (self.assigned_left
+                                                      and self.assigned_right):
+                    # A dual mode with no usable assignment is just single
+                    # mode wearing a dual label.
+                    self.board_mode = "single"
                 print(f"[+] Loaded balance calibration from {fp}: multipliers={self.balance_multiplier}")
         except Exception as e:
             print(f"[!] Could not load calibration: {e}")
@@ -709,7 +747,14 @@ class PressureManager:
         2s, so failures here are the NORMAL state for anyone running without a
         balance board -- log the first one and stay quiet after that rather than
         spamming the console twice a second.
+
+        A placeholder id ("Board B") is NOT a device. Opening one used to fall
+        through to open-by-VID/PID and hand back the first board found, so a
+        dual setup could end up reading the same physical board through two
+        handles. Refuse it explicitly instead.
         """
+        if device_path is not None and _is_placeholder_board_id(device_path):
+            return None
         if sys.platform == "win32":
             try:
                 from src.hardware.pressure.hid_backend import HidBackend
@@ -786,6 +831,76 @@ class PressureManager:
             self._set_simulator_unlocked(self.is_simulator)
             return self.board_mode
 
+    def enumerate_boards(self, max_age_sec: float = 1.0):
+        """Return the device paths of every balance board the OS can see.
+
+        This is the honest answer to "how many boards are actually connected",
+        and it is what the Setup page shows. A board that is blinking has not
+        finished OS-level Bluetooth pairing and will NOT appear here.
+
+        Result is cached briefly: this is polled by the status endpoint and the
+        Setup page redraw, and hid.enumerate() is not free.
+        """
+        now = time.time()
+        cached = getattr(self, "_device_scan_cache", None)
+        if cached is not None and (now - cached[0]) < max_age_sec:
+            return list(cached[1])
+
+        dev_paths = []
+        if sys.platform == "win32":
+            try:
+                from src.hardware.pressure.hid_backend import enumerate_boards
+                devs = enumerate_boards()
+                dev_paths = [d["path"] for d in devs]
+            except Exception:
+                pass
+        else:
+            try:
+                from src.hardware.pressure.evdev_backend import (
+                    enumerate_board_devices,
+                )
+                dev_paths = enumerate_board_devices()
+            except Exception:
+                pass
+        result = [p for p in dev_paths if not _is_placeholder_board_id(p)]
+        self._device_scan_cache = (now, list(result))
+        return result
+
+    def assign_boards(self, left_path, right_path):
+        """Explicitly bind physical devices to the left and right foot.
+
+        The step-on wizard infers L/R from the ORDER the user steps, which is
+        unrecoverable if they step wrong. This is the direct route: label the
+        boards from the Setup list in any order. Persists so the assignment
+        survives a restart.
+        """
+        with self.lock:
+            if _is_placeholder_board_id(left_path) or _is_placeholder_board_id(right_path):
+                return {"status": "error", "message": "Both boards must be real devices."}
+            if str(left_path) == str(right_path):
+                return {"status": "error",
+                        "message": "Left and right must be different boards."}
+
+            available = {str(p) for p in self.enumerate_boards()}
+            for label, path in (("left", left_path), ("right", right_path)):
+                if available and str(path) not in available:
+                    return {"status": "error",
+                            "message": f"The {label} board is no longer connected."}
+
+            self.assigned_left = left_path
+            self.assigned_right = right_path
+            self.board_mode = "dual"
+            if self.assignment_wizard:
+                self.assignment_wizard.reset()
+            self._set_simulator_unlocked(self.is_simulator)
+            self._save_calibration()
+            return {
+                "status": "ok",
+                "assigned_left": str(left_path),
+                "assigned_right": str(right_path),
+                "connected": bool(self.backend and self.backend.is_open),
+            }
+
     def start_assignment_wizard(self):
         with self.lock:
             from src.hardware.pressure.connection import BoardAssignmentWizard
@@ -805,34 +920,53 @@ class PressureManager:
                 except Exception: pass
                 self._wiz_backend_b = None
 
-            dev_paths = []
-            if sys.platform == "win32":
-                try:
-                    from src.hardware.pressure.hid_backend import enumerate_boards
-                    devs = enumerate_boards()
-                    dev_paths = [d["path"] for d in devs]
-                except Exception:
-                    pass
-            else:
-                try:
-                    from src.hardware.pressure.evdev_backend import (
-                        enumerate_board_devices,
-                    )
-                    dev_paths = enumerate_board_devices()
-                except Exception:
-                    pass
+            dev_paths = self.enumerate_boards()
+
+            # Dual assignment requires TWO boards. It used to invent a
+            # "Board B" placeholder and drive the wizard from one board's
+            # left/right CELLS, so shifting weight on a single board would
+            # report "both boards assigned" -- a configured dual setup that
+            # never existed. Refuse instead of lying.
+            if len(dev_paths) < 2 and not self.is_simulator:
+                self.assignment_wizard = None
+                self._set_simulator_unlocked(self.is_simulator)
+                return {
+                    "phase": "idle",
+                    "is_complete": False,
+                    "detected": len(dev_paths),
+                    "message": (
+                        f"{len(dev_paths)} of 2 boards detected. Pair the second "
+                        "board over Bluetooth first — a blinking light means it "
+                        "has not finished pairing with this PC."
+                    ),
+                }
 
             if len(dev_paths) >= 2:
                 b_a_id = dev_paths[0]
                 b_b_id = dev_paths[1]
                 self._wiz_backend_a = self._create_hardware_backend(b_a_id)
                 self._wiz_backend_b = self._create_hardware_backend(b_b_id)
-            elif len(dev_paths) == 1:
-                b_a_id = dev_paths[0]
-                b_b_id = "Board B"
-                self._wiz_backend_a = self._create_hardware_backend(b_a_id)
-                self._wiz_backend_b = None
+                if not (self._wiz_backend_a and self._wiz_backend_b):
+                    # Two devices enumerated but one would not open -- usually
+                    # a stale handle. Do not proceed on a single handle.
+                    for attr in ("_wiz_backend_a", "_wiz_backend_b"):
+                        b = getattr(self, attr)
+                        if b:
+                            try: b.close()
+                            except Exception: pass
+                        setattr(self, attr, None)
+                    self.assignment_wizard = None
+                    self._set_simulator_unlocked(self.is_simulator)
+                    return {
+                        "phase": "idle",
+                        "is_complete": False,
+                        "detected": len(dev_paths),
+                        "message": ("Both boards are listed but one could not be "
+                                    "opened. Reconnect it and try again."),
+                    }
             else:
+                # Simulator only: no real devices, synthetic ids are fine
+                # because nothing will be opened against them.
                 b_a_id = "Board A"
                 b_b_id = "Board B"
                 self._wiz_backend_a = None
@@ -849,11 +983,19 @@ class PressureManager:
     def update_assignment_wizard(self, weight_a: float, weight_b: float):
         with self.lock:
             if not self.assignment_wizard:
-                self.start_assignment_wizard()
+                # start_assignment_wizard refuses to run without two real
+                # boards and returns a plain status dict, leaving the wizard
+                # unset. Report that instead of raising on None.
+                status = self.start_assignment_wizard()
+                if not self.assignment_wizard:
+                    return status
             phase, msg = self.assignment_wizard.update(weight_a, weight_b)
             if phase == "complete" or getattr(phase, "value", phase) == "complete":
                 self.assigned_left = self.assignment_wizard.left_board
                 self.assigned_right = self.assignment_wizard.right_board
+                # Persist, or the whole wizard has to be re-run on every
+                # launch: _load_calibration reads these back at startup.
+                self._save_calibration()
 
                 # Seamlessly transition wizard backends directly into DualWbbBackend
                 if self.board_mode == "dual" and self._wiz_backend_a and self._wiz_backend_b:
@@ -904,6 +1046,7 @@ class PressureManager:
             wizard_status = self.assignment_wizard.get_status() if self.assignment_wizard else {
                 "phase": "idle", "message": "", "is_complete": False
             }
+            devices = self.enumerate_boards()
             return {
                 "connected": self.backend.is_open if self.backend else False,
                 "mode": "simulator" if self.is_simulator else "hardware",
@@ -911,6 +1054,14 @@ class PressureManager:
                 "is_dual": self.board_mode == "dual",
                 "assigned_left": self.assigned_left,
                 "assigned_right": self.assigned_right,
+                "devices": [str(p) for p in devices],
+                "device_count": len(devices),
+                "dual_ready": bool(
+                    self.board_mode == "dual"
+                    and self.assigned_left and self.assigned_right
+                    and self.backend is not None
+                    and self.backend.__class__.__name__ == "DualWbbBackend"
+                ),
                 "assignment_wizard": wizard_status,
                 "latest": self.latest_frame,
                 "tare": {
@@ -1125,6 +1276,17 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     w_a = float(data.get("weight_a", 0.0))
                     w_b = float(data.get("weight_b", 0.0))
                     status = pressure_manager.update_assignment_wizard(w_a, w_b)
+                elif action == "set":
+                    # Explicit binding: label each physical board directly
+                    # instead of inferring L/R from step order.
+                    status = pressure_manager.assign_boards(
+                        data.get("left"), data.get("right")
+                    )
+                elif action == "devices":
+                    devs = pressure_manager.enumerate_boards(max_age_sec=0.0)
+                    status = {"status": "ok",
+                              "devices": [str(p) for p in devs],
+                              "device_count": len(devs)}
                 else:
                     status = {"status": "error", "message": f"Unknown action {action}"}
                 self.send_json(status)

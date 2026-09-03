@@ -133,17 +133,35 @@ class HidBackend(BoardBackend):
     def open(self) -> None:
         if hid is None:
             raise RuntimeError("hidapi is not installed. Run: pip install hidapi")
+
+        # A caller that names a device MEANS that device. Falling back to
+        # open-by-VID/PID would hand back "the first WBB found", so in a
+        # two-board setup both handles could land on the same physical board
+        # -- the app would report dual while reading one board twice, and the
+        # unopened board would sit there blinking. Explicit path => explicit
+        # failure.
+        explicit = bool(
+            self._device_path
+            and self._device_path not in (b"Board A", b"Board B", "Board A", "Board B")
+        )
+
         self._device = hid.device()
         opened = False
 
         # 1. Try specified path if valid (not placeholder)
-        if self._device_path and self._device_path not in (b"Board A", b"Board B", "Board A", "Board B"):
+        if explicit:
             try:
                 p = self._device_path.encode("utf-8") if isinstance(self._device_path, str) else self._device_path
                 self._device.open_path(p)
                 opened = True
             except Exception:
                 opened = False
+            if not opened:
+                self._device = None
+                raise RuntimeError(
+                    f"Wii Balance Board at {self._device_path!r} could not be opened. "
+                    "It may be disconnected, or already held by another handle."
+                )
 
         # 2. Try default VID/PID
         if not opened:

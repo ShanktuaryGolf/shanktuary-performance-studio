@@ -66,6 +66,14 @@ class EvdevBackend(BoardBackend):
     def open(self) -> None:
         if evdev is None:
             raise RuntimeError("python-evdev is not installed (pip install evdev)")
+        # A wizard placeholder is not a device node. Never let it degrade into
+        # "auto-find the first board" -- in a dual setup that resolves to the
+        # board the other handle already owns.
+        if self._device_path in ("Board A", "Board B"):
+            raise RuntimeError(
+                f"{self._device_path!r} is a placeholder, not a real input device. "
+                "Only one balance board was detected."
+            )
         path = self._device_path or find_board_device()
         if path is None:
             raise RuntimeError(

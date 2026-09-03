@@ -719,12 +719,6 @@ class ShanktuaryApp:
         self.swing_lab_tare_rect = None
         self.swing_lab_hw_rect = None
         self.swing_lab_demo_rect = None
-        self.show_balance_hardware_modal = False
-        self.balance_modal_box_rect = None
-        self.balance_modal_close_rect = None
-        self.balance_modal_tare_rect = None
-        self.balance_modal_align_rect = None
-        self.balance_modal_stance_rect = None
         # Overview interactive regions
         self.overview_viewall_rect = None
         self.overview_prev_rect = None
@@ -734,9 +728,17 @@ class ShanktuaryApp:
         self.setup_mode_1_rect = None
         self.setup_mode_2_rect = None
         self.setup_pair_rect = None
+        self.setup_pin_copy_rect = None
+        self.setup_pin_text = ""
+        self.setup_bt_settings_rect = None
+        self.setup_wizard_rect = None
+        self.setup_device_paths = []
+        self.setup_assign_left_rects = []
+        self.setup_assign_right_rects = []
         self.setup_step_a_rect = None
         self.setup_step_b_rect = None
         self.setup_align_rect = None
+        self.setup_stance_rect = None
         self.setup_tare_rect = None
         # Aim calibration: where the Nova points relative to the target line.
         # The device has no aim calibration of its own, so an off-square unit
@@ -764,16 +766,6 @@ class ShanktuaryApp:
         # Cache for _text_width(): measuring is cheap but this runs per card
         # per redraw, and the set of strings is small and repetitive.
         self._text_w_cache = {}
-        self.balance_modal_sim_rect = None
-        self.balance_modal_pair_rect = None
-        self.balance_modal_copy_pin_rect = None
-        self.balance_modal_bt_settings_rect = None
-        self.balance_modal_mode_1_rect = None
-        self.balance_modal_mode_2_rect = None
-        self.balance_modal_assign_btn_rect = None
-        self.balance_modal_step_a_rect = None
-        self.balance_modal_step_b_rect = None
-        self.balance_modal_pin_text = ""
         self.root.after(33, self.poll_pressure_stream)
 
         self.current_shot = None
@@ -1823,12 +1815,6 @@ class ShanktuaryApp:
                 self.aim_modal_lateral = cur
             self.draw_screen()
             return "break"
-        if self.show_balance_hardware_modal:
-            if event.keysym == "Escape":
-                self.show_balance_hardware_modal = False
-                self.draw_screen()
-                return "break"
-            return "break"
         if self.show_spec_editor_modal:
             if event.keysym == "Escape":
                 self.show_spec_editor_modal = False
@@ -2386,10 +2372,9 @@ class ShanktuaryApp:
                         self.swing_lab_history.pop(0)
 
                 # Views that render live pressure state need the repaint:
-                # Swing Lab (8), Setup (10) and the hardware modal. Without
-                # this the calibration countdown is drawn once and frozen.
-                if (self.view_mode in (8, 10)
-                        or self.show_balance_hardware_modal):
+                # Swing Lab (8) and Setup (10). Without this the calibration
+                # countdown is drawn once and frozen.
+                if self.view_mode in (8, 10):
                     self.draw_screen()
         except Exception:
             pass
@@ -2600,23 +2585,6 @@ class ShanktuaryApp:
         return nx, ny
 
     def handle_mouse_hover(self, event):
-        # 0. In-Canvas Balance Hardware Modal Hover
-        if self.show_balance_hardware_modal:
-            for r in (
-                self.balance_modal_close_rect, self.balance_modal_pair_rect,
-                self.balance_modal_stance_rect,
-                self.balance_modal_tare_rect, self.balance_modal_sim_rect,
-                self.balance_modal_copy_pin_rect, self.balance_modal_bt_settings_rect,
-                self.balance_modal_mode_1_rect, self.balance_modal_mode_2_rect,
-                self.balance_modal_assign_btn_rect,
-                self.balance_modal_step_a_rect, self.balance_modal_step_b_rect
-            ):
-                if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
-                    self.canvas.config(cursor="hand2")
-                    return
-            self.canvas.config(cursor="")
-            return
-
         # 0a. In-Canvas Spec Editor Modal Hover
         if self.show_spec_editor_modal:
             for cx1, cy1, cx2, cy2, _ in self.spec_editor_cat_chips:
@@ -2840,125 +2808,6 @@ class ShanktuaryApp:
         r = self.nav_setup_rect
         if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
             self.set_mode(10)
-            return
-
-        # 0. In-Canvas Balance Hardware Modal Click Handling
-        if self.show_balance_hardware_modal:
-            if self.balance_modal_close_rect and self.balance_modal_close_rect[0] <= event.x <= self.balance_modal_close_rect[2] and self.balance_modal_close_rect[1] <= event.y <= self.balance_modal_close_rect[3]:
-                self.show_balance_hardware_modal = False
-                self.draw_screen()
-                return
-            if self.balance_modal_copy_pin_rect and self.balance_modal_copy_pin_rect[0] <= event.x <= self.balance_modal_copy_pin_rect[2] and self.balance_modal_copy_pin_rect[1] <= event.y <= self.balance_modal_copy_pin_rect[3]:
-                if self.balance_modal_pin_text:
-                    try:
-                        self.root.clipboard_clear()
-                        self.root.clipboard_append(self.balance_modal_pin_text)
-                        self.copy_feedback = "✓ PIN Copied! Paste into Windows Bluetooth prompt (Ctrl+V)"
-                        self.root.after(3000, self.clear_copy_feedback)
-                        self.draw_screen()
-                    except Exception as e:
-                        print(f"[!] Clipboard copy failed: {e}")
-                return
-            if self.balance_modal_bt_settings_rect and self.balance_modal_bt_settings_rect[0] <= event.x <= self.balance_modal_bt_settings_rect[2] and self.balance_modal_bt_settings_rect[1] <= event.y <= self.balance_modal_bt_settings_rect[3]:
-                try:
-                    from src.hardware.pressure.bluetooth_windows import (
-                        open_windows_bluetooth_settings,
-                    )
-                    open_windows_bluetooth_settings()
-                    self.copy_feedback = "✓ Opening Bluetooth Settings..."
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                except Exception as e:
-                    print(f"[!] Launch settings failed: {e}")
-                return
-            if self.balance_modal_pair_rect and self.balance_modal_pair_rect[0] <= event.x <= self.balance_modal_pair_rect[2] and self.balance_modal_pair_rect[1] <= event.y <= self.balance_modal_pair_rect[3]:
-                self.copy_feedback = "Scanning for Wii Balance Boards..."
-                self.root.after(2000, self.clear_copy_feedback)
-                def _do_pair():
-                    try:
-                        from src.hardware.pressure import connect_board
-                        connect_board()
-                    except Exception as e:
-                        print(f"[!] Pairing notice: {e}")
-                threading.Thread(target=_do_pair, daemon=True).start()
-                self.draw_screen()
-                return
-            if self.balance_modal_tare_rect and self.balance_modal_tare_rect[0] <= event.x <= self.balance_modal_tare_rect[2] and self.balance_modal_tare_rect[1] <= event.y <= self.balance_modal_tare_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.tare()
-                    self.swing_lab_history.clear()
-                    self.copy_feedback = "✓ Baseline Zeroed (Tared)"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_align_rect and self.balance_modal_align_rect[0] <= event.x <= self.balance_modal_align_rect[2] and self.balance_modal_align_rect[1] <= event.y <= self.balance_modal_align_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.start_stance_alignment(duration_sec=4.0)
-                    self.copy_feedback = "⏳ Stand still in address posture (4s)..."
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_stance_rect and self.balance_modal_stance_rect[0] <= event.x <= self.balance_modal_stance_rect[2] and self.balance_modal_stance_rect[1] <= event.y <= self.balance_modal_stance_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    pm_ = obs_server.pressure_manager
-                    if pm_.get_stance_width_status().get("active"):
-                        pm_.cancel_stance_width_calibration()
-                        self.copy_feedback = "Stance width measurement cancelled"
-                    else:
-                        pm_.start_stance_width_calibration()
-                        self.copy_feedback = "📏 Shift weight to your LEFT foot and hold"
-                    self.root.after(2500, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_sim_rect and self.balance_modal_sim_rect[0] <= event.x <= self.balance_modal_sim_rect[2] and self.balance_modal_sim_rect[1] <= event.y <= self.balance_modal_sim_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    curr = obs_server.pressure_manager.is_simulator
-                    obs_server.pressure_manager.set_simulator(not curr)
-                    self.copy_feedback = f"Simulator: {'[ON]' if not curr else '[OFF]'}"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_mode_1_rect and self.balance_modal_mode_1_rect[0] <= event.x <= self.balance_modal_mode_1_rect[2] and self.balance_modal_mode_1_rect[1] <= event.y <= self.balance_modal_mode_1_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.set_board_mode("single")
-                    self.copy_feedback = "Mode: 1 Board (Single Mat)"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_mode_2_rect and self.balance_modal_mode_2_rect[0] <= event.x <= self.balance_modal_mode_2_rect[2] and self.balance_modal_mode_2_rect[1] <= event.y <= self.balance_modal_mode_2_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.set_board_mode("dual")
-                    self.copy_feedback = "Mode: 2 Boards (Dual Plate)"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_assign_btn_rect and self.balance_modal_assign_btn_rect[0] <= event.x <= self.balance_modal_assign_btn_rect[2] and self.balance_modal_assign_btn_rect[1] <= event.y <= self.balance_modal_assign_btn_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.start_assignment_wizard()
-                    self.copy_feedback = "🦶 Wizard Started: Step on LEFT Board"
-                    self.root.after(3000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_step_a_rect and self.balance_modal_step_a_rect[0] <= event.x <= self.balance_modal_step_a_rect[2] and self.balance_modal_step_a_rect[1] <= event.y <= self.balance_modal_step_a_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.update_assignment_wizard(35.0, 0.0)
-                    self.copy_feedback = "🦶 Stepped on Board A (35 kg)"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_step_b_rect and self.balance_modal_step_b_rect[0] <= event.x <= self.balance_modal_step_b_rect[2] and self.balance_modal_step_b_rect[1] <= event.y <= self.balance_modal_step_b_rect[3]:
-                if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                    obs_server.pressure_manager.update_assignment_wizard(0.0, 35.0)
-                    self.copy_feedback = "🦶 Stepped on Board B (35 kg)"
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                return
-            if self.balance_modal_box_rect:
-                bx1, by1, bx2, by2 = self.balance_modal_box_rect
-                if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
-                    self.show_balance_hardware_modal = False
-                    self.draw_screen()
-                    return
             return
 
         # 0a. In-Canvas Spec Editor Modal Click Handling
@@ -3248,25 +3097,139 @@ class ShanktuaryApp:
                 return
 
             if _h(self.setup_pair_rect):
-                self.copy_feedback = "Scanning for Wii Balance Boards..."
+                self.copy_feedback = "Scanning for balance boards..."
                 self.root.after(2000, self.clear_copy_feedback)
 
                 def _do_pair():
+                    # On Windows connect_board() only prints instructions --
+                    # and a --windowed build has no console, so the button
+                    # looked dead. Report the real, checkable outcome: how
+                    # many boards the OS actually hands us.
                     try:
                         from src.hardware.pressure import connect_board
                         connect_board()
                     except Exception as e:
                         print(f"[!] Pairing notice: {e}")
+
+                    def _report():
+                        try:
+                            n = len(pm.enumerate_boards(max_age_sec=0.0)) if pm else 0
+                        except Exception:
+                            n = 0
+                        if n == 0:
+                            self.copy_feedback = (
+                                "No board found — press SYNC, then add it in "
+                                "Bluetooth settings using the PIN above")
+                        else:
+                            self.copy_feedback = (
+                                f"{n} board{'s' if n != 1 else ''} detected")
+                        self.root.after(4000, self.clear_copy_feedback)
+                        self.draw_screen()
+
+                    try:
+                        self.root.after(0, _report)
+                    except Exception:
+                        pass
+
                 threading.Thread(target=_do_pair, daemon=True).start()
                 self.draw_screen()
                 return
 
+            if _h(self.setup_pin_copy_rect):
+                pin = getattr(self, "setup_pin_text", "")
+                if pin:
+                    try:
+                        self.root.clipboard_clear()
+                        self.root.clipboard_append(pin)
+                        self.copy_feedback = ("✓ PIN copied — paste into the "
+                                              "Windows Bluetooth prompt (Ctrl+V)")
+                        self.root.after(3000, self.clear_copy_feedback)
+                    except Exception as e:
+                        print(f"[!] Clipboard copy failed: {e}")
+                self.draw_screen()
+                return
+
+            if _h(self.setup_bt_settings_rect):
+                try:
+                    from src.hardware.pressure.bluetooth_windows import (
+                        open_windows_bluetooth_settings,
+                    )
+                    open_windows_bluetooth_settings()
+                    self.copy_feedback = "Opening Bluetooth settings..."
+                    self.root.after(2000, self.clear_copy_feedback)
+                except Exception as e:
+                    print(f"[!] Launch settings failed: {e}")
+                self.draw_screen()
+                return
+
+            # Explicit left/right binding. Pair the boards in any order, then
+            # label them -- the step-on wizard's implicit "first stepped is
+            # left" is unrecoverable if the user steps wrong.
+            for rects, side in ((getattr(self, "setup_assign_left_rects", []), "left"),
+                                (getattr(self, "setup_assign_right_rects", []), "right")):
+                for rect, dev_path in rects:
+                    if not _h(rect):
+                        continue
+                    if not pm:
+                        return
+                    cur_l = str(getattr(pm, "assigned_left", "") or "")
+                    cur_r = str(getattr(pm, "assigned_right", "") or "")
+                    others = [d for d in getattr(self, "setup_device_paths", [])
+                              if d != dev_path]
+                    if side == "left":
+                        new_l = dev_path
+                        # Keep the existing right unless it IS this board, in
+                        # which case fall back to the other detected device.
+                        new_r = cur_r if cur_r and cur_r != dev_path else (
+                            others[0] if others else "")
+                    else:
+                        new_r = dev_path
+                        new_l = cur_l if cur_l and cur_l != dev_path else (
+                            others[0] if others else "")
+                    if not (new_l and new_r):
+                        self.copy_feedback = "Two paired boards are required"
+                        self.root.after(2500, self.clear_copy_feedback)
+                        self.draw_screen()
+                        return
+                    res = pm.assign_boards(new_l, new_r)
+                    if res.get("status") == "ok":
+                        self.copy_feedback = (
+                            "✓ Boards assigned"
+                            if res.get("connected")
+                            else "Assigned — board not currently readable")
+                    else:
+                        self.copy_feedback = res.get("message", "Assignment failed")
+                    self.root.after(3000, self.clear_copy_feedback)
+                    self.draw_screen()
+                    return
+
+            if _h(getattr(self, "setup_wizard_rect", None)):
+                if pm:
+                    wiz = getattr(pm, "assignment_wizard", None)
+                    ph = wiz.get_status().get("phase") if wiz else "idle"
+                    if ph in ("waiting_left", "waiting_right"):
+                        pm.reset_assignment_wizard()
+                        self.copy_feedback = "Wizard cancelled"
+                    else:
+                        st = pm.start_assignment_wizard()
+                        # start_assignment_wizard refuses to run on fewer than
+                        # two real boards and explains why -- surface that
+                        # rather than pretending the wizard started.
+                        self.copy_feedback = st.get(
+                            "message", "Step on the board under your LEFT foot")
+                    self.root.after(4000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+
             # Step chips feed the assignment wizard a simulated load so a
-            # user can drive it without a board, matching the modal.
+            # user can drive it without a board. They are only drawn in
+            # simulator mode -- against hardware the worker thread overwrites
+            # the injected value within a tick, so they could only ever
+            # fabricate an assignment.
             for rect, (kg_a, kg_b) in ((self.setup_step_a_rect, (35.0, 0.0)),
                                        (self.setup_step_b_rect, (0.0, 35.0))):
                 if _h(rect):
-                    if pm:
+                    if pm and getattr(pm, "is_simulator", False):
                         if not (pm.assignment_wizard
                                 and pm.assignment_wizard.get_status().get("phase")
                                 not in (None, "idle")):
@@ -3292,6 +3255,21 @@ class ShanktuaryApp:
                         self.root.after(2000, self.clear_copy_feedback)
                 except Exception as e:
                     print(f"[!] Tare failed: {e}")
+                self.draw_screen()
+                return
+
+            if _h(getattr(self, "setup_stance_rect", None)):
+                try:
+                    if pm and hasattr(pm, "start_stance_width_calibration"):
+                        if pm.get_stance_width_status().get("active"):
+                            pm.cancel_stance_width_calibration()
+                            self.copy_feedback = "Stance width measurement cancelled"
+                        else:
+                            pm.start_stance_width_calibration()
+                            self.copy_feedback = "Shift weight to your LEFT foot and hold"
+                        self.root.after(2500, self.clear_copy_feedback)
+                except Exception as e:
+                    print(f"[!] Stance width calibration failed: {e}")
                 self.draw_screen()
                 return
 
@@ -4577,8 +4555,6 @@ class ShanktuaryApp:
             self.draw_tools_flyout_menu(w, h)
 
         # 5. In-Canvas Modal Dialog (Top-most Modal Layer)
-        if self.show_balance_hardware_modal:
-            self.draw_balance_hardware_modal(w, h)
         if self.show_spec_editor_modal:
             self.draw_club_spec_editor_modal(w, h)
         elif self.show_custom_club_modal:
@@ -8300,91 +8276,279 @@ class ShanktuaryApp:
             else:
                 self.setup_mode_2_rect = (bx0, ry + 48, bx1_, ry + 84)
 
-        # --- pair ---
+        # --- pair: PIN + Bluetooth settings ---------------------------------
+        # Windows asks for a PIN when adding the board, and that PIN is derived
+        # from THIS PC's Bluetooth adapter MAC. Without it shown here the Pair
+        # button was unusable: connect_board() only prints instructions, and a
+        # --windowed build has no console to print them to.
         py = ry + 96
-        self.setup_pair_rect = (rx0 + 18, py, rx1 - 18, py + 32)
-        self.canvas.create_rectangle(rx0 + 18, py, rx1 - 18, py + 32,
+        pin_raw = ""
+        pin_disp = ""
+        mac_disp = ""
+        try:
+            from src.hardware.pressure.bluetooth_windows import (
+                format_mac_display,
+                get_host_bluetooth_mac,
+                mac_to_wii_pin,
+                mac_to_wii_pin_display,
+            )
+            mac = get_host_bluetooth_mac() or ""
+            if mac:
+                pin_raw = mac_to_wii_pin(mac)
+                pin_disp = mac_to_wii_pin_display(mac)
+                mac_disp = format_mac_display(mac)
+        except Exception as e:
+            print(f"[!] Could not derive Bluetooth PIN: {e}")
+        self.setup_pin_text = pin_raw
+
+        self.canvas.create_text(rx0 + 18, py, text="PAIRING",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        py += 16
+
+        if pin_disp:
+            self.canvas.create_rectangle(rx0 + 18, py, rx1 - 18, py + 62,
+                                         fill=theme.SURFACE_2, outline="")
+            self.canvas.create_text(rx0 + 30, py + 8,
+                                    text=f"Pairing PIN  ·  adapter {mac_disp}",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            self.canvas.create_text(rx0 + 30, py + 24, text=pin_disp,
+                                    fill=theme.ACCENT_TEXT,
+                                    font=(theme.ui_font(), 15, "bold"),
+                                    anchor="nw")
+            self.setup_pin_copy_rect = (rx1 - 96, py + 22, rx1 - 30, py + 48)
+            self.canvas.create_rectangle(*self.setup_pin_copy_rect,
+                                         fill=theme.ACCENT_DEEP,
+                                         outline=theme.ACCENT_LINE)
+            self.canvas.create_text((rx1 - 96 + rx1 - 30) / 2, py + 35,
+                                    text="Copy PIN", fill=theme.ACCENT_TEXT,
+                                    font=(theme.ui_font(), 8), anchor="center")
+            py += 70
+        else:
+            self.setup_pin_copy_rect = None
+            self.canvas.create_text(rx0 + 18, py,
+                                    text="Bluetooth adapter not detected — no PIN available",
+                                    fill=theme.WARN,
+                                    font=(theme.ui_font(), 7), anchor="nw")
+            py += 18
+
+        # Two buttons: OS Bluetooth settings (where pairing actually happens)
+        # and the platform pairing helper.
+        pw_ = (rx1 - rx0 - 44) / 2
+        self.setup_bt_settings_rect = (rx0 + 18, py, rx0 + 18 + pw_, py + 32)
+        self.canvas.create_rectangle(*self.setup_bt_settings_rect,
                                      fill=theme.ACCENT_DEEP,
                                      outline=theme.ACCENT_LINE)
-        self.canvas.create_text((rx0 + rx1) / 2, py + 16,
-                                text="Pair a board over Bluetooth",
+        self.canvas.create_text((rx0 + 18 + rx0 + 18 + pw_) / 2, py + 16,
+                                text="Open Bluetooth Settings",
                                 fill=theme.ACCENT_TEXT,
-                                font=(theme.ui_font(), 9), anchor="center")
-        self.canvas.create_text(rx0 + 18, py + 40,
-                                text="Press the red SYNC button inside the battery compartment",
+                                font=(theme.ui_font(), 8), anchor="center")
+
+        self.setup_pair_rect = (rx1 - 18 - pw_, py, rx1 - 18, py + 32)
+        self.canvas.create_rectangle(*self.setup_pair_rect,
+                                     fill=theme.SURFACE_2, outline="")
+        self.canvas.create_text((rx1 - 18 - pw_ + rx1 - 18) / 2, py + 16,
+                                text="Scan for boards",
+                                fill=theme.TEXT_2,
+                                font=(theme.ui_font(), 8), anchor="center")
+        py += 38
+
+        self.canvas.create_text(rx0 + 18, py,
+                                text="Hold the red SYNC button inside the battery compartment,",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.canvas.create_text(rx0 + 18, py + 11,
+                                text="add the device in Bluetooth settings, and paste the PIN.",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.canvas.create_text(rx0 + 18, py + 22,
+                                text="A blinking light means pairing has not completed.",
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
                                 anchor="nw")
 
-        # --- paired boards ---
+        # --- detected boards -------------------------------------------------
         wiz = getattr(pm, "assignment_wizard", None) if pm else None
         wst = wiz.get_status() if wiz else {}
         w_a = wst.get("board_a_weight", 0.0)
         w_b = wst.get("board_b_weight", 0.0)
         phase = wst.get("phase", "idle")
 
-        by = py + 60
-        self.canvas.create_text(rx0 + 18, by, text="PAIRED",
-                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="nw")
+        # Only real, OS-paired devices appear here. This is the difference
+        # between "the app thinks it has two boards" and "two boards exist".
+        try:
+            devices = pm.enumerate_boards() if pm else []
+        except Exception:
+            devices = []
+        assigned_left = str(getattr(pm, "assigned_left", "") or "") if pm else ""
+        assigned_right = str(getattr(pm, "assigned_right", "") or "") if pm else ""
+        self.setup_device_paths = [str(p) for p in devices]
+
+        by = py + 40
+        self.canvas.create_text(rx0 + 18, by, text="DETECTED", fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="nw")
+        count_txt = (f"{len(devices)} of 2 connected" if is_dual
+                     else f"{len(devices)} connected")
+        count_col = (theme.TEXT_3 if not is_dual
+                     else (theme.ACCENT_TEXT if len(devices) >= 2 else theme.WARN))
+        self.canvas.create_text(rx1 - 18, by, text=count_txt, fill=count_col,
+                                font=(theme.ui_font(), 7), anchor="ne")
         by += 16
-        boards = [("Board A", "LEAD (L)", w_a)]
-        if is_dual:
-            boards.append(("Board B", "TRAIL (R)", w_b))
-        for name, foot, kg in boards:
-            live = kg > 0.5
+
+        self.setup_assign_left_rects = []
+        self.setup_assign_right_rects = []
+
+        if not devices:
             self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + 40,
                                          fill=theme.SURFACE_2, outline="")
-            self.canvas.create_oval(rx0 + 30, by + 17, rx0 + 38, by + 25,
-                                    fill=theme.ACCENT if live else theme.TEXT_3,
-                                    outline="")
-            self.canvas.create_text(rx0 + 48, by + 8, text=name,
-                                    fill=theme.TEXT,
-                                    font=(theme.ui_font(), 10), anchor="nw")
-            self.canvas.create_text(rx0 + 48, by + 24, text=foot,
+            self.canvas.create_text(rx0 + 30, by + 14,
+                                    text="No balance board detected",
                                     fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), 7), anchor="nw")
-            self.canvas.create_text(rx1 - 30, by + 12,
-                                    text=f"{kg:.1f} kg" if live else "--",
-                                    fill=theme.TEXT if live else theme.TEXT_3,
-                                    font=(theme.ui_font(), 12), anchor="ne")
+                                    font=(theme.ui_font(), 9), anchor="nw")
             by += 46
+        else:
+            for i, dev in enumerate(devices):
+                dev_s = str(dev)
+                # Live weight is only known per-board while the wizard holds
+                # its own handles; otherwise show the assignment, not a guess.
+                if dev_s == assigned_left:
+                    role, role_col = "LEAD (L)", theme.ACCENT_TEXT
+                elif dev_s == assigned_right:
+                    role, role_col = "TRAIL (R)", theme.ACCENT_TEXT
+                else:
+                    role, role_col = "unassigned", theme.TEXT_3
+                kg = w_a if i == 0 else (w_b if i == 1 else 0.0)
+                live = kg > 0.5
+
+                row_h = 40 if not is_dual else 62
+                self.canvas.create_rectangle(rx0 + 18, by, rx1 - 18, by + row_h,
+                                             fill=theme.SURFACE_2, outline="")
+                self.canvas.create_oval(rx0 + 30, by + 17, rx0 + 38, by + 25,
+                                        fill=theme.ACCENT if live else theme.TEXT_3,
+                                        outline="")
+                # A raw HID path is unreadable; show a short stable tail.
+                short = dev_s if len(dev_s) <= 30 else "..." + dev_s[-27:]
+                self.canvas.create_text(rx0 + 48, by + 8,
+                                        text=f"Board {chr(65 + i)}",
+                                        fill=theme.TEXT,
+                                        font=(theme.ui_font(), 10), anchor="nw")
+                self.canvas.create_text(rx0 + 48, by + 24, text=short,
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 6), anchor="nw")
+                self.canvas.create_text(rx1 - 30, by + 6, text=role,
+                                        fill=role_col,
+                                        font=(theme.ui_font(), 7), anchor="ne")
+                if live:
+                    self.canvas.create_text(rx1 - 30, by + 18, text=f"{kg:.1f} kg",
+                                            fill=theme.TEXT,
+                                            font=(theme.ui_font(), 12), anchor="ne")
+
+                # Explicit L/R labelling. Step order no longer decides which
+                # physical board is which -- pair in any order, label here.
+                if is_dual:
+                    bw_ = 74
+                    lb_x = rx0 + 48
+                    l_rect = (lb_x, by + 36, lb_x + bw_, by + 56)
+                    r_rect = (lb_x + bw_ + 8, by + 36, lb_x + bw_ * 2 + 8, by + 56)
+                    for rect, label, is_on in (
+                        (l_rect, "Set LEFT", dev_s == assigned_left),
+                        (r_rect, "Set RIGHT", dev_s == assigned_right),
+                    ):
+                        self.canvas.create_rectangle(
+                            *rect,
+                            fill=theme.ACCENT_DEEP if is_on else theme.SURFACE,
+                            outline=theme.ACCENT_LINE if is_on else theme.HAIRLINE)
+                        self.canvas.create_text(
+                            (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2,
+                            text=label,
+                            fill=theme.ACCENT_TEXT if is_on else theme.TEXT_2,
+                            font=(theme.ui_font(), 7), anchor="center")
+                    self.setup_assign_left_rects.append((l_rect, dev_s))
+                    self.setup_assign_right_rects.append((r_rect, dev_s))
+
+                by += row_h + 6
 
         # --- assign left / right (dual only) ---
         if is_dual:
             self.canvas.create_text(rx0 + 18, by, text="ASSIGN LEFT / RIGHT",
                                     fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 7), anchor="nw")
-            self.canvas.create_text(rx0 + 18, by + 14,
-                                    text="Step on each board to tell the app which foot it is under",
-                                    fill=theme.TEXT_3,
+            if len(devices) < 2:
+                sub = "Two paired boards are required — pair the second board above"
+                sub_col = theme.WARN
+            else:
+                sub = "Use Set LEFT / Set RIGHT above, or step on each board in turn"
+                sub_col = theme.TEXT_3
+            self.canvas.create_text(rx0 + 18, by + 14, text=sub, fill=sub_col,
                                     font=(theme.ui_font(), 7), anchor="nw")
             by += 32
-            sw_ = (rx1 - rx0 - 44) / 2
-            for i, (lbl, kg) in enumerate((("Step Board A", w_a),
-                                           ("Step Board B", w_b))):
-                sx0 = rx0 + 18 + i * (sw_ + 8)
-                sx1_ = sx0 + sw_
-                waiting = (phase == "waiting_left" and i == 0) or \
-                          (phase == "waiting_right" and i == 1)
-                self.canvas.create_rectangle(sx0, by, sx1_, by + 44,
-                                             fill=theme.SURFACE_2,
-                                             outline=theme.ACCENT_LINE if waiting else "")
-                self.canvas.create_text(sx0 + 12, by + 8, text=lbl,
+
+            # The wizard button. Previously this lived ONLY in the balance
+            # hardware modal, which became unreachable when Tools -> Open Setup
+            # was rerouted to this page -- taking dual assignment with it.
+            can_wizard = len(devices) >= 2 or bool(pm and getattr(pm, "is_simulator", False))
+            if phase in ("waiting_left", "waiting_right"):
+                wiz_lbl = "Detecting… — cancel"
+            elif phase == "complete":
+                wiz_lbl = "Re-run step-on wizard"
+            else:
+                wiz_lbl = "Start step-on wizard"
+            self.setup_wizard_rect = (rx0 + 18, by, rx1 - 18, by + 32)
+            self.canvas.create_rectangle(
+                *self.setup_wizard_rect,
+                fill=theme.ACCENT_DEEP if can_wizard else theme.SURFACE_2,
+                outline=theme.ACCENT_LINE if can_wizard else "")
+            self.canvas.create_text((rx0 + rx1) / 2, by + 16, text=wiz_lbl,
+                                    fill=theme.ACCENT_TEXT if can_wizard else theme.TEXT_3,
+                                    font=(theme.ui_font(), 9), anchor="center")
+            by += 38
+
+            wiz_msg = wst.get("message", "")
+            if wiz_msg:
+                self.canvas.create_text(rx0 + 18, by, text=wiz_msg,
                                         fill=theme.TEXT_2,
-                                        font=(theme.ui_font(), 8), anchor="nw")
-                self.canvas.create_text(sx0 + 12, by + 22, text=f"{kg:.1f} kg",
-                                        fill=theme.TEXT,
-                                        font=(theme.ui_font(), 13), anchor="nw")
-                if waiting:
-                    self.canvas.create_text(sx1_ - 12, by + 28, text="detecting",
-                                            fill=theme.ACCENT_TEXT,
-                                            font=(theme.ui_font(), 7), anchor="ne")
-                if i == 0:
-                    self.setup_step_a_rect = (sx0, by, sx1_, by + 44)
-                else:
-                    self.setup_step_b_rect = (sx0, by, sx1_, by + 44)
-            by += 56
+                                        font=(theme.ui_font(), 7), anchor="nw")
+                by += 16
+
+            # Simulated step chips are a SIMULATOR affordance. Against real
+            # hardware the worker overwrites the injected load within a tick,
+            # so their only real effect was to fabricate an assignment for a
+            # dual setup the user did not have.
+            if pm and getattr(pm, "is_simulator", False):
+                sw_ = (rx1 - rx0 - 44) / 2
+                for i, (lbl, kg) in enumerate((("Step Board A", w_a),
+                                               ("Step Board B", w_b))):
+                    sx0 = rx0 + 18 + i * (sw_ + 8)
+                    sx1_ = sx0 + sw_
+                    waiting = (phase == "waiting_left" and i == 0) or \
+                              (phase == "waiting_right" and i == 1)
+                    self.canvas.create_rectangle(sx0, by, sx1_, by + 44,
+                                                 fill=theme.SURFACE_2,
+                                                 outline=theme.ACCENT_LINE if waiting else "")
+                    self.canvas.create_text(sx0 + 12, by + 8, text=lbl,
+                                            fill=theme.TEXT_2,
+                                            font=(theme.ui_font(), 8), anchor="nw")
+                    self.canvas.create_text(sx0 + 12, by + 22, text=f"{kg:.1f} kg",
+                                            fill=theme.TEXT,
+                                            font=(theme.ui_font(), 13), anchor="nw")
+                    if waiting:
+                        self.canvas.create_text(sx1_ - 12, by + 28, text="detecting",
+                                                fill=theme.ACCENT_TEXT,
+                                                font=(theme.ui_font(), 7), anchor="ne")
+                    if i == 0:
+                        self.setup_step_a_rect = (sx0, by, sx1_, by + 44)
+                    else:
+                        self.setup_step_b_rect = (sx0, by, sx1_, by + 44)
+                self.canvas.create_text(rx0 + 18, by + 48,
+                                        text="Simulator only — injects a synthetic load",
+                                        fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), 6), anchor="nw")
+                by += 66
+            else:
+                self.setup_step_a_rect = None
+                self.setup_step_b_rect = None
         else:
+            self.setup_wizard_rect = None
             self.setup_step_a_rect = None
             self.setup_step_b_rect = None
 
@@ -8440,6 +8604,39 @@ class ShanktuaryApp:
                                 text="Tare — zero both boards (step off first)",
                                 fill=theme.TEXT_2,
                                 font=(theme.ui_font(), 8), anchor="center")
+        by += 36
+
+        # Stance-width measurement. This used to be reachable only from the
+        # balance-hardware modal, which became unreachable when Tools ->
+        # Open Setup was rerouted here -- orphaning the only control that
+        # lets CoP travel be reported in mm instead of arbitrary units.
+        sw_status = {}
+        try:
+            if pm and hasattr(pm, "get_stance_width_status"):
+                sw_status = pm.get_stance_width_status() or {}
+        except Exception:
+            sw_status = {}
+        sw_active = bool(sw_status.get("active"))
+        width_mm = getattr(pm, "stance_width_mm", None) if pm else None
+
+        self.setup_stance_rect = (rx0 + 18, by, rx1 - 18, by + 40)
+        self.canvas.create_rectangle(*self.setup_stance_rect,
+                                     fill=theme.ACCENT_DEEP if sw_active else theme.SURFACE_2,
+                                     outline=theme.ACCENT_LINE if sw_active else "")
+        self.canvas.create_text(rx0 + 30, by + 8,
+                                text=("Measuring stance width — cancel" if sw_active
+                                      else "Measure stance width"),
+                                fill=theme.ACCENT_TEXT if sw_active else theme.TEXT,
+                                font=(theme.ui_font(), 9), anchor="nw")
+        if sw_active:
+            sw_sub = sw_status.get("message", "Shift weight to your LEFT foot and hold")
+        elif width_mm:
+            sw_sub = f"Measured: {float(width_mm):.0f} mm between feet"
+        else:
+            sw_sub = "Lets CoP travel be reported in mm — not measured yet"
+        self.canvas.create_text(rx0 + 30, by + 24, text=sw_sub,
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="nw")
 
         # ---- footer --------------------------------------------------------
         self.canvas.create_line(x0, h - 26, x1, h - 26, fill=theme.HAIRLINE)
@@ -8448,270 +8645,6 @@ class ShanktuaryApp:
         self.canvas.create_text(x1, h - 18, text="Changes apply immediately",
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
                                 anchor="ne")
-
-    def draw_balance_hardware_modal(self, w, h):
-        # Modal dark backdrop
-        self.canvas.create_rectangle(0, 0, w, h, fill="#000000", stipple="gray50")
-        mw, mh = 580, 540
-        mx1, my1 = (w - mw) // 2, (h - mh) // 2
-        mx2, my2 = mx1 + mw, my1 + mh
-        self.balance_modal_box_rect = (mx1, my1, mx2, my2)
-
-        # Modal Window Container
-        self.canvas.create_rectangle(mx1, my1, mx2, my2, fill=theme.SURFACE, outline=theme.ACCENT_TEXT, width=2)
-        self.canvas.create_text(mx1 + 20, my1 + 22, text="⚙️ WII BALANCE BOARD HARDWARE & PAIRING", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 10, "bold"), anchor="w")
-
-        # Close button [X]
-        self.balance_modal_close_rect = (mx2 - 36, my1 + 10, mx2 - 12, my1 + 34)
-        self.canvas.create_rectangle(mx2 - 36, my1 + 10, mx2 - 12, my1 + 34, fill="#1E222E", outline="#383E50")
-        self.canvas.create_text(mx2 - 24, my1 + 22, text="✕", fill=theme.TEXT, font=(theme.ui_font(), 9, "bold"))
-
-        pm = obs_server.pressure_manager if hasattr(obs_server, "pressure_manager") else None
-        board_mode = pm.board_mode if pm else "single"
-        is_dual = (board_mode == "dual")
-
-        # --- SECTION 0: 1-BOARD VS 2-BOARDS MODE SELECTOR ---
-        mode_y1 = my1 + 42
-        mode_y2 = mode_y1 + 30
-        half_mw = (mx2 - mx1 - 50) // 2
-        m1_x1, m1_x2 = mx1 + 20, mx1 + 20 + half_mw
-        m2_x1, m2_x2 = m1_x2 + 10, mx2 - 20
-
-        self.balance_modal_mode_1_rect = (m1_x1, mode_y1, m1_x2, mode_y2)
-        bg1 = theme.SURFACE_2 if not is_dual else theme.SURFACE
-        bd1 = theme.ACCENT_TEXT if not is_dual else theme.HAIRLINE
-        col1 = theme.ACCENT_TEXT if not is_dual else theme.TEXT_2
-        self.canvas.create_rectangle(m1_x1, mode_y1, m1_x2, mode_y2, fill=bg1, outline=bd1, width=2 if not is_dual else 1)
-        self.canvas.create_text((m1_x1 + m1_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶 1 Board (Single Mat)", fill=col1, font=(theme.ui_font(), 8, "bold" if not is_dual else "normal"))
-
-        self.balance_modal_mode_2_rect = (m2_x1, mode_y1, m2_x2, mode_y2)
-        bg2 = theme.SURFACE_2 if is_dual else theme.SURFACE
-        bd2 = theme.ACCENT_TEXT if is_dual else theme.HAIRLINE
-        col2 = theme.ACCENT_TEXT if is_dual else theme.TEXT_2
-        self.canvas.create_rectangle(m2_x1, mode_y1, m2_x2, mode_y2, fill=bg2, outline=bd2, width=2 if is_dual else 1)
-        self.canvas.create_text((m2_x1 + m2_x2) // 2, (mode_y1 + mode_y2) // 2, text="🦶🦶 2 Boards (Dual Plate)", fill=col2, font=(theme.ui_font(), 8, "bold" if is_dual else "normal"))
-
-        # --- SECTION 0B: DUAL-BOARD FOOT ASSIGNMENT WIZARD CARD (When Dual Mode is Active) ---
-        next_y = mode_y2 + 8
-        if is_dual:
-            wiz = pm.assignment_wizard if pm else None
-            wiz_status = wiz.get_status() if wiz else {"phase": "idle", "message": "Click Calibrate to begin assignment", "board_a_weight": 0.0, "board_b_weight": 0.0}
-            wiz_phase = wiz_status.get("phase", "idle")
-            w_a = wiz_status.get("board_a_weight", 0.0)
-            w_b = wiz_status.get("board_b_weight", 0.0)
-
-            card_h = 68 if wiz_phase in ("waiting_left", "waiting_right") else 56
-            card_y1 = next_y
-            card_y2 = card_y1 + card_h
-            self.canvas.create_rectangle(mx1 + 20, card_y1, mx2 - 20, card_y2, fill=theme.BG, outline="#38BDF8" if wiz_phase != "idle" else theme.HAIRLINE)
-
-            # Status Message
-            if wiz_phase == "waiting_left":
-                p_text = "🦶 Step on the board under your LEFT foot (>5kg)"
-                p_col = theme.ACCENT_TEXT
-            elif wiz_phase == "waiting_right":
-                p_text = "🦶 Now step on the board under your RIGHT foot (>5kg)"
-                p_col = theme.WARN
-            elif wiz_phase == "complete":
-                p_text = "✓ Both boards assigned (Left: Board A, Right: Board B)"
-                p_col = theme.ACCENT_TEXT
-            else:
-                p_text = "Step on boards to assign Left & Right feet:"
-                p_col = "#CBD5E1"
-
-            self.canvas.create_text(mx1 + 32, card_y1 + 14, text=p_text, fill=p_col, font=(theme.ui_font(), 8, "bold"), anchor="w")
-            self.canvas.create_text(mx1 + 32, card_y1 + 32, text=f"Board A: {w_a:.1f} kg   |   Board B: {w_b:.1f} kg", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
-
-            # Step simulation chips during wizard
-            if wiz_phase in ("waiting_left", "waiting_right"):
-                sa_x1 = mx1 + 32
-                sa_x2 = sa_x1 + 105
-                sb_x1 = sa_x2 + 8
-                sb_x2 = sb_x1 + 105
-                s_y1 = card_y1 + 44
-                s_y2 = s_y1 + 18
-
-                self.balance_modal_step_a_rect = (sa_x1, s_y1, sa_x2, s_y2)
-                self.canvas.create_rectangle(sa_x1, s_y1, sa_x2, s_y2, fill=theme.HAIRLINE, outline=theme.ACCENT_TEXT)
-                self.canvas.create_text((sa_x1 + sa_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board A", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 7, "bold"))
-
-                self.balance_modal_step_b_rect = (sb_x1, s_y1, sb_x2, s_y2)
-                self.canvas.create_rectangle(sb_x1, s_y1, sb_x2, s_y2, fill=theme.HAIRLINE, outline=theme.DANGER)
-                self.canvas.create_text((sb_x1 + sb_x2) // 2, (s_y1 + s_y2) // 2, text="🦶 Step Board B", fill=theme.DANGER, font=(theme.ui_font(), 7, "bold"))
-            else:
-                self.balance_modal_step_a_rect = None
-                self.balance_modal_step_b_rect = None
-
-            # Calibrate / Start Button
-            btn_w = 135
-            b_x2 = mx2 - 32
-            b_x1 = b_x2 - btn_w
-            b_y1 = card_y1 + 12
-            b_y2 = card_y2 - 12
-            self.balance_modal_assign_btn_rect = (b_x1, b_y1, b_x2, b_y2)
-            btn_lbl = "🎯 Re-Assign" if wiz_phase == "complete" else ("⏳ Detecting..." if wiz_phase in ("waiting_left", "waiting_right") else "🎯 Start Wizard")
-            btn_bg = "#0284C7" if wiz_phase != "idle" else theme.HAIRLINE
-            self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill=btn_bg, outline="#38BDF8")
-            self.canvas.create_text((b_x1 + b_x2) // 2, (b_y1 + b_y2) // 2, text=btn_lbl, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
-
-            next_y = card_y2 + 8
-        else:
-            self.balance_modal_assign_btn_rect = None
-            self.balance_modal_step_a_rect = None
-            self.balance_modal_step_b_rect = None
-
-        # --- SECTION 1: BLUETOOTH PAIRING PIN CARD ---
-        from src.hardware.pressure.bluetooth_windows import (
-            format_mac_display,
-            get_host_bluetooth_mac,
-            mac_to_wii_pin,
-            mac_to_wii_pin_display,
-        )
-        mac = get_host_bluetooth_mac() or ""
-        if mac:
-            pin_raw = mac_to_wii_pin(mac)
-            pin_disp = mac_to_wii_pin_display(mac)
-            mac_disp = format_mac_display(mac)
-        else:
-            mac_disp = "Default / Auto (38:FC:98:3B:B4:DC)"
-            pin_raw = mac_to_wii_pin("38FC983BB4DC")
-            pin_disp = mac_to_wii_pin_display("38FC983BB4DC")
-
-        self.balance_modal_pin_text = pin_raw
-
-        pin_card_y1 = next_y
-        pin_card_y2 = pin_card_y1 + 130
-        self.canvas.create_rectangle(mx1 + 20, pin_card_y1, mx2 - 20, pin_card_y2, fill="#171B2A", outline=theme.HAIRLINE)
-        self.canvas.create_text(mx1 + 32, pin_card_y1 + 14, text="WINDOWS BLUETOOTH PAIRING PIN", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
-        self.canvas.create_text(mx1 + 32, pin_card_y1 + 28, text=f"Host Adapter MAC: {mac_disp}", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
-
-        # Big Glowing PIN Box. Starts at +48, not +40: the MAC line above
-        # baselines at +28 and a real UI face is tall enough that the box
-        # edge cut through its descenders.
-        p_box_y1 = pin_card_y1 + 48
-        p_box_y2 = p_box_y1 + 44
-        self.canvas.create_rectangle(mx1 + 32, p_box_y1, mx2 - 32, p_box_y2, fill="#0B0F17", outline=theme.ACCENT_TEXT, width=1)
-        self.canvas.create_text((mx1 + mx2) // 2, (p_box_y1 + p_box_y2) // 2, text=pin_disp, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 16, "bold"))
-
-        # Action Buttons under PIN (Copy PIN + Open BT Settings)
-        act_y1 = p_box_y2 + 8
-        act_y2 = act_y1 + 28
-        half_w = (mx2 - mx1 - 74) // 2
-        btn_copy_x1 = mx1 + 32
-        btn_copy_x2 = btn_copy_x1 + half_w
-        btn_open_x1 = btn_copy_x2 + 10
-        btn_open_x2 = mx2 - 32
-
-        self.balance_modal_copy_pin_rect = (btn_copy_x1, act_y1, btn_copy_x2, act_y2)
-        self.canvas.create_rectangle(btn_copy_x1, act_y1, btn_copy_x2, act_y2, fill=theme.SURFACE_2, outline=theme.ACCENT_TEXT)
-        self.canvas.create_text((btn_copy_x1 + btn_copy_x2) // 2, (act_y1 + act_y2) // 2, text="📋 Copy PIN to Clipboard", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
-
-        self.balance_modal_bt_settings_rect = (btn_open_x1, act_y1, btn_open_x2, act_y2)
-        self.canvas.create_rectangle(btn_open_x1, act_y1, btn_open_x2, act_y2, fill="#1E2A3A", outline="#38BDF8")
-        self.canvas.create_text((btn_open_x1 + btn_open_x2) // 2, (act_y1 + act_y2) // 2, text="🌐 Open Bluetooth Settings", fill="#38BDF8", font=(theme.ui_font(), 8, "bold"))
-
-        # --- SECTION 2: HARDWARE CONTROLS ---
-        hw_y1 = pin_card_y2 + 8
-        hw_y2 = hw_y1 + 38
-        is_sim = pm.is_simulator if pm else False
-
-        tot_hw_w = mx2 - mx1 - 40
-        btn_w3 = (tot_hw_w - 20) // 3
-        b1_x1, b1_x2 = mx1 + 20, mx1 + 20 + btn_w3
-        b2_x1, b2_x2 = b1_x2 + 10, b1_x2 + 10 + btn_w3
-        b3_x1, b3_x2 = b2_x2 + 10, mx2 - 20
-
-        # Pair over Bluetooth. The click handler for this existed but nothing
-        # ever assigned balance_modal_pair_rect, so pairing was unreachable
-        # from the UI. Its own full-width row above the three action buttons.
-        pair_y2 = hw_y1 - 8
-        pair_y1 = pair_y2 - 26
-        self.balance_modal_pair_rect = (b1_x1, pair_y1, mx2 - 20, pair_y2)
-        self.canvas.create_rectangle(b1_x1, pair_y1, mx2 - 20, pair_y2,
-                                     fill=theme.ACCENT_DEEP,
-                                     outline=theme.ACCENT_LINE)
-        self.canvas.create_text((b1_x1 + mx2 - 20) // 2,
-                                (pair_y1 + pair_y2) // 2,
-                                text="Pair board over Bluetooth  ·  hold SYNC first",
-                                fill=theme.ACCENT_TEXT,
-                                font=(theme.ui_font(), 8, "bold"))
-
-        # Button 1: Tare Zero
-        self.balance_modal_tare_rect = (b1_x1, hw_y1, b1_x2, hw_y2)
-        self.canvas.create_rectangle(b1_x1, hw_y1, b1_x2, hw_y2, fill=theme.HAIRLINE, outline=theme.ACCENT_TEXT)
-        self.canvas.create_text((b1_x1 + b1_x2) // 2, (hw_y1 + hw_y2) // 2, text="⚖️ Tare Resting Zero", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"))
-
-        # Button 2: 50/50 Stance Calibration (5s Lead-in + 4s Sample)
-        align_st = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {"active": False, "remaining_sec": 0.0, "in_lead_in": False, "message": "Idle"}
-        is_aligning = align_st.get("active", False)
-        in_lead = align_st.get("in_lead_in", False)
-        rem_sec = align_st.get("remaining_sec", 0.0)
-
-        self.balance_modal_align_rect = (b2_x1, hw_y1, b2_x2, hw_y2)
-        if is_aligning:
-            if in_lead:
-                align_bg = theme.ACCENT_DEEP  # Warm amber/orange during lead-in
-                align_bd = theme.WARN
-                align_txt = f"⏳ Step On & Settle... {rem_sec:.0f}s"
-            else:
-                align_bg = "#0369A1"  # Cyan/blue during hold
-                align_bd = "#38BDF8"
-                align_txt = f"🎯 Hold Stance... {rem_sec:.1f}s"
-        else:
-            align_bg = theme.HAIRLINE
-            align_bd = theme.ACCENT_TEXT
-            align_txt = "🎯 50/50 Stance Calibrate"
-
-        self.canvas.create_rectangle(b2_x1, hw_y1, b2_x2, hw_y2, fill=align_bg, outline=align_bd, width=2 if is_aligning else 1)
-        self.canvas.create_text((b2_x1 + b2_x2) // 2, (hw_y1 + hw_y2) // 2, text=align_txt, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
-
-        # Button 3: Simulator Toggle
-        self.balance_modal_sim_rect = (b3_x1, hw_y1, b3_x2, hw_y2)
-        sim_col = theme.ACCENT_TEXT if is_sim else theme.TEXT_3
-        self.canvas.create_rectangle(b3_x1, hw_y1, b3_x2, hw_y2, fill=theme.SURFACE, outline=sim_col)
-        self.canvas.create_text((b3_x1 + b3_x2) // 2, (hw_y1 + hw_y2) // 2, text=f"Simulator: {'[ON]' if is_sim else '[OFF]'}", fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
-
-        # Button 4: Stance WIDTH calibration (shift left, then right).
-        # Separate row so the three buttons above keep their width.
-        sw_y1 = hw_y2 + 8
-        sw_y2 = sw_y1 + (hw_y2 - hw_y1)
-        st_st = pm.get_stance_width_status() if (pm and hasattr(pm, "get_stance_width_status")) else {"active": False, "state": "idle", "instruction": "", "stance_width_mm": None}
-        sw_active = st_st.get("active", False)
-        sw_mm = st_st.get("stance_width_mm")
-
-        self.balance_modal_stance_rect = (b1_x1, sw_y1, b3_x2, sw_y2)
-        if sw_active:
-            sw_bg, sw_bd = theme.ACCENT_DEEP, theme.ACCENT_LINE
-            sw_txt = f"📏 {st_st.get('instruction', '')}"
-        elif sw_mm:
-            sw_bg, sw_bd = theme.SURFACE, theme.TEXT_3
-            sw_txt = f"📏 Stance Width: {sw_mm:.0f} mm  (tap to redo)"
-        else:
-            sw_bg, sw_bd = theme.SURFACE, theme.TEXT_3
-            sw_txt = "📏 Measure Stance Width (shift L, then R)"
-        self.canvas.create_rectangle(b1_x1, sw_y1, b3_x2, sw_y2, fill=sw_bg, outline=sw_bd, width=2 if sw_active else 1)
-        self.canvas.create_text((b1_x1 + b3_x2) // 2, (sw_y1 + sw_y2) // 2, text=sw_txt, fill=theme.TEXT, font=(theme.ui_font(), 8, "bold"))
-
-        # --- SECTION 3: STEP-BY-STEP PAIRING INSTRUCTIONS ---
-        guide_y1 = sw_y2 + 8
-        guide_y2 = my2 - 12
-        self.canvas.create_rectangle(mx1 + 20, guide_y1, mx2 - 20, guide_y2, fill="#141824", outline="#1F2536")
-        self.canvas.create_text(mx1 + 32, guide_y1 + 12, text="PAIRING & CALIBRATION INSTRUCTIONS", fill=theme.TEXT_3, font=(theme.ui_font(), 7, "bold"), anchor="w")
-
-        # Alignment feedback banner if present
-        msg = align_st.get("message", "")
-        if msg and msg != "Idle":
-            msg_col = theme.ACCENT_TEXT if msg.startswith("✓") else (theme.WARN if "Sampling" in msg or "Stand" in msg else theme.DANGER)
-            self.canvas.create_text(mx2 - 32, guide_y1 + 12, text=msg, fill=msg_col, font=(theme.ui_font(), 7, "bold"), anchor="e")
-
-        steps = [
-            "1. Press red SYNC button on board(s) (4 LEDs blink) → Open BT Settings → Paste PIN.",
-            "2. For 2-Board setups: Select '2 Boards' above and click 'Start Wizard' to identify feet.",
-            "3. Step on Left board first, then Right board when prompted.",
-            "4. Step off and click 'Tare Resting Zero' → Stand at address and click '50/50 Stance (4s)'."
-        ]
-        for idx, s in enumerate(steps):
-            self.canvas.create_text(mx1 + 32, guide_y1 + 26 + (idx * 14), text=s, fill="#CBD5E1", font=(theme.ui_font(), 7), anchor="w")
 
 def main():
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
