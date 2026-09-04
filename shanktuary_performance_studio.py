@@ -743,6 +743,14 @@ class ShanktuaryApp:
         self.show_board_assign_modal = False
         self.board_modal_cancel_rect = None
         self.board_modal_done_rect = None
+        self.board_modal_skip_rect = None
+        # Guided calibration flow: assign -> 50/50 -> stance width, run as one
+        # pass because the user stands on the boards for all three.
+        self.setup_flow_steps = []
+        self.setup_flow_index = 0
+        self.setup_flow_done = False
+        self.setup_flow_error = ""
+        self.setup_guided_rect = None
         self.setup_tare_rect = None
         # Aim calibration: where the Nova points relative to the target line.
         # The device has no aim calibration of its own, so an off-square unit
@@ -1793,22 +1801,18 @@ class ShanktuaryApp:
         if self.show_board_assign_modal:
             if event.keysym == "Escape":
                 self.show_board_assign_modal = False
-                pm = getattr(obs_server, "pressure_manager", None)
-                if pm:
-                    try:
-                        pm.reset_assignment_wizard()
-                    except Exception as e:
-                        print(f"[!] Could not reset assignment wizard: {e}")
-                self.copy_feedback = "Assignment cancelled"
+                self._cancel_setup_flow()
+                self.copy_feedback = "Setup cancelled"
                 self.root.after(2000, self.clear_copy_feedback)
                 self.draw_screen()
                 return "break"
+            if event.keysym in ("s", "S"):
+                if not getattr(self, "setup_flow_done", False):
+                    self._skip_setup_flow_step()
+                    self.draw_screen()
+                return "break"
             if event.keysym in ("Return", "KP_Enter"):
-                wiz = None
-                pm = getattr(obs_server, "pressure_manager", None)
-                if pm:
-                    wiz = getattr(pm, "assignment_wizard", None)
-                if wiz and wiz.get_status().get("is_complete"):
+                if getattr(self, "setup_flow_done", False):
                     self.show_board_assign_modal = False
                     self.draw_screen()
                 return "break"
@@ -2406,6 +2410,7 @@ class ShanktuaryApp:
                 # Swing Lab (8) and Setup (10). Without this the calibration
                 # countdown is drawn once and frozen. The step-on prompt shows
                 # live per-board weight, so it needs the repaint from ANY view.
+                self.tick_setup_flow()
                 if self.view_mode in (8, 10) or self.show_board_assign_modal:
                     self.draw_screen()
         except Exception:
@@ -2854,14 +2859,14 @@ class ShanktuaryApp:
                 self.show_board_assign_modal = False
                 self.draw_screen()
                 return
+            if _hit(getattr(self, "board_modal_skip_rect", None)):
+                self._skip_setup_flow_step()
+                self.draw_screen()
+                return
             if _hit(self.board_modal_cancel_rect):
                 self.show_board_assign_modal = False
-                if pm:
-                    try:
-                        pm.reset_assignment_wizard()
-                    except Exception as e:
-                        print(f"[!] Could not reset assignment wizard: {e}")
-                self.copy_feedback = "Assignment cancelled"
+                self._cancel_setup_flow()
+                self.copy_feedback = "Setup cancelled"
                 self.root.after(2000, self.clear_copy_feedback)
                 self.draw_screen()
                 return
@@ -3271,23 +3276,20 @@ class ShanktuaryApp:
 
             if _h(getattr(self, "setup_wizard_rect", None)):
                 if pm:
-                    wiz = getattr(pm, "assignment_wizard", None)
-                    ph = wiz.get_status().get("phase") if wiz else "idle"
-                    if ph in ("waiting_left", "waiting_right"):
-                        pm.reset_assignment_wizard()
-                        self.copy_feedback = "Wizard cancelled"
+                    # One guided pass: assign -> 50/50 -> stance width. The
+                    # user is standing on the boards for all three, so making
+                    # them a separate trip each was three step-on/step-off
+                    # cycles for one calibration.
+                    st = self.start_guided_setup()
+                    err = getattr(self, "setup_flow_error", "")
+                    if err:
+                        # A refusal (e.g. only one board paired) must not leave
+                        # a dead full-screen prompt up -- report and stay put.
+                        self.show_board_assign_modal = False
+                        self.copy_feedback = err
                     else:
-                        st = pm.start_assignment_wizard()
-                        # start_assignment_wizard refuses to run on fewer than
-                        # two real boards and explains why -- surface that
-                        # rather than pretending the wizard started.
                         self.copy_feedback = st.get(
-                            "message", "Step on the board under your LEFT foot")
-                        # Only take over the screen if it really started. On a
-                        # refusal the toast carries the reason and the Setup
-                        # page stays put.
-                        if st.get("phase") in ("waiting_left", "waiting_right"):
-                            self.show_board_assign_modal = True
+                            "message", "Follow the on-screen steps")
                     self.root.after(4000, self.clear_copy_feedback)
                 self.draw_screen()
                 return
@@ -3309,12 +3311,22 @@ class ShanktuaryApp:
                     self.draw_screen()
                     return
 
+            if _h(getattr(self, "setup_guided_rect", None)):
+                self.start_guided_setup()
+                err = getattr(self, "setup_flow_error", "")
+                if err:
+                    # A refusal (e.g. only one board paired for the assign
+                    # step) must not leave a dead full-screen prompt up.
+                    self.show_board_assign_modal = False
+                    self.copy_feedback = err
+                    self.root.after(4000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+
             if _h(self.setup_align_rect):
-                try:
-                    if pm and hasattr(pm, "start_stance_alignment"):
-                        pm.start_stance_alignment(duration_sec=4.0)
-                except Exception as e:
-                    print(f"[!] Stance alignment failed: {e}")
+                # Same full-screen prompt as the guided pass, just this one
+                # step -- a 7pt caption is unreadable from the mat.
+                self.start_guided_setup(["align"])
                 self.draw_screen()
                 return
 
@@ -3335,10 +3347,9 @@ class ShanktuaryApp:
                         if pm.get_stance_width_status().get("active"):
                             pm.cancel_stance_width_calibration()
                             self.copy_feedback = "Stance width measurement cancelled"
+                            self.root.after(2500, self.clear_copy_feedback)
                         else:
-                            pm.start_stance_width_calibration()
-                            self.copy_feedback = "Shift weight to your LEFT foot and hold"
-                        self.root.after(2500, self.clear_copy_feedback)
+                            self.start_guided_setup(["width"])
                 except Exception as e:
                     print(f"[!] Stance width calibration failed: {e}")
                 self.draw_screen()
@@ -8023,14 +8034,150 @@ class ShanktuaryApp:
                                         fill=col, width=2)
                 lx = bb[0] - 24
 
-    def draw_board_assign_modal(self, w, h):
-        """Full-screen, room-readable prompt for the step-on assignment wizard.
+    # ---- guided setup flow (assign -> 50/50 -> stance width) -------------
+    #
+    # These three used to be three separate buttons, each needing its own trip
+    # to the Setup page and its own step-on/step-off cycle. They are really one
+    # calibration: you are standing on the boards for all of it, and doing them
+    # out of order silently invalidates the later ones (a 50/50 baseline taken
+    # before left/right are known is measured against the wrong feet).
+    FLOW_TITLES = {
+        "assign": "Board assignment",
+        "align": "50/50 stance calibration",
+        "width": "Stance width",
+    }
 
-        The wizard's whole interaction happens with the user standing several
-        feet away, about to put a foot on a board -- not sitting at the
-        keyboard. A 7pt caption inside a sidebar card is unreadable from
-        there, so this takes over the screen and states the one thing that
-        matters in type large enough to read across a room.
+    def start_guided_setup(self, steps=None):
+        """Begin the chained calibration. `steps` defaults to all three."""
+        pm = getattr(obs_server, "pressure_manager", None)
+        if steps is None:
+            steps = []
+            # Assignment only means anything with two boards to tell apart.
+            if pm and getattr(pm, "board_mode", "single") == "dual":
+                steps.append("assign")
+            steps += ["align", "width"]
+
+        self.setup_flow_steps = list(steps)
+        self.setup_flow_index = 0
+        self.setup_flow_error = ""
+        self.setup_flow_done = False
+        self.show_board_assign_modal = True
+        return self._enter_setup_flow_step()
+
+    def _flow_step(self):
+        steps = getattr(self, "setup_flow_steps", None) or ["assign"]
+        i = getattr(self, "setup_flow_index", 0)
+        return steps[i] if 0 <= i < len(steps) else None
+
+    def _enter_setup_flow_step(self):
+        """Kick off whichever step just became current."""
+        pm = getattr(obs_server, "pressure_manager", None)
+        step = self._flow_step()
+        self.setup_flow_error = ""
+        if not pm or step is None:
+            return {}
+
+        try:
+            if step == "assign":
+                st = pm.start_assignment_wizard()
+                # start_assignment_wizard refuses on fewer than two boards and
+                # explains why. Surface that instead of showing a dead step.
+                if st.get("phase") not in ("waiting_left", "waiting_right"):
+                    self.setup_flow_error = st.get(
+                        "message", "Board assignment could not start")
+                return st
+            if step == "align":
+                # The lead-in gives the user time to step back on and settle
+                # after the assignment step.
+                return pm.start_stance_alignment(duration_sec=4.0)
+            if step == "width":
+                return pm.start_stance_width_calibration()
+        except Exception as e:
+            self.setup_flow_error = f"{self.FLOW_TITLES.get(step, step)} failed: {e}"
+        return {}
+
+    def _cancel_setup_flow(self):
+        """Abandon the whole flow, stopping whatever step is mid-run."""
+        pm = getattr(obs_server, "pressure_manager", None)
+        if pm:
+            for call in ("reset_assignment_wizard",
+                         "cancel_stance_width_calibration"):
+                try:
+                    getattr(pm, call)()
+                except Exception as e:
+                    print(f"[!] {call} failed: {e}")
+        self.setup_flow_steps = []
+        self.setup_flow_index = 0
+        self.setup_flow_done = False
+        self.setup_flow_error = ""
+
+    def _skip_setup_flow_step(self):
+        """Abandon the current step and move to the next one."""
+        pm = getattr(obs_server, "pressure_manager", None)
+        step = self._flow_step()
+        try:
+            if pm and step == "assign":
+                pm.reset_assignment_wizard()
+            elif pm and step == "width":
+                pm.cancel_stance_width_calibration()
+        except Exception:
+            pass
+        self._advance_setup_flow()
+
+    def _advance_setup_flow(self):
+        steps = getattr(self, "setup_flow_steps", None) or []
+        self.setup_flow_index = getattr(self, "setup_flow_index", 0) + 1
+        if self.setup_flow_index >= len(steps):
+            self.setup_flow_done = True
+            return
+        self._enter_setup_flow_step()
+
+    def tick_setup_flow(self):
+        """Advance the flow when the current step reports success.
+
+        Driven from poll_pressure_stream so each step hands off the moment the
+        hardware says it is finished -- the user never has to walk back to the
+        keyboard between steps.
+        """
+        if not self.show_board_assign_modal or getattr(self, "setup_flow_done", False):
+            return
+        pm = getattr(obs_server, "pressure_manager", None)
+        if not pm:
+            return
+        step = self._flow_step()
+
+        try:
+            if step == "assign":
+                wiz = getattr(pm, "assignment_wizard", None)
+                if wiz and wiz.get_status().get("is_complete"):
+                    self._advance_setup_flow()
+            elif step == "align":
+                al = pm.get_alignment_status() or {}
+                if not al.get("active"):
+                    msg = str(al.get("message", ""))
+                    if msg.startswith("✓"):
+                        self._advance_setup_flow()
+                    elif msg and "failed" in msg.lower():
+                        self.setup_flow_error = msg
+            elif step == "width":
+                sw = pm.get_stance_width_status() or {}
+                if sw.get("state") == "done":
+                    self._advance_setup_flow()
+        except Exception:
+            pass
+
+    def draw_board_assign_modal(self, w, h):
+        """Full-screen, room-readable prompt for the guided setup flow.
+
+        The whole interaction happens with the user standing several feet
+        away, on the boards -- not sitting at the keyboard. A 7pt caption
+        inside a sidebar card is unreadable from there, so this takes over the
+        screen and states the one thing that matters in type large enough to
+        read across a room.
+
+        It now carries all three calibration steps (assign -> 50/50 -> stance
+        width) behind one step rail, because the user is standing on the
+        boards for all of them.
         """
         pm = getattr(obs_server, "pressure_manager", None)
         wiz = getattr(pm, "assignment_wizard", None) if pm else None
@@ -8038,6 +8185,11 @@ class ShanktuaryApp:
         phase = st.get("phase", "idle")
         w_a = float(st.get("board_a_weight", 0.0) or 0.0)
         w_b = float(st.get("board_b_weight", 0.0) or 0.0)
+
+        steps = getattr(self, "setup_flow_steps", None) or ["assign"]
+        step = self._flow_step()
+        flow_done = bool(getattr(self, "setup_flow_done", False))
+        flow_err = getattr(self, "setup_flow_error", "") or ""
 
         # Dim everything behind so the instruction is the only thing competing
         # for attention.
@@ -8073,20 +8225,64 @@ class ShanktuaryApp:
 
         cx = w // 2
 
-        if phase == "waiting_left":
-            headline = "Step on your LEFT board"
-            sub = "Put your LEFT foot on one board and leave it there"
-        elif phase == "waiting_right":
-            headline = "Now step on your RIGHT board"
-            sub = "Keep both feet down — the other board is your right"
-        elif phase == "complete":
-            headline = "Both boards assigned"
-            sub = "Left and right are set. You can step off."
-        else:
-            headline = "Board assignment"
-            sub = st.get("message", "")
+        # ---- what this step is asking for --------------------------------
+        al = {}
+        sw = {}
+        if pm and step == "align":
+            try:
+                al = pm.get_alignment_status() or {}
+            except Exception:
+                al = {}
+        if pm and step == "width":
+            try:
+                sw = pm.get_stance_width_status() or {}
+            except Exception:
+                sw = {}
 
-        head_col = theme.ACCENT_TEXT if phase != "complete" else theme.ACCENT
+        show_plates = step == "assign"
+        big_value = ""
+
+        if flow_done:
+            headline = "Setup complete"
+            width_mm = getattr(pm, "stance_width_mm", None) if pm else None
+            sub = (f"Stance width {float(width_mm):.0f} mm — you can step off."
+                   if width_mm else "You can step off.")
+        elif step == "assign":
+            if phase == "waiting_left":
+                headline = "Step on your LEFT board"
+                sub = "Put your LEFT foot on one board and leave it there"
+            elif phase == "waiting_right":
+                headline = "Now step on your RIGHT board"
+                sub = "Keep both feet down — the other board is your right"
+            elif phase == "complete":
+                headline = "Both boards assigned"
+                sub = "Left and right are set."
+            else:
+                headline = "Board assignment"
+                sub = st.get("message", "")
+        elif step == "align":
+            headline = "Stand in your address position"
+            sub = al.get("message", "Take your stance and hold still")
+            rem = float(al.get("remaining_sec", 0.0) or 0.0)
+            if al.get("active"):
+                big_value = f"{rem:.1f}s"
+        elif step == "width":
+            headline = "Measure stance width"
+            sub = sw.get("instruction") or "Shift your weight left, then right"
+            width_mm = (sw.get("stance_width_mm")
+                        or (getattr(pm, "stance_width_mm", None) if pm else None))
+            if width_mm:
+                big_value = f"{float(width_mm):.0f} mm"
+        else:
+            headline = "Setup"
+            sub = ""
+
+        if flow_err:
+            sub = flow_err
+
+        head_col = theme.ACCENT if flow_done else theme.ACCENT_TEXT
+        if flow_err:
+            head_col = theme.WARN
 
         # Lay the block out from its true total height so it sits centred,
         # rather than hanging off a hardcoded offset from the middle.
@@ -8100,13 +8296,59 @@ class ShanktuaryApp:
         gap = int(60 * s)
         btn_h = int(46 * s)
         gap_head = int(18 * s)      # headline -> subtitle
-        gap_plates = int(34 * s)    # subtitle -> plates
-        gap_dots = int(40 * s)      # plates -> progress dots
+        gap_plates = int(34 * s)    # subtitle -> body
+        gap_dots = int(40 * s)      # body -> progress dots
         gap_btn = int(34 * s)       # dots -> button
+        h_rail = h_label + int(10 * s)
 
-        block_h = (h_head + gap_head + h_sub + gap_plates + plate_h
-                   + gap_dots + gap_btn + btn_h)
+        # Steps other than assignment show a single big readout (a countdown
+        # or the measured width) rather than two board plates.
+        body_h = plate_h if show_plates else (h_kg if big_value else 0)
+        # The 50/50 step also reserves a band for its progress bar.
+        pre_bar = int(26 * s) if (step == "align" and al.get("active")) else 0
+
+        block_h = (h_rail + int(26 * s) + h_head + gap_head + h_sub
+                   + gap_plates + body_h + pre_bar + gap_dots + gap_btn + btn_h)
         y = max(int(40 * s), (h - block_h) // 2)
+
+        # ---- step rail ----------------------------------------------------
+        # Three separate buttons gave no sense of where you were. Name the
+        # steps and mark the current one, so the user knows what is coming.
+        if len(steps) > 1:
+            rail_gap = int(26 * s)
+            labels = [self.FLOW_TITLES.get(k, k) for k in steps]
+            widths = []
+            for i, lbl in enumerate(labels):
+                tid = self.canvas.create_text(-4000, -4000,
+                                              text=f"{i + 1}. {lbl}",
+                                              font=(theme.ui_font(), f_label))
+                bb = self.canvas.bbox(tid)
+                widths.append((bb[2] - bb[0]) if bb else int(120 * s))
+                self.canvas.delete(tid)
+            total = sum(widths) + rail_gap * (len(labels) - 1)
+            rx = cx - total // 2
+            for i, lbl in enumerate(labels):
+                idx = getattr(self, "setup_flow_index", 0)
+                if flow_done or i < idx:
+                    col = theme.ACCENT
+                    txt = f"✓ {lbl}"
+                elif i == idx:
+                    col = theme.ACCENT_TEXT
+                    txt = f"{i + 1}. {lbl}"
+                else:
+                    col = theme.TEXT_3
+                    txt = f"{i + 1}. {lbl}"
+                self.canvas.create_text(rx, y, text=txt, fill=col,
+                                        font=(theme.ui_font(), f_label,
+                                              "bold" if i == idx and not flow_done
+                                              else "normal"),
+                                        anchor="nw")
+                rx += widths[i] + rail_gap
+            y += h_rail
+            rule_half = max(int(220 * s), total // 2 + int(16 * s))
+            self.canvas.create_line(cx - rule_half, y, cx + rule_half, y,
+                                    fill=theme.HAIRLINE)
+            y += int(26 * s)
 
         self.canvas.create_text(cx, y, text=headline,
                                 fill=head_col,
@@ -8114,75 +8356,105 @@ class ShanktuaryApp:
                                 anchor="n")
         y += h_head + gap_head
         self.canvas.create_text(cx, y, text=sub,
-                                fill=theme.TEXT_2,
+                                fill=theme.WARN if flow_err else theme.TEXT_2,
                                 font=(theme.ui_font(), f_sub), anchor="n")
         y += h_sub + gap_plates
 
-        # Two live board plates. Seeing the weight jump on the plate you just
-        # stepped on is the confirmation that the app read the RIGHT board --
-        # which is the thing that used to be impossible to tell.
         top = y
 
         # Threshold mirrors BoardAssignmentWizard.WEIGHT_THRESHOLD.
         thresh = float(getattr(wiz, "threshold", 5.0) or 5.0)
 
-        for i, (label, kg) in enumerate((("BOARD A", w_a), ("BOARD B", w_b))):
-            px1 = cx - plate_w - gap // 2 + i * (plate_w + gap)
-            px2 = px1 + plate_w
-            loaded = kg > thresh
+        if show_plates:
+            # Two live board plates. Seeing the weight jump on the plate you
+            # just stepped on is the confirmation that the app read the RIGHT
+            # board -- the thing that used to be impossible to tell.
+            for i, (label, kg) in enumerate((("BOARD A", w_a), ("BOARD B", w_b))):
+                px1 = cx - plate_w - gap // 2 + i * (plate_w + gap)
+                px2 = px1 + plate_w
+                loaded = kg > thresh
 
-            # Highlight whichever plate is currently carrying weight, so the
-            # user gets immediate feedback that this specific board is live.
-            if loaded:
-                edge, face = theme.ACCENT_LINE, theme.ACCENT_DEEP
-            else:
-                edge, face = theme.HAIRLINE, theme.SURFACE_2
+                # Highlight whichever plate is carrying weight, so the user
+                # gets immediate feedback that this specific board is live.
+                if loaded:
+                    edge, face = theme.ACCENT_LINE, theme.ACCENT_DEEP
+                else:
+                    edge, face = theme.HAIRLINE, theme.SURFACE_2
 
-            self.canvas.create_rectangle(px1, top, px2, top + plate_h,
-                                         fill=face, outline=edge, width=3 if loaded else 1)
-            pcx = (px1 + px2) // 2
+                self.canvas.create_rectangle(px1, top, px2, top + plate_h,
+                                             fill=face, outline=edge,
+                                             width=3 if loaded else 1)
+                pcx = (px1 + px2) // 2
 
-            # Stack the plate's contents top-down on real line heights instead
-            # of centring three separate strings on the same midpoint.
-            ty = top + pad
-            self.canvas.create_text(pcx, ty, text=label, fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), f_label), anchor="n")
-            ty += h_label + int(8 * s)
-            self.canvas.create_text(pcx, ty,
-                                    text=f"{kg:.0f}",
-                                    fill=theme.TEXT if loaded else theme.TEXT_3,
+                # Stack the plate's contents top-down on real line heights
+                # instead of centring three strings on the same midpoint.
+                ty = top + pad
+                self.canvas.create_text(pcx, ty, text=label, fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), f_label), anchor="n")
+                ty += h_label + int(8 * s)
+                self.canvas.create_text(pcx, ty,
+                                        text=f"{kg:.0f}",
+                                        fill=theme.TEXT if loaded else theme.TEXT_3,
+                                        font=(theme.ui_font(), f_kg, "bold"),
+                                        anchor="n")
+                ty += h_kg
+                self.canvas.create_text(pcx, ty,
+                                        text="kg", fill=theme.TEXT_3,
+                                        font=(theme.ui_font(), f_label), anchor="n")
+
+                # Once a board has been claimed, say which foot owns it.
+                owned = ""
+                if wiz is not None:
+                    board = wiz.board_a if i == 0 else wiz.board_b
+                    if wiz.left_board is not None and board == wiz.left_board:
+                        owned = "LEFT"
+                    elif wiz.right_board is not None and board == wiz.right_board:
+                        owned = "RIGHT"
+                if owned:
+                    self.canvas.create_text(pcx, top + plate_h - pad,
+                                            text=owned, fill=theme.ACCENT_TEXT,
+                                            font=(theme.ui_font(), f_label, "bold"),
+                                            anchor="s")
+        elif big_value:
+            # Countdown or measured width, in the same slot the plates use.
+            self.canvas.create_text(cx, top, text=big_value,
+                                    fill=theme.WARN if al.get("in_lead_in")
+                                    else theme.ACCENT_TEXT,
                                     font=(theme.ui_font(), f_kg, "bold"),
                                     anchor="n")
-            ty += h_kg
-            self.canvas.create_text(pcx, ty,
-                                    text="kg", fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), f_label), anchor="n")
 
-            # Once a board has been claimed, say which foot owns it.
-            owned = ""
-            if wiz is not None:
-                board = wiz.board_a if i == 0 else wiz.board_b
-                if wiz.left_board is not None and board == wiz.left_board:
-                    owned = "LEFT"
-                elif wiz.right_board is not None and board == wiz.right_board:
-                    owned = "RIGHT"
-            if owned:
-                self.canvas.create_text(pcx, top + plate_h - pad,
-                                        text=owned, fill=theme.ACCENT_TEXT,
-                                        font=(theme.ui_font(), f_label, "bold"),
-                                        anchor="s")
+        # Progress bar for the timed 50/50 hold, so the user can see it
+        # running rather than guessing whether it registered. It gets its own
+        # reserved band -- drawn into the dots' gap it crowded them.
+        show_bar = step == "align" and al.get("active")
+        bar_band = int(26 * s) if show_bar else 0
+        dot_y = top + body_h + bar_band + gap_dots
+        if show_bar:
+            frac = max(0.0, min(1.0, float(al.get("progress", 0.0) or 0.0)))
+            bar_w = int(320 * s)
+            bar_y = top + body_h + int(16 * s)
+            self.canvas.create_rectangle(cx - bar_w // 2, bar_y,
+                                         cx + bar_w // 2, bar_y + int(6 * s),
+                                         fill=theme.SURFACE_2, outline="")
+            self.canvas.create_rectangle(cx - bar_w // 2, bar_y,
+                                         cx - bar_w // 2 + int(bar_w * frac),
+                                         bar_y + int(6 * s),
+                                         fill=theme.WARN if al.get("in_lead_in")
+                                         else theme.ACCENT, outline="")
 
-        # Progress dots: two steps, so the user knows another one is coming.
-        dot_y = top + plate_h + gap_dots
+        # Progress dots: one per step in the flow.
         r_dot = max(5, int(7 * s))
-        for i in range(2):
-            done = (phase == "complete") or (phase == "waiting_right" and i == 0)
-            here = (phase == "waiting_left" and i == 0) or \
-                   (phase == "waiting_right" and i == 1)
-            dx = cx - int(20 * s) + i * int(40 * s)
+        n_dots = len(steps)
+        idx = getattr(self, "setup_flow_index", 0)
+        spacing = int(40 * s)
+        x_start = cx - (spacing * (n_dots - 1)) // 2
+        for i in range(n_dots):
+            done_i = flow_done or i < idx
+            here = (not flow_done) and i == idx
+            dx = x_start + i * spacing
             self.canvas.create_oval(dx - r_dot, dot_y - r_dot,
                                     dx + r_dot, dot_y + r_dot,
-                                    fill=theme.ACCENT if (done or here) else theme.HAIRLINE,
+                                    fill=theme.ACCENT if (done_i or here) else theme.HAIRLINE,
                                     outline=theme.ACCENT_LINE if here else "",
                                     width=2 if here else 0)
 
@@ -8190,10 +8462,11 @@ class ShanktuaryApp:
         # board first must be able to back out rather than live with it.
         btn_w = int(180 * s)
         by1 = dot_y + gap_btn
-        if phase == "complete":
+        if flow_done:
             self.board_modal_done_rect = (cx - btn_w // 2, by1,
                                           cx + btn_w // 2, by1 + btn_h)
             self.board_modal_cancel_rect = None
+            self.board_modal_skip_rect = None
             self.canvas.create_rectangle(*self.board_modal_done_rect,
                                          fill=theme.ACCENT_DEEP,
                                          outline=theme.ACCENT_LINE, width=2)
@@ -8202,16 +8475,35 @@ class ShanktuaryApp:
                                     font=(theme.ui_font(), f_sub, "bold"),
                                     anchor="center")
         else:
+            # Cancel abandons the whole flow; Skip drops just this step, so a
+            # bad sensor reading on one step cannot strand the other two.
             self.board_modal_done_rect = None
-            self.board_modal_cancel_rect = (cx - btn_w // 2, by1,
-                                            cx + btn_w // 2, by1 + btn_h)
+            gapx = int(12 * s)
+            self.board_modal_cancel_rect = (cx - btn_w - gapx // 2, by1,
+                                            cx - gapx // 2, by1 + btn_h)
+            self.board_modal_skip_rect = (cx + gapx // 2, by1,
+                                          cx + btn_w + gapx // 2, by1 + btn_h)
             self.canvas.create_rectangle(*self.board_modal_cancel_rect,
                                          fill=theme.SURFACE_2, outline=theme.HAIRLINE)
-            self.canvas.create_text(cx, by1 + btn_h // 2, text="Cancel",
+            self.canvas.create_text((self.board_modal_cancel_rect[0]
+                                     + self.board_modal_cancel_rect[2]) // 2,
+                                    by1 + btn_h // 2, text="Cancel",
                                     fill=theme.TEXT_2,
                                     font=(theme.ui_font(), f_sub), anchor="center")
+            skip_label = ("Skip step" if getattr(self, "setup_flow_index", 0)
+                          < len(steps) - 1 else "Skip")
+            self.canvas.create_rectangle(*self.board_modal_skip_rect,
+                                         fill=theme.SURFACE_2, outline=theme.HAIRLINE)
+            self.canvas.create_text((self.board_modal_skip_rect[0]
+                                     + self.board_modal_skip_rect[2]) // 2,
+                                    by1 + btn_h // 2, text=skip_label,
+                                    fill=theme.TEXT_2,
+                                    font=(theme.ui_font(), f_sub), anchor="center")
+            hint = (f"Needs more than {thresh:.0f} kg to register  ·  Esc to cancel"
+                    if step == "assign"
+                    else "Esc to cancel  ·  S to skip this step")
             self.canvas.create_text(cx, by1 + btn_h + int(22 * s),
-                                    text=f"Needs more than {thresh:.0f} kg to register  ·  Esc to cancel",
+                                    text=hint,
                                     fill=theme.TEXT_3,
                                     font=(theme.ui_font(), max(9, int(11 * s))),
                                     anchor="center")
@@ -8837,6 +9129,31 @@ class ShanktuaryApp:
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
                                 anchor="nw")
         by += 16
+
+        # One guided pass through every calibration step. This is the way in:
+        # the individual buttons below stay for re-running a single step, but
+        # nobody should have to run three separate wizards, stepping on and
+        # off the boards each time, to finish one setup.
+        n_steps = 3 if is_dual else 2
+        self.setup_guided_rect = (rx0 + 18, by, rx1 - 18, by + 40)
+        self.canvas.create_rectangle(*self.setup_guided_rect,
+                                     fill=theme.ACCENT_DEEP,
+                                     outline=theme.ACCENT_LINE)
+        self.canvas.create_text(rx0 + 30, by + 8,
+                                text=f"Run full setup — {n_steps} steps",
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 9, "bold"), anchor="nw")
+        self.canvas.create_text(rx0 + 30, by + 24,
+                                text=("Assign boards, 50/50, then stance width"
+                                      if is_dual
+                                      else "50/50 calibration, then stance width"),
+                                fill=theme.TEXT_3,
+                                font=(theme.ui_font(), 7), anchor="nw")
+        self.canvas.create_text(rx1 - 30, by + 20, text="›",
+                                fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 12), anchor="e")
+        by += 48
+
         al = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {}
         aligning = al.get("active", False)
         rem = al.get("remaining_sec", 0.0)
