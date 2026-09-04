@@ -2,7 +2,7 @@
 
 import { initRenderer } from './renderer.js';
 import { setupEnvironment } from './environment.js';
-import { setupFoliage } from './foliage.js';
+import { setupFoliage, updateFoliageWind } from './foliage.js';
 import { CameraController, CameraModes } from './camera.js';
 import { GolfPhysicsEngine } from './physics.js';
 import { GolfBall } from './ball.js';
@@ -38,6 +38,7 @@ function start() {
         
         const delta = Math.min(clock.getDelta(), 0.1);
         
+        updateFoliageWind(clock.getElapsedTime());
         ball.update(delta);
         cameraController.setBallPosition(ball.mesh.position);
         cameraController.update(delta);
