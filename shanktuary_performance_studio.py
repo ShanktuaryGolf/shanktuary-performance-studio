@@ -51,7 +51,11 @@ from src.analytics.aim import (
 )
 from src.gspro import GsproPoller, locate_gspro_database_path, match_gspro_club
 from src.gspro import settings as gspro_settings
-from src.processing.pressure import PressureTraceStore, derive_pressure_metrics
+from src.processing.pressure import (
+    PressureTraceStore,
+    derive_pressure_metrics,
+    shot_trace_id,
+)
 
 # Configuration & Logging
 FALLBACK_NOVA_HOST = "192.168.40.249"
@@ -2574,13 +2578,13 @@ class ShanktuaryApp:
         self.root.after(250, self.poll_pressure_traces)
 
     def _find_shot_by_id(self, shot_id):
-        """Locate a stored shot by its Nova shotId, newest first."""
+        """Locate a stored shot by its trace id, newest first."""
         if shot_id is None:
             return None
         target = str(shot_id)
         for sess in reversed(self.sessions):
             for shot in reversed(sess.get("shots", [])):
-                if str(shot.get("shotId")) == target:
+                if shot_trace_id(shot) == target:
                     return shot
         return None
 
@@ -2599,7 +2603,7 @@ class ShanktuaryApp:
             return inline
         if not shot.get("has_pressure_trace"):
             return None
-        shot_id = shot.get("shotId")
+        shot_id = shot_trace_id(shot)
         if shot_id is None:
             return None
         key = str(shot_id)

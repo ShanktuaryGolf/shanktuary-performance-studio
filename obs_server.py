@@ -277,7 +277,11 @@ class OBSState:
         # Trigger shot impact capture in pressure buffer
         pm = globals().get('pressure_manager')
         if pm is not None and pm.buffer is not None:
-            shot_id = shot_data.get("shotId")
+            # The Nova payload has no `shotId`, so keying on it alone wrote
+            # every trace to "None.json.gz" -- each shot silently overwriting
+            # the last, and no shot ever able to find its own trace again.
+            from src.processing.pressure import shot_trace_id
+            shot_id = shot_trace_id(shot_data)
 
             def on_pressure_captured(trace_frames):
                 # Build an immutable snapshot instead of mutating the shared
@@ -287,7 +291,7 @@ class OBSState:
                     if self.latest_shot is shot_data:
                         self.latest_shot = snapshot
                 pm.last_shot_trace = trace_frames
-                self.broadcast({"type": "shot_pressure", "shot_id": shot_data.get("shotId"), "trace": trace_frames})
+                self.broadcast({"type": "shot_pressure", "shot_id": shot_id, "trace": trace_frames})
 
                 # Hand the trace to whoever owns shot history. This fires on
                 # the pressure thread ~3s after impact, long after the desktop

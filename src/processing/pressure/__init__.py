@@ -6,7 +6,7 @@ from .cop import BodyWeightNormalizer, CoPCalculator, CoPSample, CoPStabilityMet
 from .shot_metrics import derive_pressure_metrics
 from .swing import SwingDetector, SwingPhase
 from .torque import TorqueCalculator, TorqueSample
-from .trace_store import PressureTraceStore
+from .trace_store import PressureTraceStore, shot_trace_id
 from .velocity import VelocityCalculator
 
 __all__ = [
@@ -24,4 +24,5 @@ __all__ = [
     "ShotSynchronizedPressureBuffer",
     "derive_pressure_metrics",
     "PressureTraceStore",
+    "shot_trace_id",
 ]

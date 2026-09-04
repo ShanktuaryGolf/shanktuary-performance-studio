@@ -35,6 +35,27 @@ def _safe_id(shot_id: Any) -> str:
     return _SAFE_ID.sub("_", str(shot_id))[:80] or "unknown"
 
 
+def shot_trace_id(shot: Dict[str, Any] | None) -> Optional[str]:
+    """Stable per-shot key used to name its trace file.
+
+    The Nova payload has no `shotId` -- the field the capture path originally
+    keyed on. Every trace therefore saved as "None.json.gz", each shot
+    overwriting the last, and no shot could ever find its own trace again.
+
+    `timestamp_ns` is on every Nova and GSPro shot, is unique per swing and is
+    already persisted in session history, so it is the identity that survives
+    a restart. `shotId` is still honoured first in case a future firmware
+    starts sending one.
+    """
+    if not shot:
+        return None
+    for key in ("shotId", "timestamp_ns"):
+        val = shot.get(key)
+        if val not in (None, "", "None"):
+            return _safe_id(val)
+    return None
+
+
 class PressureTraceStore:
     """Reads and writes per-shot pressure traces beside the session file."""
 
