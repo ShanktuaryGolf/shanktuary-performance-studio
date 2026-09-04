@@ -2588,6 +2588,72 @@ class ShanktuaryApp:
                     return shot
         return None
 
+    def board_is_streaming(self, max_age_s=1.5):
+        """True while the boards are actually feeding fresh frames.
+
+        `latest_frame` lingers after the hardware stops, so presence alone is
+        not liveness -- check that the newest frame is actually recent.
+        """
+        pm = getattr(obs_server, "pressure_manager", None)
+        frame = getattr(pm, "latest_frame", None) if pm else None
+        if not frame:
+            return False
+        ts = frame.get("timestamp")
+        if ts is None:
+            # No timestamp to judge by: trust that a frame exists.
+            return True
+        try:
+            return (time.time() - float(ts)) <= max_age_s
+        except (TypeError, ValueError):
+            return True
+
+    def is_reviewing_past_shot(self):
+        """True when the user has deliberately selected an older shot.
+
+        Landing a shot selects it (poll_queue sets selected_shot_index to the
+        last index), so "newest selected" is the live case; anything earlier
+        means the user clicked back through history to review it.
+        """
+        try:
+            shots = self.session_shots
+            idx = self.selected_shot_index
+        except AttributeError:
+            # Called before init finishes (a painter can run during __init__).
+            # Only missing attributes are tolerated -- a broader catch here
+            # silently swallowed a real wiring bug during development.
+            return False
+        if not shots or idx is None or idx < 0:
+            return False
+        return idx < len(shots) - 1
+
+    def pressure_display_trail(self):
+        """Frames the pressure panels should draw.
+
+        Precedence matches the metric strip (which kept working): live data
+        wins while the boards are streaming. Previously the CoP trail and the
+        force timeline did the opposite -- any stored trace on current_shot
+        overrode live. That was invisible while traces were broken and every
+        lookup returned None; once traces actually saved, current_shot always
+        had one and those two panels froze on it permanently.
+
+        Returns (frames, is_stored) so callers can label a review correctly.
+        """
+        live = self.swing_lab_history
+        stored = None
+        if self.current_shot:
+            stored = self.get_pressure_trace(self.current_shot)
+
+        # Deliberate review of an older shot always wins -- that is the whole
+        # point of clicking back through the shot list.
+        if stored and self.is_reviewing_past_shot():
+            return stored, True
+        # Otherwise live data wins whenever the boards are actually running.
+        if self.board_is_streaming() and len(live) > 1:
+            return live, False
+        if stored:
+            return stored, True
+        return live, False
+
     def get_pressure_trace(self, shot):
         """Full pressure trace for a shot, loaded from disk on demand.
 
@@ -7611,14 +7677,20 @@ class ShanktuaryApp:
                                 fill=theme.TEXT_3,
                                 font=(theme.ui_font(), 9), anchor="nw")
 
-        # Get latest pressure sample
+        # Get latest pressure sample. Reviewing an older shot shows THAT
+        # shot's values; otherwise live board data wins.
         latest = None
-        if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-            latest = obs_server.pressure_manager.latest_frame
-        if not latest and self.current_shot:
+        if self.is_reviewing_past_shot() and self.current_shot:
             trace = self.get_pressure_trace(self.current_shot)
             if trace:
                 latest = trace[-1]
+        if latest is None:
+            if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
+                latest = obs_server.pressure_manager.latest_frame
+            if not latest and self.current_shot:
+                trace = self.get_pressure_trace(self.current_shot)
+                if trace:
+                    latest = trace[-1]
 
         phase_str = latest.get("phase", "Address").title() if latest else "Ready"
         total_kg = latest.get("total_kg", 0.0) if latest else 0.0
@@ -7902,11 +7974,7 @@ class ShanktuaryApp:
         scale = max_r / 150.0
 
         # Draw Trail from history
-        trail = self.swing_lab_history
-        if self.current_shot:
-            stored = self.get_pressure_trace(self.current_shot)
-            if stored:
-                trail = stored
+        trail, _stored = self.pressure_display_trail()
 
         if len(trail) > 1:
             pts = []
@@ -7941,11 +8009,7 @@ class ShanktuaryApp:
         """
         x2, y2 = x1 + w, y1 + h
 
-        trail = self.swing_lab_history
-        if self.current_shot:
-            stored = self.get_pressure_trace(self.current_shot)
-            if stored:
-                trail = stored
+        trail, _stored = self.pressure_display_trail()
 
         gx1, gx2 = x1 + 46, x2 - 16
         gy1, gy2 = y1 + 22, y2 - 26
