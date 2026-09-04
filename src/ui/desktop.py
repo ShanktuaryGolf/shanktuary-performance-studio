@@ -222,6 +222,16 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
             *args, **kwargs,
         )
 
+    def draw_board_assign_modal(self, *args, **kwargs):
+        # This modal is painted from draw_screen, outside the Setup page's
+        # palette scope, so it rendered in the legacy hunter-green tokens
+        # while every surface behind it was navy/teal/gold.
+        return legacy_palette.draw_production_page(
+            self,
+            lambda *a, **k: studio.ShanktuaryApp.draw_board_assign_modal(self, *a, **k),
+            *args, **kwargs,
+        )
+
     # ---- Persistent shell ---------------------------------------------
     def draw_left_sidebar(self, w, h):
         # Upstream's base sidebar already applies aim correction. The approved

@@ -57,6 +57,11 @@ _LITERAL_MAP = {
     "#ff7a00": GOLD,
     "#ff8c00": GOLD,
     "#e76f25": GOLD,
+    # The board-assignment scrim is painted as a near-black literal. Left
+    # unmapped it punches a cold grey-black hole through the navy shell.
+    # (Plain #000000 is deliberately NOT mapped -- it is real black in the
+    # Range and Bag renderers.)
+    "#04060a": "#05161D",
 }
 
 _THEME_VALUES = {

@@ -8051,6 +8051,26 @@ class ShanktuaryApp:
         f_kg = max(22, int(40 * s))
         f_label = max(11, int(15 * s))
 
+        # Real line heights. The previous layout advanced by the POINT SIZE as
+        # if it were a pixel height, so a 52pt headline reserved 52px for a
+        # ~70px line -- which is why "Both boards assigned" sat on top of its
+        # own subtitle, and "kg" ran straight through the weight.
+        import tkinter.font as tkfont
+
+        def lh(size, bold=False):
+            try:
+                return tkfont.Font(root=self.root, family=theme.ui_font(),
+                                   size=size,
+                                   weight="bold" if bold else "normal",
+                                   ).metrics("linespace")
+            except Exception:
+                return int(size * 1.35)
+
+        h_head = lh(f_head, True)
+        h_sub = lh(f_sub)
+        h_kg = lh(f_kg, True)
+        h_label = lh(f_label)
+
         cx = w // 2
 
         if phase == "waiting_left":
@@ -8071,15 +8091,20 @@ class ShanktuaryApp:
         # Lay the block out from its true total height so it sits centred,
         # rather than hanging off a hardcoded offset from the middle.
         plate_w = int(min(300, w * 0.24))
-        plate_h = int(plate_w * 0.62)
+        pad = int(14 * s)
+        # Size the plate from what it actually has to hold, so the caption,
+        # the number, its unit and the LEFT/RIGHT tag never collide.
+        plate_h = max(int(plate_w * 0.62),
+                      pad + h_label + int(8 * s) + h_kg + h_label
+                      + int(8 * s) + h_label + pad)
         gap = int(60 * s)
         btn_h = int(46 * s)
-        gap_head = int(14 * s)      # headline -> subtitle
+        gap_head = int(18 * s)      # headline -> subtitle
         gap_plates = int(34 * s)    # subtitle -> plates
         gap_dots = int(40 * s)      # plates -> progress dots
         gap_btn = int(34 * s)       # dots -> button
 
-        block_h = (f_head + gap_head + f_sub + gap_plates + plate_h
+        block_h = (h_head + gap_head + h_sub + gap_plates + plate_h
                    + gap_dots + gap_btn + btn_h)
         y = max(int(40 * s), (h - block_h) // 2)
 
@@ -8087,11 +8112,11 @@ class ShanktuaryApp:
                                 fill=head_col,
                                 font=(theme.ui_font(), f_head, "bold"),
                                 anchor="n")
-        y += f_head + gap_head
+        y += h_head + gap_head
         self.canvas.create_text(cx, y, text=sub,
                                 fill=theme.TEXT_2,
                                 font=(theme.ui_font(), f_sub), anchor="n")
-        y += f_sub + gap_plates
+        y += h_sub + gap_plates
 
         # Two live board plates. Seeing the weight jump on the plate you just
         # stepped on is the confirmation that the app read the RIGHT board --
@@ -8115,18 +8140,23 @@ class ShanktuaryApp:
 
             self.canvas.create_rectangle(px1, top, px2, top + plate_h,
                                          fill=face, outline=edge, width=3 if loaded else 1)
-            self.canvas.create_text((px1 + px2) // 2, top + int(18 * s),
-                                    text=label, fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), f_label), anchor="center")
-            self.canvas.create_text((px1 + px2) // 2, top + plate_h // 2 + int(4 * s),
+            pcx = (px1 + px2) // 2
+
+            # Stack the plate's contents top-down on real line heights instead
+            # of centring three separate strings on the same midpoint.
+            ty = top + pad
+            self.canvas.create_text(pcx, ty, text=label, fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label), anchor="n")
+            ty += h_label + int(8 * s)
+            self.canvas.create_text(pcx, ty,
                                     text=f"{kg:.0f}",
                                     fill=theme.TEXT if loaded else theme.TEXT_3,
                                     font=(theme.ui_font(), f_kg, "bold"),
-                                    anchor="center")
-            self.canvas.create_text((px1 + px2) // 2,
-                                    top + plate_h // 2 + f_kg,
+                                    anchor="n")
+            ty += h_kg
+            self.canvas.create_text(pcx, ty,
                                     text="kg", fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), f_label), anchor="center")
+                                    font=(theme.ui_font(), f_label), anchor="n")
 
             # Once a board has been claimed, say which foot owns it.
             owned = ""
@@ -8137,10 +8167,10 @@ class ShanktuaryApp:
                 elif wiz.right_board is not None and board == wiz.right_board:
                     owned = "RIGHT"
             if owned:
-                self.canvas.create_text((px1 + px2) // 2, top + plate_h - int(16 * s),
+                self.canvas.create_text(pcx, top + plate_h - pad,
                                         text=owned, fill=theme.ACCENT_TEXT,
                                         font=(theme.ui_font(), f_label, "bold"),
-                                        anchor="center")
+                                        anchor="s")
 
         # Progress dots: two steps, so the user knows another one is coming.
         dot_y = top + plate_h + gap_dots
@@ -8872,12 +8902,19 @@ class ShanktuaryApp:
         self.setup_stance_rect = (rx0 + 18, by, rx1 - 18, by + 40)
         self.canvas.create_rectangle(*self.setup_stance_rect,
                                      fill=theme.ACCENT_DEEP if sw_active else theme.SURFACE_2,
-                                     outline=theme.ACCENT_LINE if sw_active else "")
+                                     outline=theme.ACCENT_LINE if sw_active
+                                     else theme.HAIRLINE)
         self.canvas.create_text(rx0 + 30, by + 8,
                                 text=("Measuring stance width — cancel" if sw_active
                                       else "Measure stance width"),
                                 fill=theme.ACCENT_TEXT if sw_active else theme.TEXT,
                                 font=(theme.ui_font(), 9), anchor="nw")
+        # A chevron marks this as something you press. Without it the row read
+        # as a status line and nobody knew it was a control.
+        self.canvas.create_text(rx1 - 30, by + 20,
+                                text="✕" if sw_active else "›",
+                                fill=theme.ACCENT_TEXT if sw_active else theme.TEXT_3,
+                                font=(theme.ui_font(), 12), anchor="e")
         if sw_active:
             sw_sub = sw_status.get("message", "Shift weight to your LEFT foot and hold")
         elif width_mm:
