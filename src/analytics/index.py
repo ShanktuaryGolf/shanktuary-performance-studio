@@ -13,6 +13,7 @@ the kind of bug nobody notices until the ratings disagree with each other.
 from __future__ import annotations
 
 import enum
+import statistics
 from typing import Any
 
 from .flight_model import carry_yards, model_optimum
@@ -156,6 +157,99 @@ def spin_control_by_club(shots: list[dict[str, Any]]) -> dict[str, dict[str, Any
             "score": score,
             "count": len(spins),
             "confidence": club_confidence(len(spins)),
+        }
+    return result
+
+
+SHAPE_SPREAD_PLATEAU = 2.5
+SHAPE_SPREAD_RATE = 10.0
+SHAPE_SPREAD_FLOOR = 20.0
+SHAPE_BIAS_FREE_LIMIT = 8.0
+SHAPE_BIAS_RATE = 2.2
+SHAPE_BIAS_PENALTY_CAP = 30.0
+
+
+def shape_ratio(
+    actual_axes: list[float], is_left_handed: bool = False
+) -> float | None:
+    """Score spin-axis bias and repeatability as a 0-to-1 ratio.
+
+    The spread curve (SHAPE_SPREAD_*) is a provisional calibration decision
+    made 2026-09-05, not a recovered source formula. Plan §9a's "Shape --
+    the plateau curve" table is eight examples of intended behavior, not a
+    documented formula -- no linear/quadratic/exponential curve reproduces
+    all eight exactly, and attempts to reverse-engineer one from the table
+    alone were inconclusive. Team vote (claude/copilot/Gemini, ruling by
+    Qwen) picked the plateau-then-linear-then-floor shape below because it
+    is the closest match, not because it was recovered:
+
+        base(spread) = max(FLOOR, 100 - RATE * max(0, spread - PLATEAU))
+
+    Reproduces six of the table's eight rows exactly. Two rows deviate --
+    both by ~1 point, in opposite directions, so this is not a one-sided
+    fudge:
+        bias=25 deg, spread=2.4 deg: formula scores 70.0, table says 69.0 (+1.0)
+        bias=0 deg,  spread=12  deg: formula scores 20.0, table says 21.1 (-1.1)
+
+    The second row is the design-intent anchor ("a 0 deg mean with 12 deg of
+    spread ... the two-way miss is the worst result on the board") and the
+    formula scores it *lower* than the table's own example, so that intent
+    holds with more margin, not less. The full eight-row table is reproduced
+    verbatim in tests/test_index_shape.py for provenance.
+
+    The bias penalty (SHAPE_BIAS_*), by contrast, IS an exact plan formula:
+    free to +-8 degrees, then 2.2 points per degree, capped at 30.
+    """
+    values: list[float] = []
+    for axis in actual_axes:
+        try:
+            value = float(axis)
+        except (TypeError, ValueError):
+            continue
+        values.append(-value if is_left_handed else value)
+    if len(values) < 2:
+        return None
+
+    bias = sum(values) / len(values)
+    spread = statistics.stdev(values)
+    base_score = max(
+        SHAPE_SPREAD_FLOOR,
+        100.0
+        - SHAPE_SPREAD_RATE * max(0.0, spread - SHAPE_SPREAD_PLATEAU),
+    )
+    bias_penalty = min(
+        SHAPE_BIAS_PENALTY_CAP,
+        max(0.0, abs(bias) - SHAPE_BIAS_FREE_LIMIT) * SHAPE_BIAS_RATE,
+    )
+    return max(0.0, base_score - bias_penalty) / 100.0
+
+
+def _shape_value(shot: dict[str, Any]) -> float | None:
+    try:
+        return float(shot["spin_axis_degrees"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def shape_by_club(
+    shots: list[dict[str, Any]], is_left_handed: bool = False
+) -> dict[str, dict[str, Any]]:
+    """Aggregate Shape scores by club after the shared validity gate."""
+    grouped: dict[str, list[float]] = {}
+    for shot in valid_shots(shots):
+        axis = _shape_value(shot)
+        if axis is not None:
+            grouped.setdefault(str(shot.get("club") or "Unknown"), []).append(axis)
+
+    result: dict[str, dict[str, Any]] = {}
+    for club, axes in grouped.items():
+        score = shape_ratio(axes, is_left_handed=is_left_handed)
+        if score is None:
+            continue
+        result[club] = {
+            "score": score,
+            "count": len(axes),
+            "confidence": club_confidence(len(axes)),
         }
     return result
 
