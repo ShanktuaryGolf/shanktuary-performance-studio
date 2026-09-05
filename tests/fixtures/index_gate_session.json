@@ -1,0 +1,79 @@
+{
+  "shots": [
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5100,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 92}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5050,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 91}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 4980,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 90}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5150,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 93}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5020,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 91}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5070,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 92}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5010,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 90}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5090,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 92}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5030,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 91}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 5120,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 93}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": -471,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 90}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": -859,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 91}}
+    },
+    {
+      "club": "7 Iron",
+      "total_spin_rpm": 0,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 92}}
+    },
+    {
+      "club": "Putter",
+      "total_spin_rpm": 3500,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 55}}
+    },
+    {
+      "club": "Putter",
+      "total_spin_rpm": 3600,
+      "open_golf_coach": {"us_customary_units": {"ball_speed_mph": 58}}
+    }
+  ]
+}

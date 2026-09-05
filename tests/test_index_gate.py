@@ -111,27 +111,26 @@ def test_the_tiers_are_ordered_so_they_can_be_compared():
 # --- behaviour on the real session file ----------------------------------
 
 def test_the_gate_on_the_real_session_history():
-    """Documents exactly what the shipped data does through the gate."""
+    """Documents the gate behavior on a stable committed fixture."""
     import json
     from pathlib import Path
 
-    path = Path(__file__).resolve().parent.parent / "shanktuary_session_history.json"
-    shots = [s for sess in json.loads(path.read_text())["sessions"]
-             for s in sess.get("shots", [])]
+    path = Path(__file__).resolve().parent / "fixtures" / "index_gate_session.json"
+    shots = json.loads(path.read_text())["shots"]
 
     seven_iron = [s for s in shots if s.get("club") == "7 Iron"]
-    assert len(seven_iron) == 22, "session file changed; update this test"
+    assert len(seven_iron) == 13
 
     kept = valid_shots(seven_iron)
 
-    # 3 of the 30 shots in the file have negative spin.
+    # Three malformed-spin shots are rejected.
     assert len(kept) < len(seven_iron)
     assert all(s["total_spin_rpm"] > 0 for s in kept)
 
     # Putter shots are full swings from a mis-set dropdown -- all dropped.
     assert valid_shots([s for s in shots if s.get("club") == "Putter"]) == []
 
-    # 22 raw shots is not enough for an established rating either way.
+    # The fixture is intentionally below the established-rating threshold.
     assert club_confidence(len(kept)) is not ConfidenceTier.ESTABLISHED
 
 
