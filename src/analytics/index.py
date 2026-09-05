@@ -254,6 +254,109 @@ def shape_by_club(
     return result
 
 
+CONSISTENCY_RESIDUAL_MIN_SHOTS = 40
+
+
+def _consistency_inputs(
+    shot: dict[str, Any],
+) -> tuple[float, float, float, float] | None:
+    us = (shot.get("open_golf_coach") or {}).get("us_customary_units") or {}
+    try:
+        carry = float(us["carry_distance_yards"])
+        speed = float(us["ball_speed_mph"])
+        vla = float(shot["vertical_launch_angle_degrees"])
+        spin = float(shot["total_spin_rpm"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if carry <= 0 or speed <= 0 or spin <= 0:
+        return None
+    return carry, speed, vla, spin
+
+
+def _solve_regression(
+    rows: list[tuple[float, float, float, float]],
+) -> list[float] | None:
+    matrix = [
+        [
+            sum((1.0, speed, vla, spin)[row] * (1.0, speed, vla, spin)[col] for carry, speed, vla, spin in rows)
+            for col in range(4)
+        ]
+        + [sum(carry * (1.0, speed, vla, spin)[row] for carry, speed, vla, spin in rows)]
+        for row in range(4)
+    ]
+    for pivot in range(4):
+        pivot_row = max(range(pivot, 4), key=lambda row: abs(matrix[row][pivot]))
+        if abs(matrix[pivot_row][pivot]) < 1e-12:
+            return None
+        matrix[pivot], matrix[pivot_row] = matrix[pivot_row], matrix[pivot]
+        divisor = matrix[pivot][pivot]
+        matrix[pivot] = [value / divisor for value in matrix[pivot]]
+        for row in range(4):
+            if row == pivot:
+                continue
+            factor = matrix[row][pivot]
+            matrix[row] = [
+                value - factor * pivot_value
+                for value, pivot_value in zip(matrix[row], matrix[pivot])
+            ]
+    return [matrix[row][4] for row in range(4)]
+
+
+def consistency_by_club(
+    shots: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Report carry dispersion as raw CV or corrected residual standard error.
+
+    Fewer than 40 gated shots use sample carry CV and are labeled ``RAW``.
+    At 40 or more, carry is regressed on ball speed, VLA, and spin, then the
+    residual sample standard deviation uses ``n - 4`` degrees of freedom.
+    """
+    grouped: dict[str, list[tuple[float, float, float, float]]] = {}
+    for shot in valid_shots(shots):
+        values = _consistency_inputs(shot)
+        if values is not None:
+            grouped.setdefault(str(shot.get("club") or "Unknown"), []).append(values)
+
+    result: dict[str, dict[str, Any]] = {}
+    for club, rows in grouped.items():
+        carries = [row[0] for row in rows]
+        if len(carries) < 2:
+            continue
+        if len(rows) < CONSISTENCY_RESIDUAL_MIN_SHOTS:
+            mean = sum(carries) / len(carries)
+            if mean <= 0:
+                continue
+            variance = sum((carry - mean) ** 2 for carry in carries) / (len(carries) - 1)
+            value = variance**0.5 / mean
+            form = "RAW"
+        else:
+            coefficients = _solve_regression(rows)
+            if coefficients is None:
+                continue
+            residuals = [
+                carry
+                - sum(coefficient * feature for coefficient, feature in zip(
+                    coefficients, (1.0, speed, vla, spin)
+                ))
+                for carry, speed, vla, spin in rows
+            ]
+            residual_std = (
+                sum(residual**2 for residual in residuals) / (len(rows) - 4)
+            ) ** 0.5
+            mean = sum(carries) / len(carries)
+            if mean <= 0:
+                continue
+            value = residual_std / mean
+            form = "RESIDUAL"
+        result[club] = {
+            "cv": value,
+            "form": form,
+            "count": len(rows),
+            "confidence": club_confidence(len(rows)),
+        }
+    return result
+
+
 def club_confidence(n_valid: int) -> ConfidenceTier:
     """Map a valid-shot count to its tier.
 
