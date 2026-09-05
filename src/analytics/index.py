@@ -15,6 +15,8 @@ from __future__ import annotations
 import enum
 from typing import Any
 
+from .flight_model import carry_yards, model_optimum
+
 # The partial-swing floor: a shot slower than PARTIAL_SWING_RATIO x the club's
 # full-swing anchor is a chip or a half swing, not a badly struck full one.
 #
@@ -59,6 +61,51 @@ class ConfidenceTier(enum.IntEnum):
     UNRATED = 0
     PROVISIONAL = 1
     ESTABLISHED = 2
+
+
+def efficiency_ratio(bs_mph: float, vla_deg: float, spin_rpm: float) -> float:
+    """Return launch efficiency under one flight model.
+
+    Efficiency is a pure function of vertical launch angle and spin at a given
+    ball speed: actual model carry divided by that model's launch-optimal
+    carry. It measures launch-condition level, not shot-to-shot variance, and
+    is not an independent measurement from Strike.
+    """
+    actual = carry_yards(float(bs_mph), float(vla_deg), float(spin_rpm))
+    optimum = model_optimum(float(bs_mph))
+    return actual / optimum
+
+
+def _efficiency_inputs(shot: dict[str, Any]) -> tuple[float, float, float] | None:
+    us = (shot.get("open_golf_coach") or {}).get("us_customary_units") or {}
+    try:
+        return (
+            float(us["ball_speed_mph"]),
+            float(shot["vertical_launch_angle_degrees"]),
+            float(shot["total_spin_rpm"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def efficiency_by_club(shots: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate gated Efficiency scores by club with confidence tiers."""
+    grouped: dict[str, list[float]] = {}
+    for shot in valid_shots(shots):
+        inputs = _efficiency_inputs(shot)
+        if inputs is None:
+            continue
+        club = str(shot.get("club") or "Unknown")
+        grouped.setdefault(club, []).append(efficiency_ratio(*inputs))
+
+    result: dict[str, dict[str, Any]] = {}
+    for club, scores in grouped.items():
+        result[club] = {
+            "score": sum(scores) / len(scores),
+            "count": len(scores),
+            "confidence": club_confidence(len(scores)),
+        }
+    return result
 
 
 def club_confidence(n_valid: int) -> ConfidenceTier:
