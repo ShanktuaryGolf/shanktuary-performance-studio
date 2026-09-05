@@ -959,6 +959,68 @@
             white-space: nowrap;
         }
 
+        /* Target practice widget */
+        #target-scorecard .target-presets {
+            display: flex;
+            gap: 5px;
+            padding: 0 10px 8px;
+        }
+        .target-preset {
+            flex: 1;
+            min-width: 0;
+            padding: 5px 3px;
+            border: 1px solid var(--glass-line);
+            border-radius: 5px;
+            background: rgba(255,255,255,0.04);
+            color: var(--text-2);
+            font: 700 0.62rem var(--mono);
+            cursor: pointer;
+        }
+        .target-preset:hover, .target-preset.active {
+            border-color: var(--accent);
+            color: var(--accent-text);
+            background: var(--accent-deep);
+        }
+        #target-score-result {
+            padding: 7px 10px;
+            border-top: 1px solid var(--glass-line);
+            border-bottom: 1px solid var(--glass-line);
+            color: var(--text-2);
+            font-size: 0.68rem;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+        #target-score-result.hit { color: var(--accent-text); }
+        #target-score-result.near { color: #f5c76b; }
+        #target-score-result.miss { color: #f28b82; }
+        #target-score-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            flex: none;
+        }
+        .target-stat {
+            min-width: 0;
+            padding: 7px 5px;
+            text-align: center;
+            border-right: 1px solid rgba(255,255,255,0.06);
+        }
+        .target-stat:last-child { border-right: none; }
+        .target-stat-label {
+            color: var(--text-3);
+            font-size: 0.52rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .target-stat-value {
+            color: var(--text);
+            font: 800 0.84rem var(--mono);
+            margin-top: 2px;
+            white-space: nowrap;
+        }
+
         /* Pressure widget */
         .pressure-phase-badge {
             font-size: 0.6rem;
@@ -1472,6 +1534,37 @@
                 <div class="ds-cell">
                     <div class="ds-label">Offline Bias</div>
                     <div class="ds-val" id="ds-offline">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget glass" id="target-scorecard">
+            <div class="widget-head">
+                <div class="widget-title">🎯 Target Practice</div>
+                <div class="widget-note" id="target-score-distance">150 yds</div>
+            </div>
+            <div class="target-presets">
+                <button class="target-preset" data-target-preset="100" type="button">100y</button>
+                <button class="target-preset" data-target-preset="130" type="button">130y</button>
+                <button class="target-preset" data-target-preset="160" type="button">160y</button>
+            </div>
+            <div id="target-score-result">Hit a measured shot to score</div>
+            <div id="target-score-stats">
+                <div class="target-stat">
+                    <div class="target-stat-label">Hits</div>
+                    <div class="target-stat-value" id="target-score-hits">0</div>
+                </div>
+                <div class="target-stat">
+                    <div class="target-stat-label">Streak</div>
+                    <div class="target-stat-value" id="target-score-streak">0</div>
+                </div>
+                <div class="target-stat">
+                    <div class="target-stat-label">Best</div>
+                    <div class="target-stat-value" id="target-score-best">0</div>
+                </div>
+                <div class="target-stat">
+                    <div class="target-stat-label">Avg Dev</div>
+                    <div class="target-stat-value" id="target-score-average">--</div>
                 </div>
             </div>
         </div>

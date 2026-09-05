@@ -220,6 +220,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const dsCarry = document.getElementById('ds-carry');
     const dsCarrySd = document.getElementById('ds-carry-sd');
     const dsOffline = document.getElementById('ds-offline');
+    const targetScoreDistance = document.getElementById('target-score-distance');
+    const targetScoreResult = document.getElementById('target-score-result');
+    const targetScoreHits = document.getElementById('target-score-hits');
+    const targetScoreStreak = document.getElementById('target-score-streak');
+    const targetScoreBest = document.getElementById('target-score-best');
+    const targetScoreAverage = document.getElementById('target-score-average');
+    const targetPresetButtons = document.querySelectorAll('[data-target-preset]');
 
     // Nav tabs / All Metrics panel
     const allMetricsPanel = document.getElementById('all-metrics');
@@ -296,6 +303,47 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     let lastShotTelemetry = null;
     let lastShotId = null;
     let lastLandingPt = null;
+    const targetScore = {
+        currentStreak: 0,
+        bestStreak: 0,
+        hits: 0,
+        shotCount: 0,
+        totalDeviation: 0,
+    };
+
+    function renderTargetScorecard() {
+        if (targetScoreDistance) targetScoreDistance.innerText = `${currentTargetYards} yds`;
+        if (targetScoreStreak) targetScoreStreak.innerText = `${targetScore.currentStreak}`;
+        if (targetScoreBest) targetScoreBest.innerText = `${targetScore.bestStreak}`;
+        if (targetScoreAverage) {
+            targetScoreAverage.innerText = targetScore.shotCount
+                ? `${(targetScore.totalDeviation / targetScore.shotCount).toFixed(1)}y`
+                : '--';
+        }
+    }
+
+    function scoreTargetShot(carryYds, offlineYds) {
+        const carryDelta = carryYds - currentTargetYards;
+        const deviation = Math.hypot(offlineYds, carryDelta);
+        const result = deviation <= 2 ? 'hit' : (deviation <= 8 ? 'near' : 'miss');
+
+        targetScore.shotCount += 1;
+        targetScore.totalDeviation += deviation;
+        if (result === 'hit') targetScore.hits += 1;
+        if (result === 'miss') {
+            targetScore.currentStreak = 0;
+        } else {
+            targetScore.currentStreak += 1;
+            targetScore.bestStreak = Math.max(targetScore.bestStreak, targetScore.currentStreak);
+        }
+
+        if (targetScoreResult) {
+            targetScoreResult.className = result;
+            targetScoreResult.innerText = `${result} · ${deviation.toFixed(1)} yds away`;
+        }
+        if (targetScoreHits) targetScoreHits.innerText = `${targetScore.hits}`;
+        renderTargetScorecard();
+    }
 
     // 2. Game Mode Selection Logic
     function setGameMode(mode) {
@@ -408,6 +456,11 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     if (tgtCustomInput) tgtCustomInput.value = currentTargetYards;
     if (tgtReadout) tgtReadout.innerText = `${currentTargetYards} yds`;
     if (elTargetDistBadge) elTargetDistBadge.innerText = `${currentTargetYards}`;
+    renderTargetScorecard();
+    targetPresetButtons.forEach(button => {
+        const val = parseInt(button.getAttribute('data-target-preset'), 10);
+        button.classList.toggle('active', val === currentTargetYards);
+    });
     setTargetDistance(currentTargetYards);
 
     function updateTarget(newYards) {
@@ -424,8 +477,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             const val = parseInt(chip.getAttribute('data-tgt'), 10);
             chip.classList.toggle('active', val === currentTargetYards);
         });
+        targetPresetButtons.forEach(button => {
+            const val = parseInt(button.getAttribute('data-target-preset'), 10);
+            button.classList.toggle('active', val === currentTargetYards);
+        });
 
         localStorage.setItem('sps_range_target_dist', currentTargetYards);
+        renderTargetScorecard();
         drawMinimap();
     }
 
@@ -463,6 +521,11 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         chip.addEventListener('click', (e) => {
             const yds = parseInt(e.target.getAttribute('data-tgt'), 10);
             updateTarget(yds);
+        });
+    });
+    targetPresetButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            updateTarget(parseInt(button.getAttribute('data-target-preset'), 10));
         });
     });
 
@@ -1104,7 +1167,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     window.addEventListener('keydown', () => { if (cinematicActive) exitCinematic(); });
     document.addEventListener('pointerdown', () => { if (cinematicActive) exitCinematic(); }, true);
 
-    function updateHUDTelemetry(shotData, simulatedCarry = null, simulatedOffline = null) {
+    function updateHUDTelemetry(shotData, simulatedCarry = null, simulatedOffline = null, shotOpts = {}) {
         if (!shotData) return;
 
         const carryYds = shotData.ogcCarry || simulatedCarry || 0.0;
@@ -1163,6 +1226,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         const dz = carryYds - currentTargetYards;
         const pinDeltaYds = Math.sqrt(dx * dx + dz * dz);
         const pinDeltaFt = pinDeltaYds * 3.0;
+
+        if (shotOpts.record && !shotOpts.demo) {
+            scoreTargetShot(carryYds, offlineYds);
+        }
 
         let points = 0;
         if (pinDeltaYds <= 4.0) points = 5;      // Bullseye
@@ -1350,7 +1417,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             }
         }
 
-        updateHUDTelemetry(shotData, carryYds, offlineYds);
+        updateHUDTelemetry(shotData, carryYds, offlineYds, {
+            record,
+            demo: opts.demo === true,
+        });
         renderShotList();
 
         // Clear the HUD for the flight. Only for genuinely new shots: a replay
@@ -1854,4 +1924,3 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
     connectWS();
 }
-
