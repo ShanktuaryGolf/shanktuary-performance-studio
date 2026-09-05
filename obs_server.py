@@ -1192,7 +1192,39 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             return None
         return self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
 
+    def is_cross_origin(self):
+        if self.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+            return True
+
+        origin = self.headers.get("Origin")
+        if not origin:
+            # Headerless CLI/LAN tooling is trusted by design.
+            return False
+
+        from urllib.parse import urlsplit
+
+        try:
+            origin_parts = urlsplit(origin)
+            host_header = self.headers.get("Host")
+            if origin_parts.scheme != "http" or not host_header:
+                return True
+            host_parts = urlsplit(f"//{host_header}")
+            if not origin_parts.hostname or not host_parts.hostname:
+                return True
+            origin_port = origin_parts.port or 80
+            host_port = host_parts.port or 80
+            return (
+                origin_parts.hostname.lower() != host_parts.hostname.lower()
+                or origin_port != host_port
+            )
+        except ValueError:
+            return True
+
     def do_POST(self):
+        if self.is_cross_origin():
+            self.send_json({"status": "error", "message": "cross-origin request rejected"}, code=403)
+            return
+
         parsed_path = self.path.split("?")[0].rstrip("/")
         if parsed_path == "/api/layout":
             body = self.read_post_body()
@@ -1306,7 +1338,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))
-                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(data)
             except Exception as e:
@@ -1320,13 +1351,16 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
             self.send_error(500, str(e))
 
     def handle_websocket(self):
+        if self.is_cross_origin():
+            self.send_error(403)
+            return
+
         key = self.headers.get("Sec-WebSocket-Key")
         if not key:
             self.send_error(400)

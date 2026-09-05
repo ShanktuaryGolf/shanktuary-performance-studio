@@ -1,5 +1,6 @@
 """Integration test for OBS server pressure endpoints and WebSocket frames."""
 
+import http.client
 import json
 import sys
 import time
@@ -42,6 +43,85 @@ class TestPressureIntegration(unittest.TestCase):
         self.assertEqual(res.getcode(), 200)
         data = json.loads(res.read().decode("utf-8"))
         self.assertEqual(data.get("status"), "ok")
+
+    def test_cross_origin_post_is_rejected(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{TEST_PORT}/api/pressure/simulator",
+            data=json.dumps({"enabled": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://attacker.example",
+            }
+        )
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            urllib.request.urlopen(req)
+        self.assertEqual(context.exception.code, 403)
+
+    def test_same_origin_post_is_allowed(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{TEST_PORT}/api/pressure/simulator",
+            data=json.dumps({"enabled": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": f"http://127.0.0.1:{TEST_PORT}",
+            }
+        )
+        res = urllib.request.urlopen(req)
+        self.assertEqual(res.getcode(), 200)
+
+    def test_cross_site_fetch_post_is_rejected(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{TEST_PORT}/api/pressure/simulator",
+            data=json.dumps({"enabled": True}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Sec-Fetch-Site": "cross-site",
+            }
+        )
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            urllib.request.urlopen(req)
+        self.assertEqual(context.exception.code, 403)
+
+    def test_cross_origin_websocket_is_rejected(self):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{TEST_PORT}/ws",
+            headers={
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+                "Sec-WebSocket-Key": "dGVzdA==",
+                "Origin": "https://attacker.example",
+            }
+        )
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            urllib.request.urlopen(req)
+        self.assertEqual(context.exception.code, 403)
+
+    def test_headerless_websocket_handshake_is_allowed(self):
+        conn = http.client.HTTPConnection("127.0.0.1", TEST_PORT)
+        conn.request(
+            "GET", "/ws",
+            headers={
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+                "Sec-WebSocket-Key": "dGVzdA==",
+            }
+        )
+        self.assertEqual(conn.getresponse().status, 101)
+        conn.close()
+
+    def test_same_origin_websocket_handshake_is_allowed(self):
+        conn = http.client.HTTPConnection("127.0.0.1", TEST_PORT)
+        conn.request(
+            "GET", "/ws",
+            headers={
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+                "Sec-WebSocket-Key": "dGVzdA==",
+                "Origin": f"http://127.0.0.1:{TEST_PORT}",
+            }
+        )
+        self.assertEqual(conn.getresponse().status, 101)
+        conn.close()
 
     def test_simulator_toggle_endpoint(self):
         req = urllib.request.Request(
