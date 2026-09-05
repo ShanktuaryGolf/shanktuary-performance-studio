@@ -12,6 +12,7 @@ Based on the proven architecture from ShanktuaryGolf/SwingLab:
   - Serves http://localhost:9321/config   -> Interactive Web Configurator UI (config.html)
   - Serves /api/layout                   -> GET/POST saved layout preferences, widget positions, and divot physical calibration
   - Serves /api/shot                     -> GET last shot payload
+  - Serves /api/index                    -> GET Shanktuary Index summary by club
   - Broadcasts live shot events to connected OBS browser sources over WebSocket
 """
 
@@ -269,6 +270,47 @@ class OBSState:
             except Exception as e:
                 print(f"[!] Error reading bag from {path}: {e}")
         return {"clubs": [], "is_left_handed": False}
+
+    def load_index(self):
+        """Read shots from session history and compute the bag index summary.
+
+        Pure calculation via bag_index_summary(); reads session history from
+        disk rather than caching in OBSState so any desktop edits or new shots
+        are immediately visible.
+        """
+        paths = [SESSION_LOG_PATH]
+        default_path = DATA_DIR / "shanktuary_session_history.json"
+        if SESSION_LOG_PATH == default_path and SCRIPT_DIR / "shanktuary_session_history.json" != default_path:
+            paths.append(SCRIPT_DIR / "shanktuary_session_history.json")
+
+        for path in paths:
+            if not path:
+                continue
+            path_obj = Path(path)
+            if not path_obj.exists():
+                continue
+            try:
+                data = json.loads(path_obj.read_text(encoding="utf-8"))
+                shots = []
+                is_left_handed = False
+                if isinstance(data, dict):
+                    is_left_handed = bool(data.get("is_left_handed", False))
+                    sessions = data.get("sessions") or []
+                elif isinstance(data, list):
+                    sessions = data
+                else:
+                    sessions = []
+                for sess in sessions:
+                    if isinstance(sess, dict):
+                        sess_shots = sess.get("shots")
+                        if isinstance(sess_shots, list):
+                            shots.extend(sess_shots)
+                from src.analytics.index import bag_index_summary
+                return bag_index_summary(shots, is_left_handed=is_left_handed)
+            except Exception as e:
+                print(f"[!] Error computing index from {path}: {e}")
+                return {}
+        return {}
 
     def push_shot(self, shot_data):
         with self.lock:
@@ -1113,6 +1155,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             # Aim-corrected: the browser overlay must agree with the desktop
             # app's shot table about which way the ball started.
             self.send_json(obs_state.latest_shot_for_display() or {})
+        elif parsed_path == "/api/index":
+            try:
+                self.send_json(obs_state.load_index())
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=500)
         elif parsed_path == "/api/pressure/status":
             self.send_json(pressure_manager.get_status())
         elif parsed_path == "/api/pressure/shot":

@@ -357,6 +357,79 @@ def consistency_by_club(
     return result
 
 
+# Category weight profiles, plan §9b (Efficiency / Shape columns only --
+# Consistency has no source benchmark yet, Command/Strike aren't built, so
+# they stay off the weighted total per copilot's scoping call 2026-09-05.
+# Renormalized to sum to 1 within each category since only two of the five
+# scored columns are in play.
+_COMPOSITE_WEIGHTS: dict[str, tuple[float, float]] = {
+    # category -> (efficiency weight, shape weight), from the §9b table.
+    "woods": (30.0, 15.0),
+    "long": (25.0, 15.0),
+    "irons": (20.0, 10.0),
+    "wedges": (10.0, 10.0),
+}
+
+
+def _club_category(club: str) -> str | None:
+    """Map a club name to its §9b weight-table category.
+
+    Not a sourced boundary -- the plan's table names the four categories but
+    never draws the exact club cutoffs, so "long irons" here means 3/4 Iron
+    and any Hybrid, matching common usage. Putter and unrecognized names are
+    excluded (no composite), same treatment as an unbenchmarked club.
+    """
+    if club == "Putter":
+        return None
+    if club == "Driver" or "Wood" in club:
+        return "woods"
+    if "Hybrid" in club or club in ("3 Iron", "4 Iron"):
+        return "long"
+    if club in ("PW", "GW", "SW", "LW") or "Wedge" in club:
+        return "wedges"
+    if "Iron" in club:
+        return "irons"
+    return None
+
+
+def bag_index_summary(
+    shots: list[dict[str, Any]], is_left_handed: bool = False
+) -> dict[str, dict[str, Any]]:
+    """Per-club card: every scored attribute, plus a weighted composite.
+
+    The composite is Efficiency + Shape only (see _COMPOSITE_WEIGHTS) --
+    Spin Control and Consistency are still reported per club for display,
+    just not folded into the weighted number yet. Composite confidence is
+    the weaker of its two contributing tiers: a club isn't "established"
+    overall on the strength of one attribute alone.
+    """
+    efficiency = efficiency_by_club(shots)
+    shape = shape_by_club(shots, is_left_handed=is_left_handed)
+    spin_control = spin_control_by_club(shots)
+    consistency = consistency_by_club(shots)
+
+    result: dict[str, dict[str, Any]] = {}
+    for club in set(efficiency) | set(shape) | set(spin_control) | set(consistency):
+        entry: dict[str, Any] = {
+            "efficiency": efficiency.get(club),
+            "shape": shape.get(club),
+            "spin_control": spin_control.get(club),
+            "consistency": consistency.get(club),
+        }
+        eff, shp = efficiency.get(club), shape.get(club)
+        category = _club_category(club)
+        if eff is not None and shp is not None and category is not None:
+            eff_weight, shape_weight = _COMPOSITE_WEIGHTS[category]
+            total_weight = eff_weight + shape_weight
+            ratio = (eff["score"] * eff_weight + shp["score"] * shape_weight) / total_weight
+            entry["composite"] = {
+                "score": min(99.0, max(0.0, ratio * 99.0)),
+                "confidence": min(eff["confidence"], shp["confidence"]),
+            }
+        result[club] = entry
+    return result
+
+
 def club_confidence(n_valid: int) -> ConfidenceTier:
     """Map a valid-shot count to its tier.
 
