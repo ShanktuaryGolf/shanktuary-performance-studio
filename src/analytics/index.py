@@ -16,6 +16,7 @@ import enum
 from typing import Any
 
 from .flight_model import carry_yards, model_optimum
+from .spin_benchmarks import TOUR_SPIN_CV_BY_CLUB
 
 # The partial-swing floor: a shot slower than PARTIAL_SWING_RATIO x the club's
 # full-swing anchor is a chip or a half swing, not a badly struck full one.
@@ -104,6 +105,57 @@ def efficiency_by_club(shots: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
             "score": sum(scores) / len(scores),
             "count": len(scores),
             "confidence": club_confidence(len(scores)),
+        }
+    return result
+
+
+def spin_control_ratio(actual_spins: list[float], club: str) -> float | None:
+    """Compare a club's sample spin CV with its sourced Tour benchmark.
+
+    Spin Control measures repeatability, not spin level. Unbenchmarked clubs
+    and samples with fewer than two readings are unrated.
+    """
+    target_cv = TOUR_SPIN_CV_BY_CLUB.get(club)
+    if target_cv is None or len(actual_spins) < 2:
+        return None
+    values = [float(spin) for spin in actual_spins]
+    mean = sum(values) / len(values)
+    if mean == 0:
+        return None
+    variance = sum((spin - mean) ** 2 for spin in values) / (len(values) - 1)
+    player_cv = variance ** 0.5 / abs(mean)
+    if player_cv == 0:
+        return 1.0
+    return min(1.0, target_cv / player_cv)
+
+
+def _spin_values(shot: dict[str, Any]) -> float | None:
+    try:
+        spin = float(shot["total_spin_rpm"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return spin if spin > 0 else None
+
+
+def spin_control_by_club(shots: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate sourced Spin Control scores by club after the shared gate."""
+    grouped: dict[str, list[float]] = {}
+    for shot in valid_shots(shots):
+        if shot.get("club") not in TOUR_SPIN_CV_BY_CLUB:
+            continue
+        spin = _spin_values(shot)
+        if spin is not None:
+            grouped.setdefault(shot["club"], []).append(spin)
+
+    result: dict[str, dict[str, Any]] = {}
+    for club, spins in grouped.items():
+        score = spin_control_ratio(spins, club)
+        if score is None:
+            continue
+        result[club] = {
+            "score": score,
+            "count": len(spins),
+            "confidence": club_confidence(len(spins)),
         }
     return result
 
