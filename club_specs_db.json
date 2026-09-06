@@ -1,0 +1,21 @@
+{
+  "_comment": "Factory loft/lie for known iron sets. v1: Callaway Paradym X only. Source: Callaway 2023 Paradym X QPG spec sheet (callawaymedia.com).",
+  "sets": [
+    {
+      "brand": "Callaway",
+      "model": "Paradym X",
+      "clubs": {
+        "4 Iron": {"loft_deg": 18.5, "lie_deg": 61.0},
+        "5 Iron": {"loft_deg": 21.5, "lie_deg": 61.5},
+        "6 Iron": {"loft_deg": 24.5, "lie_deg": 62.0},
+        "7 Iron": {"loft_deg": 27.5, "lie_deg": 62.5},
+        "8 Iron": {"loft_deg": 31.5, "lie_deg": 63.0},
+        "9 Iron": {"loft_deg": 36.0, "lie_deg": 63.5},
+        "PW": {"loft_deg": 41.0, "lie_deg": 64.0},
+        "AW": {"loft_deg": 46.0, "lie_deg": 64.0},
+        "GW": {"loft_deg": 51.0, "lie_deg": 64.0},
+        "SW": {"loft_deg": 56.0, "lie_deg": 64.0}
+      }
+    }
+  ]
+}

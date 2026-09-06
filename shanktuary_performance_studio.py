@@ -40,6 +40,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 import obs_server
 import theme
+from club_fetcher import fetch_club_specs
 from src.analytics.aim import (
     MAX_AIM_OFFSET_DEG,
     MIN_CALIBRATION_SHOTS,
@@ -49,6 +50,7 @@ from src.analytics.aim import (
     offset_from_shots,
     save_aim_offset,
 )
+from src.analytics.index import ConfidenceTier, player_shanktuary_index
 from src.gspro import GsproPoller, locate_gspro_database_path, match_gspro_club
 from src.gspro import settings as gspro_settings
 from src.processing.pressure import (
@@ -664,6 +666,21 @@ class ShanktuaryApp:
         self.spec_editor_cat_chips = []       # (x1, y1, x2, y2, cat_name)
         self.spec_editor_field_rects = {}     # field_name -> (x1, y1, x2, y2)
         self.spec_editor_notes_edit_rect = None
+
+        # In-Canvas Auto-Fill Iron Set Modal State
+        self.show_autofill_modal = False
+        self.autofill_brand = "Callaway"
+        self.autofill_model = "Paradym X"
+        self.autofill_active_field = "model"  # "brand", "model"
+        self.autofill_selected_clubs = {"4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW"}
+        self.autofill_box_rect = None
+        self.autofill_brand_rect = None
+        self.autofill_model_rect = None
+        self.autofill_club_chips = []
+        self.autofill_preset_rects = []
+        self.autofill_apply_rect = None
+        self.autofill_cancel_rect = None
+        self.bag_autofill_btn_rect = None
 
         # Mode 2: 3D Range Viewport State
         self.range_launch_web_rect = None
@@ -1463,6 +1480,39 @@ class ShanktuaryApp:
         self.root.after(2500, self.clear_copy_feedback)
         self.draw_screen()
 
+    def apply_fetched_club_specs(self, brand, model, club_names):
+        """Look up factory loft/lie for brand/model and apply to the bag.
+
+        `club_names` are the clubs the user says they have (e.g. "4 Iron",
+        "PW"). For each one found in the local spec table: if it's already
+        in the bag, its specs are updated in place; if not, it's added to
+        the bag with the fetched specs. Clubs with no match in the local
+        table are left alone entirely -- not added with blank/zeroed specs
+        -- so manual "Edit Specs" / "Add Club to Bag" stays the fallback.
+        Returns the set of club names that were actually applied.
+        """
+        specs = fetch_club_specs(brand, model, club_names)
+        updated = set()
+        for name, spec in specs.items():
+            if self.get_bag_club(name):
+                self.update_club_specs(
+                    name,
+                    brand=brand,
+                    model=model,
+                    loft_deg=spec["loft_deg"],
+                    lie_deg=spec["lie_deg"],
+                )
+            else:
+                self.add_club_to_bag(
+                    name,
+                    brand=brand,
+                    model=model,
+                    loft_deg=spec["loft_deg"],
+                    lie_deg=spec["lie_deg"],
+                )
+            updated.add(name)
+        return updated
+
     def remove_club_from_bag(self, club_name):
         self.bag = [c for c in self.bag if c.get("name") != club_name]
         # Also drop it from the selectable name list. These are separate
@@ -1893,6 +1943,37 @@ class ShanktuaryApp:
                 return "break"
             return "break"
 
+        if self.show_autofill_modal:
+            if event.keysym == "Escape":
+                self.show_autofill_modal = False
+                self.draw_screen()
+                return "break"
+            elif event.keysym in ("Return", "KP_Enter"):
+                self.apply_autofill_specs()
+                return "break"
+            elif event.keysym == "Tab":
+                fields = ["brand", "model"]
+                if self.autofill_active_field in fields:
+                    curr_i = fields.index(self.autofill_active_field)
+                    self.autofill_active_field = fields[(curr_i + 1) % len(fields)]
+                else:
+                    self.autofill_active_field = "model"
+                self.draw_screen()
+                return "break"
+            elif event.keysym == "BackSpace":
+                f = self.autofill_active_field
+                if f == "brand": self.autofill_brand = self.autofill_brand[:-1]
+                elif f == "model": self.autofill_model = self.autofill_model[:-1]
+                self.draw_screen()
+                return "break"
+            elif event.char and event.char.isprintable() and len(event.char) == 1:
+                f = self.autofill_active_field
+                if f == "brand" and len(self.autofill_brand) < 30: self.autofill_brand += event.char
+                elif f == "model" and len(self.autofill_model) < 30: self.autofill_model += event.char
+                self.draw_screen()
+                return "break"
+            return "break"
+
         if self.show_custom_club_modal:
             if event.keysym == "Escape":
                 self.show_custom_club_modal = False
@@ -2096,6 +2177,37 @@ class ShanktuaryApp:
         self.show_spec_editor_modal = False
         self.copy_feedback = f"✓ Saved {name} Specs"
         self.root.after(2500, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def open_autofill_modal(self):
+        self.show_club_menu = False
+        self.show_tools_menu = False
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
+        self.show_custom_club_modal = False
+        self.show_spec_editor_modal = False
+        self.show_autofill_modal = True
+        self.autofill_active_field = "model"
+        self.draw_screen()
+
+    def apply_autofill_specs(self):
+        brand = self.autofill_brand.strip()
+        model = self.autofill_model.strip()
+        ordered_irons = ["4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "AW", "GW", "SW"]
+        club_list = [c for c in ordered_irons if c in self.autofill_selected_clubs]
+        if not brand or not model or not club_list:
+            self.copy_feedback = "Select brand, model, and at least one club"
+            self.root.after(2500, self.clear_copy_feedback)
+            self.draw_screen()
+            return
+
+        updated = self.apply_fetched_club_specs(brand, model, club_list)
+        self.show_autofill_modal = False
+        if updated:
+            self.copy_feedback = f"✓ Updated {len(updated)} club(s) ({brand} {model})"
+        else:
+            self.copy_feedback = f"No specs found for {brand} {model}"
+        self.root.after(3000, self.clear_copy_feedback)
         self.draw_screen()
 
     def draw_aim_measure_modal(self, w, h):
@@ -2367,6 +2479,124 @@ class ShanktuaryApp:
 
         # Footer Hint
         self.canvas.create_text(cx, y2 - 12, text="Press <Tab> to cycle fields  •  <Enter> to Save  •  <Esc> to Cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
+
+    def draw_autofill_set_modal(self, w, h):
+        # 1. Backdrop
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="", stipple="gray75")
+
+        # 2. Modal Box
+        modal_w = min(640, max(520, int(w * 0.54)))
+        modal_h = min(480, max(420, int(h * 0.65)))
+        cx, cy = w // 2, h // 2
+        x1 = cx - modal_w // 2
+        x2 = cx + modal_w // 2
+        y1 = cy - modal_h // 2
+        y2 = cy + modal_h // 2
+        self.autofill_box_rect = (x1, y1, x2, y2)
+
+        # Shadow & Card
+        self.canvas.create_rectangle(x1 + 6, y1 + 6, x2 + 6, y2 + 6, fill="#020305", outline="")
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.ACCENT_TEXT, width=2)
+
+        # Title & Subtitle
+        self.canvas.create_text(cx, y1 + 24, text="AUTO-FILL IRON SET SPECS", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 11, "bold"))
+        self.canvas.create_text(cx, y1 + 44, text="Enter your brand and model, then select which irons you own", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
+
+        # Brand & Model Inputs
+        field_w = (modal_w - 85) // 2
+
+        # Brand Input (Left)
+        bx1 = x1 + 35
+        bx2 = bx1 + field_w
+        by1 = y1 + 78
+        by2 = by1 + 28
+        self.autofill_brand_rect = (bx1, by1, bx2, by2)
+        is_brand_active = (self.autofill_active_field == "brand")
+        self.canvas.create_text(bx1, y1 + 66, text="Manufacturer / Brand:", fill=theme.TEXT_2, font=(theme.ui_font(), 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.BG, outline=theme.ACCENT_TEXT if is_brand_active else "#282F42", width=1.5 if is_brand_active else 1)
+        brand_disp = (self.autofill_brand + " |") if is_brand_active else self.autofill_brand
+        self.canvas.create_text(bx1 + 10, (by1 + by2) // 2, text=brand_disp or "e.g. Callaway", fill=theme.TEXT if self.autofill_brand else (theme.ACCENT_TEXT if is_brand_active else "#485065"), font=(theme.ui_font(), 9, "bold" if is_brand_active else "normal"), anchor="w")
+
+        # Model Input (Right)
+        mx1 = bx2 + 15
+        mx2 = x2 - 35
+        my1 = by1
+        my2 = by2
+        self.autofill_model_rect = (mx1, my1, mx2, my2)
+        is_model_active = (self.autofill_active_field == "model")
+        self.canvas.create_text(mx1, y1 + 66, text="Clubhead Model:", fill=theme.TEXT_2, font=(theme.ui_font(), 8, "bold"), anchor="w")
+        self.canvas.create_rectangle(mx1, my1, mx2, my2, fill=theme.BG, outline=theme.ACCENT_TEXT if is_model_active else "#282F42", width=1.5 if is_model_active else 1)
+        model_disp = (self.autofill_model + " |") if is_model_active else self.autofill_model
+        self.canvas.create_text(mx1 + 10, (my1 + my2) // 2, text=model_disp or "e.g. Paradym X", fill=theme.TEXT if self.autofill_model else (theme.ACCENT_TEXT if is_model_active else "#485065"), font=(theme.ui_font(), 9, "bold" if is_model_active else "normal"), anchor="w")
+
+        # Section Label: Select Irons in Set
+        pres_y = y1 + 130
+        self.canvas.create_text(x1 + 35, pres_y, text="Select Irons in Set:", fill=theme.TEXT_2, font=(theme.ui_font(), 8, "bold"), anchor="w")
+
+        # Preset Buttons: 4-PW, 5-PW, All (4-SW), Clear
+        presets = [("4–PW", "4-pw"), ("5–PW", "5-pw"), ("All (4–SW)", "all"), ("Clear", "clear")]
+        self.autofill_preset_rects.clear()
+        start_px = x1 + 35
+        p_btn_w = 80
+        p_btn_h = 24
+        for i, (label, p_key) in enumerate(presets):
+            px1 = start_px + i * (p_btn_w + 8)
+            px2 = px1 + p_btn_w
+            py1 = pres_y + 14
+            py2 = py1 + p_btn_h
+            self.autofill_preset_rects.append((px1, py1, px2, py2, p_key))
+            self.canvas.create_rectangle(px1, py1, px2, py2, fill=theme.SURFACE_2, outline=theme.HAIRLINE)
+            self.canvas.create_text((px1 + px2) // 2, (py1 + py2) // 2, text=label, fill=theme.TEXT, font=(theme.ui_font(), 8), anchor="center")
+
+        # Club Chips Grid (2 rows of 5: 4I, 5I, 6I, 7I, 8I / 9I, PW, AW, GW, SW)
+        all_clubs = ["4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "AW", "GW", "SW"]
+        short_names = {"4 Iron": "4I", "5 Iron": "5I", "6 Iron": "6I", "7 Iron": "7I", "8 Iron": "8I", "9 Iron": "9I", "PW": "PW", "AW": "AW", "GW": "GW", "SW": "SW"}
+        self.autofill_club_chips.clear()
+
+        chip_start_y = pres_y + 54
+        chip_w = (modal_w - 70 - 4 * 8) // 5
+        chip_h = 32
+        for idx, c_name in enumerate(all_clubs):
+            row = idx // 5
+            col = idx % 5
+            cx1 = x1 + 35 + col * (chip_w + 8)
+            cx2 = cx1 + chip_w
+            cy1 = chip_start_y + row * (chip_h + 8)
+            cy2 = cy1 + chip_h
+            self.autofill_club_chips.append((cx1, cy1, cx2, cy2, c_name))
+
+            is_sel = c_name in self.autofill_selected_clubs
+            fill_col = theme.ACCENT_DEEP if is_sel else theme.SURFACE_2
+            outl_col = theme.ACCENT_TEXT if is_sel else theme.HAIRLINE
+            text_col = theme.ACCENT_TEXT if is_sel else theme.TEXT_2
+
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=fill_col, outline=outl_col, width=1.5 if is_sel else 1)
+            display_label = f"✓ {short_names[c_name]}" if is_sel else short_names[c_name]
+            self.canvas.create_text((cx1 + cx2) // 2, (cy1 + cy2) // 2, text=display_label, fill=text_col, font=(theme.ui_font(), 8, "bold" if is_sel else "normal"), anchor="center")
+
+        # Action Buttons
+        btn_y1 = y2 - 54
+        btn_y2 = btn_y1 + 32
+
+        # Apply / Fetch Button
+        apply_x1 = cx - 180
+        apply_x2 = cx - 20
+        self.autofill_apply_rect = (apply_x1, btn_y1, apply_x2, btn_y2)
+        n_sel = len(self.autofill_selected_clubs)
+        can_apply = bool(self.autofill_brand.strip() and self.autofill_model.strip() and n_sel > 0)
+        self.canvas.create_rectangle(apply_x1, btn_y1, apply_x2, btn_y2, fill=theme.ACCENT_TEXT if can_apply else theme.SURFACE_2, outline="")
+        apply_text = f"⚡ Fetch Specs ({n_sel})" if n_sel else "⚡ Fetch Specs"
+        self.canvas.create_text((apply_x1 + apply_x2) // 2, (btn_y1 + btn_y2) // 2, text=apply_text, fill="#08090C" if can_apply else theme.TEXT_3, font=(theme.ui_font(), 9, "bold"))
+
+        # Cancel Button
+        cancel_x1 = cx + 20
+        cancel_x2 = cx + 140
+        self.autofill_cancel_rect = (cancel_x1, btn_y1, cancel_x2, btn_y2)
+        self.canvas.create_rectangle(cancel_x1, btn_y1, cancel_x2, btn_y2, fill=theme.HAIRLINE, outline="#323B50")
+        self.canvas.create_text((cancel_x1 + cancel_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel", fill=theme.TEXT_2, font=(theme.ui_font(), 9, "bold"))
+
+        # Footer Hint
+        self.canvas.create_text(cx, y2 - 12, text="Press <Tab> to switch fields  •  <Enter> to Fetch  •  <Esc> to Cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def get_club_color(self, club_name):
         """Per-club series colour for charts.
@@ -2865,6 +3095,9 @@ class ShanktuaryApp:
             if self.bag_scope_all_rect and self.bag_scope_all_rect[0] <= event.x <= self.bag_scope_all_rect[2] and self.bag_scope_all_rect[1] <= event.y <= self.bag_scope_all_rect[3]:
                 self.canvas.config(cursor="hand2")
                 return
+            if self.bag_autofill_btn_rect and self.bag_autofill_btn_rect[0] <= event.x <= self.bag_autofill_btn_rect[2] and self.bag_autofill_btn_rect[1] <= event.y <= self.bag_autofill_btn_rect[3]:
+                self.canvas.config(cursor="hand2")
+                return
             if self.bag_add_club_btn_rect and self.bag_add_club_btn_rect[0] <= event.x <= self.bag_add_club_btn_rect[2] and self.bag_add_club_btn_rect[1] <= event.y <= self.bag_add_club_btn_rect[3]:
                 self.canvas.config(cursor="hand2")
                 return
@@ -3006,6 +3239,51 @@ class ShanktuaryApp:
                 bx1, by1, bx2, by2 = self.spec_editor_box_rect
                 if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
                     self.show_spec_editor_modal = False
+                    self.draw_screen()
+                    return
+            return
+
+        # 0c. In-Canvas Auto-Fill Iron Set Modal Click Handling
+        if self.show_autofill_modal:
+            if self.autofill_brand_rect and self.autofill_brand_rect[0] <= event.x <= self.autofill_brand_rect[2] and self.autofill_brand_rect[1] <= event.y <= self.autofill_brand_rect[3]:
+                self.autofill_active_field = "brand"
+                self.draw_screen()
+                return
+            if self.autofill_model_rect and self.autofill_model_rect[0] <= event.x <= self.autofill_model_rect[2] and self.autofill_model_rect[1] <= event.y <= self.autofill_model_rect[3]:
+                self.autofill_active_field = "model"
+                self.draw_screen()
+                return
+            for px1, py1, px2, py2, p_key in self.autofill_preset_rects:
+                if px1 <= event.x <= px2 and py1 <= event.y <= py2:
+                    if p_key == "4-pw":
+                        self.autofill_selected_clubs = {"4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW"}
+                    elif p_key == "5-pw":
+                        self.autofill_selected_clubs = {"5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW"}
+                    elif p_key == "all":
+                        self.autofill_selected_clubs = {"4 Iron", "5 Iron", "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "AW", "GW", "SW"}
+                    elif p_key == "clear":
+                        self.autofill_selected_clubs = set()
+                    self.draw_screen()
+                    return
+            for cx1, cy1, cx2, cy2, c_name in self.autofill_club_chips:
+                if cx1 <= event.x <= cx2 and cy1 <= event.y <= cy2:
+                    if c_name in self.autofill_selected_clubs:
+                        self.autofill_selected_clubs.remove(c_name)
+                    else:
+                        self.autofill_selected_clubs.add(c_name)
+                    self.draw_screen()
+                    return
+            if self.autofill_apply_rect and self.autofill_apply_rect[0] <= event.x <= self.autofill_apply_rect[2] and self.autofill_apply_rect[1] <= event.y <= self.autofill_apply_rect[3]:
+                self.apply_autofill_specs()
+                return
+            if self.autofill_cancel_rect and self.autofill_cancel_rect[0] <= event.x <= self.autofill_cancel_rect[2] and self.autofill_cancel_rect[1] <= event.y <= self.autofill_cancel_rect[3]:
+                self.show_autofill_modal = False
+                self.draw_screen()
+                return
+            if self.autofill_box_rect:
+                bx1, by1, bx2, by2 = self.autofill_box_rect
+                if not (bx1 <= event.x <= bx2 and by1 <= event.y <= by2):
+                    self.show_autofill_modal = False
                     self.draw_screen()
                     return
             return
@@ -3534,6 +3812,9 @@ class ShanktuaryApp:
                 return
             if self.bag_scope_all_rect and self.bag_scope_all_rect[0] <= event.x <= self.bag_scope_all_rect[2] and self.bag_scope_all_rect[1] <= event.y <= self.bag_scope_all_rect[3]:
                 self.set_bag_scope("all_time")
+                return
+            if self.bag_autofill_btn_rect and self.bag_autofill_btn_rect[0] <= event.x <= self.bag_autofill_btn_rect[2] and self.bag_autofill_btn_rect[1] <= event.y <= self.bag_autofill_btn_rect[3]:
+                self.open_autofill_modal()
                 return
             if self.bag_add_club_btn_rect and self.bag_add_club_btn_rect[0] <= event.x <= self.bag_add_club_btn_rect[2] and self.bag_add_club_btn_rect[1] <= event.y <= self.bag_add_club_btn_rect[3]:
                 self.open_club_spec_editor(None)
@@ -4670,6 +4951,9 @@ class ShanktuaryApp:
         elif self.view_mode == 10:
             # Mode 10: Setup -- devices & hardware.
             self.draw_setup_viewport(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 11:
+            # Mode 11: Shanktuary Index -- overall player rating, read-only.
+            self.draw_shanktuary_index_viewport(avail_w, h, offset_x=offset_x)
 
         elif self.view_mode == 9:
             # Mode 9: Overview -- the landing view.
@@ -4709,6 +4993,8 @@ class ShanktuaryApp:
         # 5. In-Canvas Modal Dialog (Top-most Modal Layer)
         if self.show_spec_editor_modal:
             self.draw_club_spec_editor_modal(w, h)
+        elif self.show_autofill_modal:
+            self.draw_autofill_set_modal(w, h)
         elif self.show_custom_club_modal:
             self.draw_custom_club_modal(w, h)
         elif self.show_aim_modal:
@@ -6774,8 +7060,8 @@ class ShanktuaryApp:
         self.canvas.create_text(offset_x + 18, 84, text=f"{len(self.bag)} Clubs in Bag  •  {display_shots} Shots ({scope_str})", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
 
         # Scope Selector Pills (Center-Right)
-        pill_w = 120
-        p1_x1 = offset_x + avail_w - 410
+        pill_w = 110
+        p1_x1 = offset_x + avail_w - 530
         p1_x2 = p1_x1 + pill_w
         p2_x1 = p1_x2 + 8
         p2_x2 = p2_x1 + pill_w
@@ -6791,6 +7077,13 @@ class ShanktuaryApp:
         is_all = (self.bag_scope == "all_time")
         self.canvas.create_rectangle(p2_x1, py1, p2_x2, py2, fill=theme.ACCENT_DEEP if is_all else theme.SURFACE_2, outline=theme.ACCENT_TEXT if is_all else theme.HAIRLINE)
         self.canvas.create_text((p2_x1 + p2_x2) // 2, (py1 + py2) // 2, text="All-Time History", fill=theme.ACCENT_TEXT if is_all else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_all else "normal"), anchor="center")
+
+        # Auto-Fill Iron Set Button
+        af_x1 = offset_x + avail_w - 280
+        af_x2 = offset_x + avail_w - 156
+        self.bag_autofill_btn_rect = (af_x1, py1, af_x2, py2)
+        self.canvas.create_rectangle(af_x1, py1, af_x2, py2, fill=theme.SURFACE_2, outline=theme.ACCENT_TEXT)
+        self.canvas.create_text((af_x1 + af_x2) // 2, (py1 + py2) // 2, text="⚡ Auto-Fill Set", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 8, "bold"), anchor="center")
 
         # Add Club to Bag Button (Far Right)
         add_x1 = offset_x + avail_w - 146
@@ -7161,6 +7454,124 @@ class ShanktuaryApp:
             "avg_dyn_loft": avg_dl, "std_dyn_loft": std_dl,
             "ellipse_area": ellipse_area
         }
+
+    def draw_shanktuary_index_viewport(self, avail_w, h, offset_x=0):
+        """Read-only overall player Index: score/tier, coverage reason,
+        game-area breakdown, and per-club composites.
+
+        Computed in-process from all-time session history -- the same
+        all-sessions shot list obs_server.load_index() reads from disk for
+        GET /api/index, just already in memory here.
+        """
+        # 1. Background
+        self.canvas.create_rectangle(offset_x, 52, offset_x + avail_w, h, fill=theme.BG, outline="")
+
+        shots = []
+        for sess in self.sessions:
+            sess_shots = sess.get("shots")
+            if isinstance(sess_shots, list):
+                shots.extend(sess_shots)
+        result = player_shanktuary_index(shots, is_left_handed=self.is_left_handed)
+
+        # 2. Top Toolbar
+        bar_y1, bar_y2 = 52, 98
+        self.canvas.create_rectangle(offset_x, bar_y1, offset_x + avail_w, bar_y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        n_established = len(result.get("established_clubs") or [])
+        self.canvas.create_text(offset_x + 18, 66, text="SHANKTUARY INDEX", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 11, "bold"), anchor="w")
+        self.canvas.create_text(offset_x + 18, 84, text=f"{n_established} Established Clubs  •  All-Time History", fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
+
+        # 3. Dual-Pane Dimensions
+        content_y = 104
+        content_h = h - content_y - 12
+        left_w = int(avail_w * 0.32)
+        right_w = avail_w - left_w - 18
+        right_x = offset_x + left_w + 12
+
+        self._draw_index_score_pane(offset_x + 6, content_y, left_w, content_h, result)
+        self._draw_index_detail_pane(right_x, content_y, right_w, content_h, result)
+
+    def _draw_index_score_pane(self, x1, y1, w, h, result):
+        x2, y2 = x1 + w, y1 + h
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self.canvas.create_text(x1 + 18, y1 + 16, text="OVERALL SCORE", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+
+        if result.get("status") == "available":
+            score = result.get("score")
+            tier = result.get("tier")
+            tier_label = (tier.value if hasattr(tier, "value") else str(tier)).upper() if tier is not None else ""
+            score_text = f"{score:.1f}" if isinstance(score, (int, float)) else "--"
+            self.canvas.create_text(x1 + 18, y1 + 48, text=score_text, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 42, "bold"), anchor="nw")
+            self.canvas.create_text(x1 + 18, y1 + 104, text=tier_label, fill=theme.TEXT_2, font=(theme.ui_font(), 10, "bold"), anchor="nw")
+
+            ly = y1 + 134
+            spread = result.get("spread_ratio")
+            if isinstance(spread, (int, float)):
+                self.canvas.create_text(x1 + 18, ly, text=f"Carry spread ratio {spread:.2f}", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+                ly += 16
+            anchor = result.get("anchor_carry")
+            if isinstance(anchor, (int, float)):
+                self.canvas.create_text(x1 + 18, ly, text=f"Anchor carry {anchor:.0f} yds", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+        else:
+            reason = result.get("reason") or "Not enough data yet"
+            self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=reason, fill=theme.TEXT_3, font=(theme.ui_font(), 10), anchor="center", width=max(1, w - 40))
+
+    def _draw_index_detail_pane(self, x1, y1, w, h, result):
+        x2, y2 = x1 + w, y1 + h
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        self.canvas.create_text(x1 + 16, y1 + 16, text="GAME AREAS", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+
+        game_areas = result.get("game_areas") or {}
+        band_order = ["A", "B", "C", "D"]
+        band_gap = 8
+        band_w = (w - 32 - band_gap * (len(band_order) - 1)) / len(band_order)
+        band_y1 = y1 + 34
+        band_y2 = band_y1 + 60
+        for i, code in enumerate(band_order):
+            area = game_areas.get(code) or {}
+            bx1 = x1 + 16 + i * (band_w + band_gap)
+            bx2 = bx1 + band_w
+            self.canvas.create_rectangle(bx1, band_y1, bx2, band_y2, fill=theme.SURFACE_2, outline=theme.HAIRLINE)
+            self.canvas.create_text((bx1 + bx2) / 2, band_y1 + 14, text=area.get("name", code), fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="center")
+            score = area.get("score")
+            score_text = f"{score:.1f}" if isinstance(score, (int, float)) else "--"
+            self.canvas.create_text((bx1 + bx2) / 2, band_y1 + 38, text=score_text,
+                                    fill=theme.ACCENT_TEXT if isinstance(score, (int, float)) else theme.TEXT_3,
+                                    font=(theme.ui_font(), 16, "bold"), anchor="center")
+
+        # Per-club composite list
+        list_label_y = band_y2 + 22
+        self.canvas.create_text(x1 + 16, list_label_y, text="PER-CLUB COMPOSITE", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9, "bold"), anchor="w")
+
+        clubs = result.get("clubs") or {}
+        established = set(result.get("established_clubs") or [])
+        row_y = list_label_y + 22
+        for club_name, card in clubs.items():
+            composite = card.get("composite") if isinstance(card, dict) else None
+            if composite is None:
+                continue
+            if row_y > y2 - 12:
+                break
+            score = composite.get("score")
+            confidence = composite.get("confidence")
+            if isinstance(confidence, ConfidenceTier):
+                tier_name = confidence.name
+            elif isinstance(confidence, (int, float)):
+                try:
+                    tier_name = ConfidenceTier(confidence).name
+                except ValueError:
+                    tier_name = str(confidence).upper()
+            elif confidence is not None:
+                tier_name = str(confidence).upper()
+            else:
+                tier_name = "--"
+            marker = "★" if club_name in established else " "
+            score_text = f"{score:.1f}" if isinstance(score, (int, float)) else "--"
+            self.canvas.create_text(x1 + 16, row_y, text=f"{marker} {club_name}", fill=theme.TEXT, font=(theme.ui_font(), 9), anchor="w")
+            self.canvas.create_text(x2 - 16, row_y, text=f"{score_text}  {tier_name}", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="e")
+            row_y += 20
+
+        if not clubs:
+            self.canvas.create_text((x1 + x2) / 2, row_y + 20, text="Hit shots to build club data", fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="center")
 
     def draw_fitting_viewport(self, avail_w, h, offset_x=0):
         # 1. Background

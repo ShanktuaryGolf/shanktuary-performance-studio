@@ -6,6 +6,8 @@ __pycache__/
 *.pcap
 # Test fixtures are data-as-code and must be versioned.
 !tests/fixtures/*.json
+# Club spec lookup table is data-as-code the app depends on at runtime.
+!club_specs_db.json
 .idea/
 .vscode/
 build/
