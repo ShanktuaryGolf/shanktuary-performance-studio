@@ -1022,7 +1022,8 @@
         }
 
         /* Pressure widget */
-        .pressure-phase-badge {
+        .pressure-phase-badge,
+        .index-tier-badge {
             font-size: 0.6rem;
             font-weight: 800;
             text-transform: uppercase;
@@ -1032,6 +1033,35 @@
             color: var(--accent-text);
             border: 1px solid var(--accent);
         }
+
+        /* Shanktuary Index widget */
+        .range-index-body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 12px;
+            flex: 1 1 auto;
+            min-height: 0;
+            text-align: center;
+        }
+        .range-index-score {
+            font: 800 2.2rem var(--mono);
+            color: var(--text);
+            line-height: 1.1;
+        }
+        .range-index-score.unavailable {
+            color: var(--text-3);
+            opacity: 0.6;
+        }
+        .range-index-reason {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--text-2);
+            margin-top: 4px;
+            line-height: 1.3;
+        }
+
         .pressure-body {
             display: flex;
             gap: 8px;
@@ -1376,7 +1406,7 @@
     <!-- ================= Target distance ================= -->
     <div class="glass" id="dist-readout" title="Click to change target distance">
         <span class="d" id="target-dist-badge">150</span>
-        <span class="u">yds to pin</span>
+        <span class="u" id="target-dist-unit">yds to pin</span>
         <span class="extra" id="range-mode-title">Free Practice</span>
         <span class="extra" id="challenge-pts-container" style="display:none;">
             <b id="target-pts-val">0</b> / 75 pts
@@ -1538,7 +1568,7 @@
             </div>
         </div>
 
-        <div class="widget glass" id="target-scorecard">
+        <div class="widget glass" id="target-scorecard" style="display:none;">
             <div class="widget-head">
                 <div class="widget-title">🎯 Target Practice</div>
                 <div class="widget-note" id="target-score-distance">150 yds</div>
@@ -1547,6 +1577,10 @@
                 <button class="target-preset" data-target-preset="100" type="button">100y</button>
                 <button class="target-preset" data-target-preset="130" type="button">130y</button>
                 <button class="target-preset" data-target-preset="160" type="button">160y</button>
+            </div>
+            <div class="custom-dist-row" style="padding:0 10px 8px;margin-top:0;">
+                <input type="number" id="target-scorecard-custom-dist" min="20" max="500" placeholder="Custom yds" class="custom-dist-input" style="padding:4px 8px;font-size:0.75rem;">
+                <button id="btn-set-target-scorecard-dist" class="custom-dist-btn" style="padding:4px 10px;font-size:0.75rem;" type="button">Set</button>
             </div>
             <div id="target-score-result">Hit a measured shot to score</div>
             <div id="target-score-stats">
@@ -1589,6 +1623,20 @@
             </div>
         </div>
 
+        <div class="widget glass" id="range-index-tile">
+            <div class="widget-head">
+                <div class="widget-title">★ Shanktuary Index</div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <span class="index-tier-badge" id="hud-index-tier" style="display:none;">INDEX</span>
+                    <button class="widget-close" id="btn-close-index-tile" type="button" title="Remove widget">✕</button>
+                </div>
+            </div>
+            <div class="range-index-body" id="range-index-body">
+                <div class="range-index-score" id="hud-index-score">--</div>
+                <div class="range-index-reason" id="hud-index-reason">Loading index...</div>
+            </div>
+        </div>
+
         <div id="rail-spacer" hidden></div>
         <div id="add-widget" title="Add a widget to the rail">+ Add Widget</div>
     </div>
@@ -1623,6 +1671,13 @@
             </div>
             <div class="game-mode-desc">10-shot / 75-point precision game. Hit concentric rings on the target green to score points and earn proximity awards.</div>
         </div>
+        <div class="game-mode-card" data-mode="target_practice">
+            <div class="game-mode-header">
+                <div class="game-mode-title">🎯 Target Practice</div>
+                <span class="game-mode-tag" id="tag-target-practice" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Hit / near / miss against the pin at a chosen distance. Tracks hits, streak, and average deviation. Not the same game as Target Challenge.</div>
+        </div>
         <div class="game-mode-card" data-mode="ladder">
             <div class="game-mode-header">
                 <div class="game-mode-title">🪜 Distance Ladder</div>
@@ -1643,6 +1698,20 @@
                 <span class="game-mode-tag" id="tag-long-drive" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Max distance shootout. Only shots that finish within the fairway boundary corridor qualify.</div>
+        </div>
+        <div class="game-mode-card" data-mode="grid">
+            <div class="game-mode-header">
+                <div class="game-mode-title">📐 Classic Grid</div>
+                <span class="game-mode-tag" id="tag-grid" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Standard 180 to 280 yard grid in 10-yard zones. Pick your opening zone, then land each random zone in the fewest balls.</div>
+        </div>
+        <div class="game-mode-card" data-mode="grid_custom">
+            <div class="game-mode-header">
+                <div class="game-mode-title">📐 Custom Grid</div>
+                <span class="game-mode-tag" id="tag-grid-custom" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Choose a custom start distance in even 10-yard increments (e.g. 50, 60, 70y). Generates 10 consecutive 10-yard zones.</div>
         </div>
     </div>
 

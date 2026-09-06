@@ -91,4 +91,5 @@ NAV_ITEMS = [
     (6, "Bag",      "My Bag and club specs"),
     (7, "Fit",      "Club fitting comparison"),
     (8, "Lab",      "Swing lab / pressure"),
+    (11, "Index",   "Shanktuary Index score"),
 ]

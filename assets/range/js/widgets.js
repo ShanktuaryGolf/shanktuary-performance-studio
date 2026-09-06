@@ -220,7 +220,7 @@ function drawLaunchWindow(canvas, ctx0) {
  * Widget registry. `kind: 'canvas'` gets a <canvas> body and a draw(canvas, ctx)
  * call; `kind: 'dom'` gets a plain div and a render(host, ctx) call.
  *
- * `fixed: true` marks the two widgets that already exist in the markup and are
+ * `fixed: true` marks the widgets that already exist in the markup and are
  * toggled rather than created.
  */
 export const WIDGET_REGISTRY = {
@@ -229,6 +229,12 @@ export const WIDGET_REGISTRY = {
         desc: 'Top-down shot scatter with 1\u03c3 group ellipse',
         fixed: true,
         element: 'minimap-container',
+    },
+    shanktuaryIndex: {
+        title: '\u2605 Shanktuary Index',
+        desc: 'Player Index rating across established clubs',
+        fixed: true,
+        element: 'range-index-tile',
     },
     pressure: {
         title: '\u2696 Pressure',

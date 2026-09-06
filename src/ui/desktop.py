@@ -213,6 +213,13 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
             *args, **kwargs,
         )
 
+    def draw_shanktuary_index_viewport(self, *args, **kwargs):
+        return legacy_palette.draw_production_page(
+            self,
+            lambda *a, **k: studio.ShanktuaryApp.draw_shanktuary_index_viewport(self, *a, **k),
+            *args, **kwargs,
+        )
+
     def draw_setup_viewport(self, *args, **kwargs):
         # Keep the latest upstream aim-calibration implementation intact; only
         # recolor its production primitives into the approved desktop palette.

@@ -82,6 +82,23 @@ def _draw_nav_icon(c, kind, cx, cy, col):
     elif kind == "Lab":
         c.create_line(cx - 11, cy + 3, cx - 7, cy + 3, cx - 3, cy - 6, cx + 1, cy + 8,
                       cx + 5, cy - 2, cx + 11, cy - 2, fill=col, width=1, smooth=True)
+    elif kind == "Index":
+        # A little scorecard: header band, a club-name/score column divider,
+        # and a few tally lines in the score column.
+        c.create_rectangle(cx - 8, cy - 10, cx + 8, cy + 10, outline=col, width=1)
+        c.create_line(cx - 8, cy - 4, cx + 8, cy - 4, fill=col, width=1)
+        c.create_line(cx - 1, cy - 4, cx - 1, cy + 10, fill=col, width=1)
+        for dy in (-1, 3, 7):
+            c.create_line(cx + 2, cy + dy, cx + 6, cy + dy, fill=col, width=1)
+    elif kind in ("Index", "Scorecard"):
+        # Folded golf scorecard with center crease, score rows, and mini pencil
+        c.create_rectangle(cx - 8, cy - 6, cx + 8, cy + 7, outline=col, width=1)
+        c.create_line(cx, cy - 6, cx, cy + 7, fill=col, width=1)
+        c.create_line(cx - 8, cy, cx + 8, cy, fill=col, width=1)
+        for dy in (-3, 4):
+            c.create_line(cx - 6, cy + dy, cx - 2, cy + dy, fill=col, width=1)
+            c.create_line(cx + 2, cy + dy, cx + 6, cy + dy, fill=col, width=1)
+        c.create_line(cx + 4, cy - 9, cx + 10, cy - 3, fill=col, width=2)
 
 
 def paint_nav(app, h):

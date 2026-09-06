@@ -122,6 +122,7 @@ def paint_nav(app, h):
         (6, "Bag", "Bag"),
         (7, "Fit", "Fit"),
         (8, "Lab", "Lab"),
+        (11, "Index", "Index"),
         (10, "Setup", None),
     ):
         y = _nav_item(app, y, mode_id, display, icon_kind)

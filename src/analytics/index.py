@@ -488,3 +488,291 @@ def valid_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     anchor = speeds[idx]
     floor = anchor * PARTIAL_SWING_RATIO
     return [s for s in structural if (_ball_speed(s) or 0.0) >= floor]
+
+
+MIN_CLUBS_FOR_INDEX = 3
+MIN_BANDS_FOR_INDEX = 2
+MIN_CARRY_SPREAD_RATIO = 1.25
+MIN_CLUBS_FOR_FULL_SPREAD = 6
+MIN_BANDS_FOR_FULL_SPREAD = 4
+
+CARRY_BAND_CUTS: list[tuple[str, str, float]] = [
+    ("A", "Longest", 0.85),
+    ("B", "Long", 0.70),
+    ("C", "Mid", 0.55),
+    ("D", "Short", 0.0),
+]
+
+
+class IndexTier(str, enum.Enum):
+    """Overall Shanktuary Index rating tiers, plan §4a."""
+
+    INDEX = "Index"
+    FULL_SPREAD = "Full-spread"
+
+
+def _shot_carry(shot: dict[str, Any]) -> float | None:
+    us = (shot.get("open_golf_coach") or {}).get("us_customary_units") or {}
+    val = us.get("carry_distance_yards")
+    if val is None:
+        val = shot.get("carry_distance_yards") or shot.get("carry")
+    try:
+        c = float(val)  # type: ignore[arg-type]
+        return c if c > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _club_mean_carries(
+    shots: list[dict[str, Any]],
+) -> dict[str, tuple[float, int]]:
+    grouped: dict[str, list[float]] = {}
+    for shot in valid_shots(shots):
+        carry = _shot_carry(shot)
+        if carry is not None:
+            club = str(shot.get("club") or "Unknown")
+            grouped.setdefault(club, []).append(carry)
+    result: dict[str, tuple[float, int]] = {}
+    for club, carries in grouped.items():
+        if carries:
+            result[club] = (sum(carries) / len(carries), len(carries))
+    return result
+
+
+def bag_carry_anchor(shots: list[dict[str, Any]]) -> float | None:
+    """Longest mean carry among clubs with 15+ recorded valid shots.
+
+    Plan §4a / §9a: Anchor = longest mean carry among clubs with 15+ recorded
+    shots -- established or not, but not a club with two shots setting the
+    reference for the whole bag. If no club qualifies, returns None.
+    """
+    carries = _club_mean_carries(shots)
+    qualifying = [
+        mean_carry
+        for club, (mean_carry, count) in carries.items()
+        if count >= MIN_SHOTS_PROVISIONAL
+    ]
+    return max(qualifying) if qualifying else None
+
+
+def classify_carry_band(carry: float, anchor: float) -> str:
+    """Map a carry distance to band 'A', 'B', 'C', or 'D' relative to anchor."""
+    if anchor <= 0:
+        return "D"
+    ratio = carry / anchor
+    if ratio >= 0.85:
+        return "A"
+    if ratio >= 0.70:
+        return "B"
+    if ratio >= 0.55:
+        return "C"
+    return "D"
+
+
+def carry_bands_by_club(
+    shots: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Compute mean carry and band assignment for every club with valid shots."""
+    anchor = bag_carry_anchor(shots)
+    if anchor is None or anchor <= 0:
+        return {}
+    club_carries = _club_mean_carries(shots)
+    labels = {code: label for code, label, _ in CARRY_BAND_CUTS}
+    result: dict[str, dict[str, Any]] = {}
+    for club, (mean_carry, count) in club_carries.items():
+        band = classify_carry_band(mean_carry, anchor)
+        result[club] = {
+            "mean_carry": mean_carry,
+            "count": count,
+            "band": band,
+            "band_label": labels.get(band, "Short"),
+            "ratio_to_anchor": mean_carry / anchor,
+        }
+    return result
+
+
+def evaluate_coverage(
+    shots: list[dict[str, Any]],
+    bag_summary: dict[str, dict[str, Any]] | None = None,
+    is_left_handed: bool = False,
+) -> dict[str, Any]:
+    """Evaluate whether established clubs clear the §4a coverage gate.
+
+    Rules:
+      Tier 1 (Index):
+        - >= 3 established clubs (valid shot count >= 30, valid composite)
+        - >= 2 distinct carry bands represented among established clubs
+        - max(mean_carry) / min(mean_carry) >= 1.25 across established clubs
+      Tier 2 (Full-spread):
+        - >= 6 established clubs
+        - all 4 carry bands (A, B, C, D) present among established clubs
+    """
+    if bag_summary is None:
+        bag_summary = bag_index_summary(shots, is_left_handed=is_left_handed)
+
+    anchor = bag_carry_anchor(shots)
+    club_carries = _club_mean_carries(shots)
+
+    established_clubs: list[str] = []
+    for club, summary in bag_summary.items():
+        composite = summary.get("composite")
+        if (
+            composite is not None
+            and composite.get("confidence") == ConfidenceTier.ESTABLISHED
+            and composite.get("score") is not None
+            and club in club_carries
+        ):
+            established_clubs.append(club)
+
+    established_clubs.sort(key=lambda c: club_carries[c][0], reverse=True)
+
+    if anchor is None or anchor <= 0:
+        return {
+            "eligible": False,
+            "tier": None,
+            "reason": "No club has enough shots (>= 15) to set a distance anchor",
+            "anchor_carry": anchor,
+            "established_clubs": established_clubs,
+            "bands_present": [],
+            "spread_ratio": None,
+            "club_bands": {},
+            "club_mean_carries": {c: club_carries[c][0] for c in established_clubs},
+        }
+
+    club_bands = {
+        club: classify_carry_band(club_carries[club][0], anchor)
+        for club in established_clubs
+    }
+    bands_present = sorted(set(club_bands.values()))
+
+    if len(established_clubs) < MIN_CLUBS_FOR_INDEX:
+        return {
+            "eligible": False,
+            "tier": None,
+            "reason": f"Need at least {MIN_CLUBS_FOR_INDEX} established clubs (have {len(established_clubs)})",
+            "anchor_carry": anchor,
+            "established_clubs": established_clubs,
+            "bands_present": bands_present,
+            "spread_ratio": None,
+            "club_bands": club_bands,
+            "club_mean_carries": {c: club_carries[c][0] for c in established_clubs},
+        }
+
+    if len(bands_present) < MIN_BANDS_FOR_INDEX:
+        return {
+            "eligible": False,
+            "tier": None,
+            "reason": f"Need established clubs across at least {MIN_BANDS_FOR_INDEX} carry bands (have {len(bands_present)})",
+            "anchor_carry": anchor,
+            "established_clubs": established_clubs,
+            "bands_present": bands_present,
+            "spread_ratio": None,
+            "club_bands": club_bands,
+            "club_mean_carries": {c: club_carries[c][0] for c in established_clubs},
+        }
+
+    carries = [club_carries[c][0] for c in established_clubs]
+    min_carry, max_carry = min(carries), max(carries)
+    spread_ratio = (max_carry / min_carry) if min_carry > 0 else 0.0
+
+    if spread_ratio < MIN_CARRY_SPREAD_RATIO:
+        return {
+            "eligible": False,
+            "tier": None,
+            "reason": f"Need carry spread ratio >= {MIN_CARRY_SPREAD_RATIO:.2f} across established clubs (have {spread_ratio:.2f})",
+            "anchor_carry": anchor,
+            "established_clubs": established_clubs,
+            "bands_present": bands_present,
+            "spread_ratio": spread_ratio,
+            "club_bands": club_bands,
+            "club_mean_carries": {c: club_carries[c][0] for c in established_clubs},
+        }
+
+    if (
+        len(established_clubs) >= MIN_CLUBS_FOR_FULL_SPREAD
+        and len(bands_present) == MIN_BANDS_FOR_FULL_SPREAD
+    ):
+        tier = IndexTier.FULL_SPREAD
+    else:
+        tier = IndexTier.INDEX
+
+    return {
+        "eligible": True,
+        "tier": tier,
+        "reason": None,
+        "anchor_carry": anchor,
+        "established_clubs": established_clubs,
+        "bands_present": bands_present,
+        "spread_ratio": spread_ratio,
+        "club_bands": club_bands,
+        "club_mean_carries": {c: club_carries[c][0] for c in established_clubs},
+    }
+
+
+def player_shanktuary_index(
+    shots: list[dict[str, Any]],
+    is_left_handed: bool = False,
+) -> dict[str, Any]:
+    """Compute overall player Shanktuary Index from §4a/§5.
+
+    Unestablished clubs are excluded from the score. If the coverage gate is not
+    met, returns status='insufficient_coverage' with score=None and explicit reason.
+    """
+    bag_summary = bag_index_summary(shots, is_left_handed=is_left_handed)
+    cov = evaluate_coverage(
+        shots, bag_summary=bag_summary, is_left_handed=is_left_handed
+    )
+
+    game_areas: dict[str, dict[str, Any]] = {}
+    for code, label, _ in CARRY_BAND_CUTS:
+        area_clubs = [
+            c for c in cov["established_clubs"] if cov["club_bands"].get(c) == code
+        ]
+        if area_clubs:
+            scores = [
+                bag_summary[c]["composite"]["score"] for c in area_clubs
+            ]
+            area_score = round(sum(scores) / len(scores), 1)
+        else:
+            area_score = None
+        game_areas[code] = {
+            "name": label,
+            "score": area_score,
+            "clubs": area_clubs,
+        }
+
+    if not cov["eligible"]:
+        return {
+            "status": "insufficient_coverage",
+            "score": None,
+            "tier": None,
+            "reason": cov["reason"],
+            "anchor_carry": cov["anchor_carry"],
+            "established_clubs": cov["established_clubs"],
+            "bands_present": cov["bands_present"],
+            "spread_ratio": cov["spread_ratio"],
+            "game_areas": game_areas,
+            "clubs": bag_summary,
+        }
+
+    established_scores = [
+        bag_summary[c]["composite"]["score"] for c in cov["established_clubs"]
+    ]
+    raw_score = sum(established_scores) / len(established_scores)
+    final_score = round(min(99.0, max(0.0, raw_score)), 1)
+
+    return {
+        "status": "available",
+        "score": final_score,
+        "tier": cov["tier"],
+        "reason": None,
+        "anchor_carry": cov["anchor_carry"],
+        "established_clubs": cov["established_clubs"],
+        "bands_present": cov["bands_present"],
+        "spread_ratio": cov["spread_ratio"],
+        "game_areas": game_areas,
+        "clubs": bag_summary,
+    }
+
+
+shanktuary_index = player_shanktuary_index

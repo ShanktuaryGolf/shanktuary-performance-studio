@@ -345,6 +345,12 @@ export function setTargetDistance(yards) {
     }
 }
 
+export function setTargetGreenVisible(visible) {
+    if (activeTargetGreen) {
+        activeTargetGreen.visible = Boolean(visible);
+    }
+}
+
 function createMountainPanorama(scene) {
     // 1. Try GLB 3D Mountain Mesh
     if (typeof THREE.GLTFLoader === 'function') {

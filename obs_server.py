@@ -103,6 +103,7 @@ DEFAULT_LAYOUT = {
         "overhead_path": {"x": 550, "y": 30, "w": 250, "h": 200, "visible": True},
         "side_launch": {"x": 810, "y": 30, "w": 250, "h": 180, "visible": True},
         "spin_axis_3d": {"x": 1070, "y": 30, "w": 250, "h": 180, "visible": True},
+        "shanktuary_index": {"x": 1330, "y": 30, "w": 220, "h": 110, "visible": True},
         "wbb_heatmap": {"x": 30, "y": 680, "w": 260, "h": 260, "visible": True},
         "wbb_cop_dot": {"x": 300, "y": 680, "w": 180, "h": 180, "visible": True},
         "wbb_balance_bar": {"x": 490, "y": 680, "w": 240, "h": 80, "visible": True},
@@ -272,9 +273,9 @@ class OBSState:
         return {"clubs": [], "is_left_handed": False}
 
     def load_index(self):
-        """Read shots from session history and compute the bag index summary.
+        """Read shots from session history and compute the player shanktuary index.
 
-        Pure calculation via bag_index_summary(); reads session history from
+        Pure calculation via player_shanktuary_index(); reads session history from
         disk rather than caching in OBSState so any desktop edits or new shots
         are immediately visible.
         """
@@ -305,8 +306,15 @@ class OBSState:
                         sess_shots = sess.get("shots")
                         if isinstance(sess_shots, list):
                             shots.extend(sess_shots)
-                from src.analytics.index import bag_index_summary
-                return bag_index_summary(shots, is_left_handed=is_left_handed)
+                if not shots:
+                    return {}
+                from src.analytics import player_shanktuary_index
+                summary = player_shanktuary_index(shots, is_left_handed=is_left_handed)
+                res = dict(summary)
+                for club, c_data in summary.get("clubs", {}).items():
+                    if club not in res:
+                        res[club] = c_data
+                return res
             except Exception as e:
                 print(f"[!] Error computing index from {path}: {e}")
                 return {}

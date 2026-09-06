@@ -1,6 +1,6 @@
 // WebSocket Telemetry, Proximity, Real-time Fairway Width Slider & Minimap Radar
 
-import { setTargetDistance } from './environment.js';
+import { setTargetDistance, setTargetGreenVisible } from './environment.js';
 import { setFairwayWidth, getFairwayWidth } from './foliage.js';
 import { PressureTileRenderer } from './pressure_tiles.js';
 import { ShotHistory, isSmashClamped } from './shot_history.js';
@@ -11,6 +11,8 @@ import {
     loadStripLayout, saveStripLayout, readMetric,
 } from './metrics.js';
 import { fetchBag, groupClubs, pillLabel, clubSubtitle } from './club_picker.js';
+import { gridMode, GRID_ZONE_WIDTH_YARDS, GRID_DEFAULT_START_YARDS, isValidGridStartYards } from './grid_mode.js';
+import { setupGridModeUI, renderGridPicker } from './grid_ui.js';
 
 export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController) {
     // 0. HUD scale wrapper
@@ -173,6 +175,123 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             ladderBanner.classList.remove('show');
         }, duration);
     }
+
+    function finiteNumber(value) {
+        const n = typeof value === 'number' ? value : Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    let preGridTargetYards = null;
+
+    function snapshotPreGridTarget() {
+        if (preGridTargetYards !== null) return;
+        const saved = finiteNumber(currentTargetYards);
+        if (saved !== null) preGridTargetYards = saved;
+    }
+
+    function beginGridFromYards(startYards) {
+        snapshotPreGridTarget();
+        try {
+            return gridMode.begin({ startYards });
+        } catch (err) {
+            showBanner('⚠️', '10-YARD INCREMENTS ONLY', err.message || 'Use 50, 60, 70… not 57.');
+            return gridMode.getState();
+        }
+    }
+
+    function restorePreGridTarget() {
+        if (preGridTargetYards === null) return;
+        const yards = preGridTargetYards;
+        preGridTargetYards = null;
+        if (typeof updateTarget === 'function') updateTarget(yards);
+    }
+
+    function gridZonePickerHost() {
+        let host = document.getElementById('grid-zone-picker');
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = 'grid-zone-picker';
+        host.style.cssText = [
+            'position:absolute',
+            'top:88px',
+            'left:50%',
+            'transform:translateX(-50%)',
+            'z-index:49',
+            'display:none',
+            'flex-wrap:wrap',
+            'gap:6px',
+            'max-width:92%',
+            'justify-content:center',
+        ].join(';');
+        const wrap = document.getElementById('hud-scale') || document.body;
+        wrap.appendChild(host);
+        host.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-grid-zone]');
+            if (!btn || (currentRangeMode !== 'grid' && currentRangeMode !== 'grid_custom')) return;
+            if (gridMode.getState().status !== 'picking') return;
+            const idx = finiteNumber(btn.getAttribute('data-grid-zone'));
+            if (idx === null || !Number.isInteger(idx)) return;
+            const next = gridMode.selectInitialZone(idx);
+            const z = next.zones[next.activeZoneIndex];
+            if (z) {
+                showBanner('🟩', `HIT ${z.label}`, 'Stay on this zone until you land it. Next zone is random.');
+            }
+            syncGridHud(next);
+        });
+        return host;
+    }
+
+    function isGridMode() {
+        return currentRangeMode === 'grid' || currentRangeMode === 'grid_custom';
+    }
+
+    function syncGridHud(st) {
+        if (!isGridMode()) {
+            const host = document.getElementById('grid-zone-picker');
+            if (host) host.style.display = 'none';
+            return;
+        }
+
+        const modeLabel = currentRangeMode === 'grid_custom' ? 'Custom Grid' : 'Classic Grid';
+
+        // Keep top bar clean — suppress pin distance readout in grid modes
+        if (elTargetDistBadge) elTargetDistBadge.style.display = 'none';
+        const targetDistUnit = document.getElementById('target-dist-unit');
+        if (targetDistUnit) targetDistUnit.style.display = 'none';
+
+        if (st.status === 'picking') {
+            if (practiceLastCarry) practiceLastCarry.innerText = 'PICK ZONE';
+            if (practiceLastOffline) practiceLastOffline.innerText = `${st.startYards} START`;
+            if (rangeModeTitle) rangeModeTitle.innerText = `${modeLabel} · Pick Zone`;
+        } else if (st.status === 'playing') {
+            const z = st.zones[st.activeZoneIndex];
+            if (practiceLastCarry) practiceLastCarry.innerText = z ? z.label : '--';
+            if (practiceLastOffline) practiceLastOffline.innerText = `${st.totalShots} BALLS`;
+            if (rangeModeTitle) rangeModeTitle.innerText = `${modeLabel} · Target: ${z ? z.label : '--'}y`;
+            if (z && typeof updateTarget === 'function') {
+                updateTarget(z.minYards + GRID_ZONE_WIDTH_YARDS / 2, { fromGrid: true });
+            }
+        } else if (st.status === 'complete') {
+            if (practiceLastCarry) practiceLastCarry.innerText = 'COMPLETE';
+            if (practiceLastOffline) practiceLastOffline.innerText = `${st.totalShots} BALLS`;
+            if (rangeModeTitle) rangeModeTitle.innerText = `${modeLabel} · Complete (${st.totalShots} balls)`;
+            restorePreGridTarget();
+        }
+
+        const host = gridZonePickerHost();
+        if (st.status !== 'picking') {
+            host.style.display = 'none';
+            return;
+        }
+        host.style.display = 'flex';
+        renderGridPicker(host, st, {
+            isCustom: currentRangeMode === 'grid_custom',
+            onStartChange: (newStart) => {
+                beginGridFromYards(newStart);
+                syncGridHud(gridMode.getState());
+            }
+        });
+    }
     
     const slDemoBtn = document.getElementById('sl-demo-btn');
     const lmStatusText = document.getElementById('lm-status-text');
@@ -220,6 +339,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const dsCarry = document.getElementById('ds-carry');
     const dsCarrySd = document.getElementById('ds-carry-sd');
     const dsOffline = document.getElementById('ds-offline');
+    const targetScorecard = document.getElementById('target-scorecard');
     const targetScoreDistance = document.getElementById('target-score-distance');
     const targetScoreResult = document.getElementById('target-score-result');
     const targetScoreHits = document.getElementById('target-score-hits');
@@ -227,6 +347,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const targetScoreBest = document.getElementById('target-score-best');
     const targetScoreAverage = document.getElementById('target-score-average');
     const targetPresetButtons = document.querySelectorAll('[data-target-preset]');
+    const tgtScorecardCustomDist = document.getElementById('target-scorecard-custom-dist');
+    const btnSetTargetScorecardDist = document.getElementById('btn-set-target-scorecard-dist');
 
     // Nav tabs / All Metrics panel
     const allMetricsPanel = document.getElementById('all-metrics');
@@ -276,6 +398,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const rangeHeatmapCanvas = document.getElementById('range-heatmap-canvas');
     const rangeCopCanvas = document.getElementById('range-cop-canvas');
     const pressureRenderer = new PressureTileRenderer();
+    const gridUI = setupGridModeUI(scene);
 
     // Dispersion plot canvas (sized from CSS; see dispersion.js)
     const minimapCanvas = document.getElementById('minimap-canvas');
@@ -293,8 +416,58 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
     if (btnClosePressureTile) btnClosePressureTile.addEventListener('click', () => removeWidget('pressure'));
 
+    // Shanktuary Index Card Elements
+    const rangeIndexTile = document.getElementById('range-index-tile');
+    const btnCloseIndexTile = document.getElementById('btn-close-index-tile');
+    const hudIndexTier = document.getElementById('hud-index-tier');
+    const hudIndexScore = document.getElementById('hud-index-score');
+    const hudIndexReason = document.getElementById('hud-index-reason');
+
+    if (btnCloseIndexTile) btnCloseIndexTile.addEventListener('click', () => removeWidget('shanktuaryIndex'));
+
+    function renderRangeIndex(data) {
+        if (!hudIndexScore || !hudIndexTier || !hudIndexReason) return;
+
+        if (!data || data.status === 'insufficient_coverage') {
+            hudIndexScore.innerText = '--';
+            hudIndexScore.classList.add('unavailable');
+            hudIndexTier.style.display = 'none';
+            hudIndexTier.innerText = '';
+            hudIndexReason.innerText = (data && data.reason) ? data.reason : 'Insufficient coverage';
+        } else if (data.status === 'available') {
+            const scoreVal = typeof data.score === 'number' ? data.score.toFixed(1) : String(data.score ?? '--');
+            hudIndexScore.innerText = scoreVal;
+            hudIndexScore.classList.remove('unavailable');
+            const tierText = data.tier ? String(data.tier).toUpperCase() : 'INDEX';
+            hudIndexTier.innerText = tierText;
+            hudIndexTier.style.display = 'inline-block';
+            const numClubs = (data.established_clubs && data.established_clubs.length) ? data.established_clubs.length : 0;
+            hudIndexReason.innerText = `${numClubs} established clubs`;
+        } else {
+            hudIndexScore.innerText = '--';
+            hudIndexScore.classList.add('unavailable');
+            hudIndexTier.style.display = 'none';
+            hudIndexReason.innerText = '--';
+        }
+    }
+
+    async function loadRangeIndex() {
+        try {
+            const res = await fetch('/api/index');
+            if (res.ok) {
+                const data = await res.json();
+                renderRangeIndex(data);
+            } else {
+                renderRangeIndex(null);
+            }
+        } catch (e) {
+            renderRangeIndex(null);
+        }
+    }
+
     let currentTargetYards = 150;
-    let currentRangeMode = localStorage.getItem('sps_range_game_mode') || 'practice';
+    let currentRangeMode = 'practice';
+    try { localStorage.removeItem('sps_range_game_mode'); } catch (e) { /* ignore */ }
     let totalChallengeScore = 0;
     let bestPinProx = 999.0;
     let bestLongDrive = 0.0;
@@ -320,6 +493,20 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 ? `${(targetScore.totalDeviation / targetScore.shotCount).toFixed(1)}y`
                 : '--';
         }
+    }
+
+    function resetTargetScore() {
+        targetScore.currentStreak = 0;
+        targetScore.bestStreak = 0;
+        targetScore.hits = 0;
+        targetScore.shotCount = 0;
+        targetScore.totalDeviation = 0;
+        if (targetScoreHits) targetScoreHits.innerText = '0';
+        if (targetScoreResult) {
+            targetScoreResult.className = '';
+            targetScoreResult.innerText = 'Hit a measured shot to score';
+        }
+        renderTargetScorecard();
     }
 
     function scoreTargetShot(carryYds, offlineYds) {
@@ -348,7 +535,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     // 2. Game Mode Selection Logic
     function setGameMode(mode) {
         currentRangeMode = mode;
-        localStorage.setItem('sps_range_game_mode', mode);
 
         gameModeCards.forEach(card => {
             const m = card.getAttribute('data-mode');
@@ -364,6 +550,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         bestLongDrive = 0.0;
         if (elTargetPts) elTargetPts.innerText = '0';
         if (elPinProx) elPinProx.innerText = '--';
+        if (targetScorecard) {
+            targetScorecard.style.display = mode === 'target_practice' ? '' : 'none';
+        }
 
         if (mode === 'practice') {
             if (rangeModeTitle) rangeModeTitle.innerText = 'Free Practice';
@@ -406,6 +595,62 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             if (challengePtsContainer) challengePtsContainer.style.display = 'none';
             if (challengeProxContainer) challengeProxContainer.style.display = 'none';
             if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        } else if (mode === 'target_practice') {
+            resetTargetScore();
+            if (rangeModeTitle) rangeModeTitle.innerText = 'Target Practice';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        } else if (mode === 'grid') {
+            beginGridFromYards(GRID_DEFAULT_START_YARDS);
+            setTargetGreenVisible(false);
+            if (rangeModeTitle) rangeModeTitle.innerText = 'Classic Grid · Pick Zone';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+            if (elTargetDistBadge) elTargetDistBadge.style.display = 'none';
+            const targetDistUnit = document.getElementById('target-dist-unit');
+            if (targetDistUnit) targetDistUnit.style.display = 'none';
+            showBanner('📐', 'CLASSIC GRID', '10 zones from 180y. Pick your opening zone, then land each random zone in the fewest balls.');
+            syncGridHud(gridMode.getState());
+        } else if (mode === 'grid_custom') {
+            snapshotPreGridTarget();
+            const raw = finiteNumber(currentTargetYards);
+            const customStart = (raw !== null && isValidGridStartYards(raw)) ? raw : 50;
+            beginGridFromYards(customStart);
+            setTargetGreenVisible(false);
+            if (rangeModeTitle) rangeModeTitle.innerText = 'Custom Grid · Pick Zone';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+            if (elTargetDistBadge) elTargetDistBadge.style.display = 'none';
+            const targetDistUnit = document.getElementById('target-dist-unit');
+            if (targetDistUnit) targetDistUnit.style.display = 'none';
+            showBanner('📐', 'CUSTOM GRID', `10 zones from ${customStart}y. Type a 10-yard start (50, 60, 70…) then pick your opening zone.`);
+            syncGridHud(gridMode.getState());
+        }
+
+        if (mode !== 'grid' && mode !== 'grid_custom') {
+            restorePreGridTarget();
+            gridMode.reset();
+            setTargetGreenVisible(true);
+            if (elTargetDistBadge) {
+                elTargetDistBadge.style.display = '';
+                elTargetDistBadge.innerText = currentTargetYards;
+            }
+            const targetDistUnit = document.getElementById('target-dist-unit');
+            if (targetDistUnit) {
+                targetDistUnit.style.display = '';
+                targetDistUnit.innerText = 'yds to pin';
+            }
+            const picker = document.getElementById('grid-zone-picker');
+            if (picker) picker.style.display = 'none';
         }
     }
 
@@ -454,6 +699,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
     if (tgtSlider) tgtSlider.value = currentTargetYards;
     if (tgtCustomInput) tgtCustomInput.value = currentTargetYards;
+    if (tgtScorecardCustomDist) tgtScorecardCustomDist.value = currentTargetYards;
     if (tgtReadout) tgtReadout.innerText = `${currentTargetYards} yds`;
     if (elTargetDistBadge) elTargetDistBadge.innerText = `${currentTargetYards}`;
     renderTargetScorecard();
@@ -463,13 +709,19 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     });
     setTargetDistance(currentTargetYards);
 
-    function updateTarget(newYards) {
+    function updateTarget(newYards, opts = {}) {
         if (isNaN(newYards) || newYards <= 0) return;
-        currentTargetYards = Math.max(20, Math.min(500, Math.round(newYards)));
-        setTargetDistance(currentTargetYards);
+        const yards = Math.max(20, Math.min(500, Math.round(newYards)));
+        setTargetDistance(yards);
+        if (opts.fromGrid) {
+            drawMinimap();
+            return;
+        }
+        currentTargetYards = yards;
         
         if (tgtSlider) tgtSlider.value = currentTargetYards;
         if (tgtCustomInput) tgtCustomInput.value = currentTargetYards;
+        if (tgtScorecardCustomDist) tgtScorecardCustomDist.value = currentTargetYards;
         if (tgtReadout) tgtReadout.innerText = `${currentTargetYards} yds`;
         if (elTargetDistBadge) elTargetDistBadge.innerText = `${currentTargetYards}`;
         
@@ -485,6 +737,12 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         localStorage.setItem('sps_range_target_dist', currentTargetYards);
         renderTargetScorecard();
         drawMinimap();
+        if (currentRangeMode === 'grid_custom' && gridMode.getState().status === 'picking') {
+            if (isValidGridStartYards(currentTargetYards)) {
+                beginGridFromYards(currentTargetYards);
+                syncGridHud(gridMode.getState());
+            }
+        }
     }
 
     if (tgtSlider) {
@@ -528,6 +786,21 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             updateTarget(parseInt(button.getAttribute('data-target-preset'), 10));
         });
     });
+
+    if (tgtScorecardCustomDist) {
+        if (btnSetTargetScorecardDist) {
+            btnSetTargetScorecardDist.addEventListener('click', () => {
+                const val = parseFloat(tgtScorecardCustomDist.value);
+                if (!isNaN(val) && val > 0) updateTarget(val);
+            });
+        }
+        tgtScorecardCustomDist.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const val = parseFloat(tgtScorecardCustomDist.value);
+                if (!isNaN(val) && val > 0) updateTarget(val);
+            }
+        });
+    }
 
     // 5. Drawer and Menu Actions
     //
@@ -1227,7 +1500,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         const pinDeltaYds = Math.sqrt(dx * dx + dz * dz);
         const pinDeltaFt = pinDeltaYds * 3.0;
 
-        if (shotOpts.record && !shotOpts.demo) {
+        if (shotOpts.record && !shotOpts.demo && currentRangeMode === 'target_practice') {
             scoreTargetShot(carryYds, offlineYds);
         }
 
@@ -1269,6 +1542,26 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             if (isFairway && carryYds > bestLongDrive) bestLongDrive = carryYds;
             if (practiceLastCarry) practiceLastCarry.innerText = `${carryYds.toFixed(1)} yds`;
             if (practiceLastOffline) practiceLastOffline.innerText = isFairway ? 'FAIRWAY' : 'ROUGH';
+        } else if (currentRangeMode === 'grid' || currentRangeMode === 'grid_custom') {
+            if (shotOpts.record && !shotOpts.demo && gridMode.getState().status === 'playing') {
+                const carry = finiteNumber(carryYds);
+                if (carry !== null) {
+                    const st = gridMode.applyShot(carry);
+                    const r = st.lastResult;
+                    if (r && r.completedGame) {
+                        showBanner('🏁', `GRID COMPLETE · ${st.totalShots} BALLS`, 'Lowest ball count wins.');
+                    } else if (r && r.hit) {
+                        const z = st.zones[st.activeZoneIndex];
+                        showBanner('✅', `ZONE DONE · NEXT ${z ? z.label : ''}`, `${st.completedCount}/10 · ${st.totalShots} balls`);
+                    } else {
+                        const z = st.zones[st.activeZoneIndex];
+                        showBanner('⚠️', `STILL ${z ? z.label : ''}`, `${carry.toFixed(0)}y does not advance until you land this zone.`);
+                    }
+                    syncGridHud(st);
+                }
+            } else if (gridMode.getState().status === 'picking') {
+                showBanner('🟩', 'PICK A ZONE FIRST', 'Select the first 10-yard window before shots count.');
+            }
         }
 
         lastLandingPt = { x: offlineYds, z: carryYds };
@@ -1679,6 +1972,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 // Canvas was 0x0 while hidden; redraw once it has a box.
                 requestAnimationFrame(() => drawMinimap());
             }
+            if (key === 'shanktuaryIndex') {
+                loadRangeIndex();
+            }
             renderWidgetMenu();
             updateAddButtonState();
             return;
@@ -1851,6 +2147,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 if (msg.type === 'shot') {
                     const parsed = extractShotTelemetry(msg);
                     if (parsed) fireShot(parsed);
+                    loadRangeIndex();
                 } else if (msg.type === 'pressure' && msg.data) {
                     const p = msg.data;
                     pressureRenderer.pushSample(p);
@@ -1872,6 +2169,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                         lastShotId = parsed.shotId;
                         updateHUDTelemetry(parsed);
                     }
+                    loadRangeIndex();
                 }
             } catch (err) {
                 console.error('[!] WebSocket JSON parse error:', err);
@@ -1922,5 +2220,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
     setInterval(pollShotAPI, 2500);
 
+    loadRangeIndex();
     connectWS();
 }

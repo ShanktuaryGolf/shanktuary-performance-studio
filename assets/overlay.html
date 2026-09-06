@@ -379,6 +379,7 @@
       <option value="overhead_path">Quad 2: Overhead Address & Path</option>
       <option value="side_launch">Quad 3: Side Launch Arc</option>
       <option value="spin_axis_3d">Quad 4: 3D Spin Axis & Rating</option>
+      <option value="shanktuary_index">Shanktuary Index</option>
       <option value="ball_speed">Ball Speed</option>
       <option value="club_speed">Club Speed</option>
       <option value="carry">Carry Distance</option>
@@ -459,6 +460,21 @@
     </div>
     <div class="visual-title">3D SPIN AXIS & RATING</div>
     <div class="canvas-wrapper"><canvas id="spinCanvas"></canvas></div>
+    <div class="resize-handle">◢</div>
+  </div>
+
+  <!-- Shanktuary Index Card -->
+  <div class="widget visual-card" id="w_shanktuary_index" style="left: 1330px; top: 30px; width: 220px; height: 110px;">
+    <div class="widget-edit-header">
+      <span class="edit-label">Shanktuary Index</span>
+      <button class="widget-close-btn" onclick="hideWidget('shanktuary_index')" title="Hide Widget">✕</button>
+    </div>
+    <div class="visual-title with-chip">
+      <span class="metric-label" style="margin-bottom: 0;">SHANKTUARY INDEX</span>
+      <span class="est-chip" id="v_index_tier" style="display: none;">INDEX</span>
+    </div>
+    <div class="metric-val" id="v_index_score" style="margin-top: 6px;">--</div>
+    <div class="metric-note" id="v_index_reason">--</div>
     <div class="resize-handle">◢</div>
   </div>
 
@@ -613,6 +629,7 @@
 
     const ALL_WIDGET_IDS = [
       'divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d',
+      'shanktuary_index',
       'wbb_heatmap', 'wbb_cop_dot', 'wbb_balance_bar',
       'ball_speed', 'club_speed', 'carry', 'total', 'smash', 'launch_angle', 'push_pull',
       'total_spin', 'sidespin', 'spin_axis', 'club_path', 'face_angle', 'offline',
@@ -1133,9 +1150,11 @@
               latestShot = msg.data;
               renderShotData();
             }
+            loadIndexData();
           } else if (msg.type === 'shot') {
             latestShot = msg.data;
             renderShotData();
+            loadIndexData();
           } else if (msg.type === 'pressure' && msg.data) {
             handleLivePressureFrame(msg.data);
           }
@@ -1294,6 +1313,49 @@
       drawOverheadPath(shotToRender);
       drawSideLaunch(shotToRender);
       drawSpinAxis3D(shotToRender);
+    }
+
+    function renderIndexData(data) {
+      const scoreEl = document.getElementById('v_index_score');
+      const tierEl = document.getElementById('v_index_tier');
+      const reasonEl = document.getElementById('v_index_reason');
+      const cardEl = document.getElementById('w_shanktuary_index');
+      if (!scoreEl || !tierEl || !reasonEl) return;
+
+      if (!data || data.status === 'insufficient_coverage') {
+        scoreEl.innerText = '--';
+        scoreEl.classList.add('unavailable');
+        tierEl.style.display = 'none';
+        tierEl.innerText = '';
+        reasonEl.innerText = (data && data.reason) ? data.reason : 'Insufficient coverage';
+        if (cardEl) cardEl.classList.add('metric-unavailable');
+      } else if (data.status === 'available') {
+        const scoreVal = typeof data.score === 'number' ? data.score.toFixed(1) : String(data.score ?? '--');
+        scoreEl.innerText = scoreVal;
+        scoreEl.classList.remove('unavailable');
+        const tierText = data.tier ? String(data.tier).toUpperCase() : 'INDEX';
+        tierEl.innerText = tierText;
+        tierEl.style.display = 'inline-block';
+        const numClubs = (data.established_clubs && data.established_clubs.length) ? data.established_clubs.length : 0;
+        reasonEl.innerText = `${numClubs} established clubs`;
+        if (cardEl) cardEl.classList.remove('metric-unavailable');
+      } else {
+        scoreEl.innerText = '--';
+        scoreEl.classList.add('unavailable');
+        tierEl.style.display = 'none';
+        reasonEl.innerText = '--';
+        if (cardEl) cardEl.classList.add('metric-unavailable');
+      }
+    }
+
+    function loadIndexData() {
+      fetch('/api/index')
+        .then(r => r.json())
+        .then(data => renderIndexData(data))
+        .catch(e => {
+          console.warn('[!] Error loading index data:', e);
+          renderIndexData(null);
+        });
     }
 
     /* ----- virtual divot ------------------------------------------------
@@ -2058,6 +2120,7 @@
     if (window.location.search.includes('edit=true')) {
       toggleEditMode(true);
     }
+    loadIndexData();
     initWebSocket();
   </script>
 </body>

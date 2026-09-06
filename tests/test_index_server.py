@@ -11,7 +11,12 @@ import pytest
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
 import obs_server
 from obs_server import obs_state, start_obs_server
-from src.analytics.index import ConfidenceTier, bag_index_summary
+from src.analytics.index import (
+    ConfidenceTier,
+    IndexTier,
+    bag_index_summary,
+    player_shanktuary_index,
+)
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +41,18 @@ def server():
     yield port
 
 
-def _sample_shot(bs=90.0, vla=18.0, spin=6500.0, axis=1.0, club="7 Iron", excluded=False):
+def _sample_shot(
+    bs=90.0,
+    vla=18.0,
+    spin=6500.0,
+    axis=1.0,
+    club="7 Iron",
+    excluded=False,
+    carry=None,
+):
+    us = {"ball_speed_mph": bs}
+    if carry is not None:
+        us["carry_distance_yards"] = carry
     return {
         "club": club,
         "excluded": excluded,
@@ -44,7 +60,7 @@ def _sample_shot(bs=90.0, vla=18.0, spin=6500.0, axis=1.0, club="7 Iron", exclud
         "vertical_launch_angle_degrees": vla,
         "spin_axis_degrees": axis,
         "open_golf_coach": {
-            "us_customary_units": {"ball_speed_mph": bs}
+            "us_customary_units": us
         },
     }
 
@@ -156,3 +172,78 @@ def test_index_respects_is_left_handed(server, monkeypatch, tmp_path):
     assert lh_data["7 Iron"]["shape"]["score"] == pytest.approx(
         expected_lh["7 Iron"]["shape"]["score"], abs=0.01
     )
+
+
+def test_index_available_history(server, monkeypatch, tmp_path):
+    shots = (
+        [_sample_shot(bs=105.0, carry=250.0, club="Driver") for _ in range(35)]
+        + [_sample_shot(bs=95.0, carry=150.0, club="7 Iron") for _ in range(35)]
+        + [_sample_shot(bs=90.0, carry=100.0, club="PW") for _ in range(35)]
+    )
+    payload = {
+        "sessions": [{"id": "sess_available", "shots": shots}],
+        "is_left_handed": False,
+    }
+    history_file = tmp_path / "session_history.json"
+    history_file.write_text(json.dumps(payload))
+    monkeypatch.setattr(obs_server, "SESSION_LOG_PATH", history_file)
+
+    expected = player_shanktuary_index(shots, is_left_handed=False)
+
+    url = f"http://localhost:{server}/api/index"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as response:
+        assert response.status == 200
+        assert "application/json" in response.headers.get("Content-Type", "")
+        data = json.loads(response.read().decode("utf-8"))
+
+        assert data["status"] == "available"
+        assert data["tier"] == "Index"
+        assert isinstance(data["score"], (int, float))
+        assert data["score"] == pytest.approx(expected["score"], abs=0.01)
+        assert data["reason"] is None
+        assert sorted(data["established_clubs"]) == ["7 Iron", "Driver", "PW"]
+        assert data["spread_ratio"] == pytest.approx(expected["spread_ratio"], abs=0.01)
+        assert "A" in data["game_areas"]
+        assert "clubs" in data
+        assert set(data["clubs"].keys()) == {"Driver", "7 Iron", "PW"}
+        assert data["clubs"]["Driver"]["composite"]["score"] == pytest.approx(
+            expected["clubs"]["Driver"]["composite"]["score"], abs=0.01
+        )
+        assert data["Driver"]["composite"]["score"] == data["clubs"]["Driver"]["composite"]["score"]
+
+
+def test_index_insufficient_coverage_history(server, monkeypatch, tmp_path):
+    shots = (
+        [_sample_shot(bs=105.0, carry=250.0, club="Driver") for _ in range(35)]
+        + [_sample_shot(bs=95.0, carry=150.0, club="7 Iron") for _ in range(35)]
+    )
+    payload = {
+        "sessions": [{"id": "sess_insufficient", "shots": shots}],
+        "is_left_handed": False,
+    }
+    history_file = tmp_path / "session_history.json"
+    history_file.write_text(json.dumps(payload))
+    monkeypatch.setattr(obs_server, "SESSION_LOG_PATH", history_file)
+
+    expected = player_shanktuary_index(shots, is_left_handed=False)
+
+    url = f"http://localhost:{server}/api/index"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as response:
+        assert response.status == 200
+        assert "application/json" in response.headers.get("Content-Type", "")
+        data = json.loads(response.read().decode("utf-8"))
+
+        assert data["status"] == "insufficient_coverage"
+        assert data["score"] is None
+        assert data["tier"] is None
+        assert isinstance(data["reason"], str)
+        assert "3" in data["reason"]
+        assert sorted(data["established_clubs"]) == ["7 Iron", "Driver"]
+        assert "clubs" in data
+        assert "Driver" in data["clubs"]
+        assert "7 Iron" in data["clubs"]
+        assert data["Driver"]["composite"]["score"] == pytest.approx(
+            expected["clubs"]["Driver"]["composite"]["score"], abs=0.01
+        )
