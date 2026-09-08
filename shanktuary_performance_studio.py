@@ -536,7 +536,7 @@ def load_image_asset(path, target_h=210, mirror=False):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.4.0"
+APP_VERSION = "v1.5.0"
 BUILD_NUMBER = "2026.09.04.1"
 
 class ShanktuaryApp:
