@@ -3,6 +3,8 @@
 let activeTargetGreen = null;
 let signContext = null;
 let signTexture = null;
+let teeBoxGroup = null;
+let fairwayCenterline = null;
 
 export function setupEnvironment(scene, initialTargetYards = 150) {
     const textureLoader = new THREE.TextureLoader();
@@ -31,6 +33,7 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     });
     
     const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+    terrain.name = 'range-fairway';
     terrain.position.set(0, 0, -250);
     terrain.receiveShadow = true;
     scene.add(terrain);
@@ -50,6 +53,8 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
 
 function createTeeBoxMat(scene) {
     const teeGroup = new THREE.Group();
+    teeGroup.name = 'range-tee';
+    teeBoxGroup = teeGroup;
     const textureLoader = new THREE.TextureLoader();
 
     // 1. Manicured Natural Tee Deck (Blends naturally with organic fairway grass)
@@ -110,6 +115,8 @@ function createTeeBoxMat(scene) {
 
 function createDashedFairwayCenterline(scene) {
     const centerGroup = new THREE.Group();
+    centerGroup.name = 'fairway-centerline';
+    fairwayCenterline = centerGroup;
     
     // Crisp White Dashed Stripes along X=0 from Z=-2 to Z=-450
     const dashLength = 2.4; // 2.4 yards long
@@ -349,6 +356,12 @@ export function setTargetGreenVisible(visible) {
     if (activeTargetGreen) {
         activeTargetGreen.visible = Boolean(visible);
     }
+}
+
+export function setRangeDecorVisible(visible) {
+    const v = Boolean(visible);
+    if (teeBoxGroup) teeBoxGroup.visible = v;
+    if (fairwayCenterline) fairwayCenterline.visible = v;
 }
 
 function createMountainPanorama(scene) {

@@ -1,6 +1,6 @@
 // WebSocket Telemetry, Proximity, Real-time Fairway Width Slider & Minimap Radar
 
-import { setTargetDistance, setTargetGreenVisible } from './environment.js';
+import { setTargetDistance, setTargetGreenVisible, setRangeDecorVisible } from './environment.js';
 import { setFairwayWidth, getFairwayWidth } from './foliage.js';
 import { PressureTileRenderer } from './pressure_tiles.js';
 import { ShotHistory, isSmashClamped } from './shot_history.js';
@@ -10,9 +10,12 @@ import {
     METRICS, MIN_STRIP, MAX_STRIP, DEFAULT_STRIP,
     loadStripLayout, saveStripLayout, readMetric,
 } from './metrics.js';
-import { fetchBag, groupClubs, pillLabel, clubSubtitle } from './club_picker.js';
+import { fetchBag, groupClubs, pillLabel, clubSubtitle, postSelectedClub, inferCategory } from './club_picker.js';
 import { gridMode, GRID_ZONE_WIDTH_YARDS, GRID_DEFAULT_START_YARDS, isValidGridStartYards } from './grid_mode.js';
 import { setupGridModeUI, renderGridPicker } from './grid_ui.js';
+import { PuttSimulation, BALL_RADIUS, FT_TO_M } from './putt_physics.js';
+import { PuttScene } from './putt_scene.js';
+import { LadderDrill } from './putt_drills.js';
 
 export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController) {
     // 0. HUD scale wrapper
@@ -889,6 +892,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         return val ?? fallback;
     }
 
+    function isPutterClub(name) {
+        const n = (name || '').trim();
+        if (!n) return false;
+        if (n.toUpperCase() === 'PT') return true;
+        return inferCategory(n) === 'Putter';
+    }
+
     function extractShotTelemetry(msg) {
         if (!msg) return null;
         const raw = msg.data || msg.shot || msg;
@@ -909,12 +919,17 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             ballSpeed = parseFloat(raw.ball_speed);
         }
 
-        if (isNaN(ballSpeed) || ballSpeed < 5.0) return null;
+        const shotClubEarly = raw.club || ogc.club || '';
+        const puttLike = isPutterClub(shotClubEarly)
+            || !!(manualClub && isPutterClub(manualClub.name));
+        // Range shots below 5 mph are noise. Putts are not — a 10 ft stimp-10
+        // roll is ~4 mph, so the floor would drop real PT shots.
+        if (isNaN(ballSpeed) || ballSpeed < (puttLike ? 0.15 : 5.0)) return null;
 
         // Launch Angles & Spin
-        const vla = parseFloat(raw.vertical_launch_angle_degrees || us.vert_launch_angle_deg || raw.launch_angle || 14.0);
+        const vla = parseFloat(raw.vertical_launch_angle_degrees || us.vert_launch_angle_deg || raw.launch_angle || (puttLike ? 0.0 : 14.0));
         const hla = parseFloat(raw.horizontal_launch_angle_degrees || us.horiz_launch_angle_deg || raw.hla || 0.0);
-        const totalSpin = parseFloat(raw.total_spin_rpm || ogc.total_spin_rpm || us.total_spin_rpm || raw.total_spin || 3000.0);
+        const totalSpin = parseFloat(raw.total_spin_rpm || ogc.total_spin_rpm || us.total_spin_rpm || raw.total_spin || (puttLike ? 0.0 : 3000.0));
         const spinAxis = parseFloat(raw.spin_axis_degrees || ogc.spin_axis_degrees || us.spin_axis_deg || raw.spin_axis || 0.0);
         const sidespin = parseFloat(ogc.sidespin_rpm || raw.sidespin_rpm || raw.sidespin || (Math.sin(spinAxis * Math.PI / 180) * totalSpin));
         const backspin = parseFloat(ogc.backspin_rpm || raw.backspin_rpm || raw.backspin || (Math.cos(spinAxis * Math.PI / 180) * totalSpin));
@@ -1311,12 +1326,17 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         applyClubChip();
         renderClubSheet();
         closeClubSheet();
+        if (club && club.name) {
+            postSelectedClub(club.name);
+        }
+        syncPuttingMode(club && club.name);
     }
 
     function clearManualClub() {
         manualClub = null;
         applyClubChip();
         renderClubSheet();
+        exitPuttingMode();
         // Fall back to whatever the last shot reported.
         if (lastShotTelemetry && hudClubName) {
             hudClubName.innerText = lastShotTelemetry.club || '--';
@@ -1685,6 +1705,12 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             shotData = { ...shotData, club: manualClub.name };
         }
 
+        if (isPutterClub(shotData.club)) {
+            firePutt(shotData, opts);
+            return;
+        }
+        if (puttingActive) exitPuttingMode();
+
         lastShotTelemetry = shotData;
         lastShotId = shotData.shotId;
 
@@ -1724,6 +1750,316 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         cameraController.setLandingPosition(new THREE.Vector3(finalPt.x, 0.05, finalPt.z));
         ball.launch(trajectory, shotData.clubColor);
     }
+
+    // Putting practice (SHA-55 T4). PT-only branch; non-PT uses the flight
+    // path above. Scene/physics live in putt_scene.js / putt_physics.js.
+    let puttingActive = false;
+    let puttScene = null;
+    let puttSim = null;
+    let puttStimp = 10;
+    let puttDistanceFt = 20;
+    const PUTT_STRIP = ['ballSpeed', 'hla', 'launch', 'faceToPath', 'total'];
+    let savedStripBeforePutt = null;
+    let puttAnnounced = false;
+    let puttHud = null;
+    let savedDistBadge = null;
+    let puttLadder = new LadderDrill();
+    let puttLadderOn = false;
+    const origBallUpdate = ball.update.bind(ball);
+    const origCamUpdate = cameraController.update.bind(cameraController);
+
+    function syncPuttingMode(clubName) {
+        if (isPutterClub(clubName)) enterPuttingMode();
+        else exitPuttingMode();
+    }
+
+    function ensurePuttScene() {
+        if (puttScene) return;
+        puttScene = new PuttScene(scene, { distanceFt: puttDistanceFt });
+        puttScene.group.visible = false;
+        puttSim = new PuttSimulation({
+            stimp: puttStimp,
+            distanceFt: puttDistanceFt,
+        });
+    }
+
+    function snapPuttCamera() {
+        const bp = ball && ball.mesh ? ball.mesh.position : null;
+        const z = bp ? bp.z : (puttSim ? puttSim.position.z : puttDistanceFt * FT_TO_M);
+        const y = bp ? Math.max(1.15, bp.y + 1.25) : 1.32;
+        cameraController.desiredPosition.set(0, y, z + 3.2);
+        cameraController.target.set(0, 0.08, 0);
+        cameraController.currentPosition.copy(cameraController.desiredPosition);
+        cameraController.camera.position.copy(cameraController.currentPosition);
+        cameraController.camera.lookAt(cameraController.target);
+    }
+
+    function snapRangeCamera() {
+        cameraController.desiredPosition.set(0, 1.75, 4.6);
+        cameraController.target.set(0, 1.10, -70);
+        cameraController.currentPosition.copy(cameraController.desiredPosition);
+        cameraController.camera.position.copy(cameraController.currentPosition);
+        cameraController.camera.lookAt(cameraController.target);
+    }
+
+    function enterPuttingMode() {
+        ensurePuttScene();
+        if (puttScene.ball) puttScene.ball.visible = false;
+        setTargetGreenVisible(false);
+        setRangeDecorVisible(false);
+        if (ball.tracerMesh) ball.tracerMesh.visible = false;
+        if (ball.landingRing) ball.landingRing.visible = false;
+        ensurePuttHud();
+        if (puttHud) puttHud.style.display = '';
+        puttScene.setDistanceFt(puttDistanceFt);
+        puttScene.setLadderVisible(puttLadderOn);
+        puttSim.setDistanceFt(puttDistanceFt);
+        puttSim.setGreen({ stimp: puttStimp });
+        if (puttLadderOn) applyLadderDistance(puttLadder.distanceFt);
+        resetPuttBall();
+        syncPuttBallMesh();
+        puttingActive = true;
+        snapPuttCamera();
+        puttScene.group.visible = true;
+        const badge = document.getElementById('target-dist-badge');
+        const unit = document.getElementById('target-dist-unit');
+        const title = document.getElementById('range-mode-title');
+        if (badge && savedDistBadge === null) savedDistBadge = { t: badge.innerText, u: unit ? unit.innerText : '', m: title ? title.innerText : '' };
+        if (badge) badge.innerText = String(puttDistanceFt);
+        if (unit) unit.innerText = 'ft to cup';
+        if (title) title.innerText = puttLadderOn ? 'Ladder' : 'Putting';
+        if (savedStripBeforePutt === null) savedStripBeforePutt = [...stripLayout];
+        stripLayout = [...PUTT_STRIP];
+        buildStrip();
+    }
+
+    function exitPuttingMode() {
+        if (!puttingActive) return;
+        if (puttScene) puttScene.group.visible = false;
+        puttingActive = false;
+        snapRangeCamera();
+        if (puttHud) puttHud.style.display = 'none';
+        setTargetGreenVisible(true);
+        setRangeDecorVisible(true);
+        if (ball.tracerMesh) ball.tracerMesh.visible = true;
+        const badge = document.getElementById('target-dist-badge');
+        const unit = document.getElementById('target-dist-unit');
+        const title = document.getElementById('range-mode-title');
+        if (savedDistBadge) {
+            if (badge) badge.innerText = savedDistBadge.t;
+            if (unit) unit.innerText = savedDistBadge.u;
+            if (title) title.innerText = savedDistBadge.m || 'Practice';
+            savedDistBadge = null;
+        } else if (title) {
+            title.innerText = 'Practice';
+        }
+        if (savedStripBeforePutt) {
+            stripLayout = [...savedStripBeforePutt];
+            savedStripBeforePutt = null;
+            buildStrip();
+        }
+    }
+
+    function applyLadderDistance(ft) {
+        puttDistanceFt = ft;
+        if (puttScene) puttScene.setDistanceFt(ft);
+        if (puttSim) puttSim.setDistanceFt(ft);
+        const distEl = puttHud && puttHud.querySelector('#putt-dist');
+        const distVal = puttHud && puttHud.querySelector('#putt-dist-val');
+        if (distEl) distEl.value = ft;
+        if (distVal) distVal.textContent = ft + ' ft';
+        const badge = document.getElementById('target-dist-badge');
+        if (puttingActive && badge) badge.innerText = String(ft);
+    }
+
+    function updateLadderHud(snap) {
+        const el = document.getElementById('putt-ladder-stats');
+        if (!el || !snap) return;
+        el.textContent = 'Lv ' + snap.level + ' · ' + snap.distanceFt + ' ft · '
+            + snap.makesAtLevel + '/2 · PB ' + snap.personalBest + ' ft'
+            + (snap.completed ? ' · done' : '');
+    }
+
+    function setLadderOn(on) {
+        puttLadderOn = !!on;
+        const distEl = puttHud && puttHud.querySelector('#putt-dist');
+        if (distEl) distEl.disabled = puttLadderOn;
+        if (puttScene) puttScene.setLadderVisible(puttLadderOn);
+        const stats = document.getElementById('putt-ladder-stats');
+        if (stats) stats.style.display = puttLadderOn ? '' : 'none';
+        const btn = document.getElementById('putt-ladder-btn');
+        if (btn) btn.textContent = puttLadderOn ? 'Ladder on' : 'Ladder off';
+        if (puttLadderOn) {
+            const snap = puttLadder.reset();
+            applyLadderDistance(snap.distanceFt);
+            updateLadderHud(snap);
+            resetPuttBall();
+        }
+        const title = document.getElementById('range-mode-title');
+        if (puttingActive && title) title.innerText = puttLadderOn ? 'Ladder' : 'Putting';
+    }
+
+    function resetPuttBall() {
+        if (!puttSim) return;
+        puttSim.isMoving = false;
+        puttSim.ballVelocity.set(0, 0, 0);
+        puttSim.ballSpin.set(0, 0, 0);
+        puttSim.setDistanceFt(puttDistanceFt);
+        puttSim.result = null;
+        puttSim.puttResultProcessed = false;
+        puttAnnounced = false;
+        syncPuttBallMesh();
+    }
+
+    function syncPuttBallMesh() {
+        if (!puttSim || !puttingActive) return;
+        const p = puttSim.position;
+        const visualR = (ball.visualRadius != null) ? ball.visualRadius : 0.055;
+        const x = puttSim.isMoving ? p.x : 0;
+        const y = puttScene.heightAt(x, p.z) + visualR;
+        ball.mesh.position.set(x, y, p.z);
+        if (puttScene.ball) puttScene.ball.position.set(x, BALL_RADIUS, p.z);
+        ball.mesh.visible = true;
+        if (ball.tracerMesh) ball.tracerMesh.visible = false;
+        if (ball.landingRing) ball.landingRing.visible = false;
+    }
+
+    function firePutt(shotData, opts = {}) {
+        enterPuttingMode();
+        lastShotTelemetry = shotData;
+        lastShotId = shotData.shotId;
+        updateHUDTelemetry(shotData);
+        puttSim.setGreen({ stimp: puttStimp });
+        resetPuttBall();
+        puttSim.hitBall(
+            shotData.ballSpeed,
+            shotData.backspin || 0,
+            shotData.sidespin || 0,
+            shotData.horizontalLaunchAngle || 0
+        );
+        syncPuttBallMesh();
+    }
+
+    function ensurePuttHud() {
+        if (puttHud) return;
+        puttHud = document.createElement('div');
+        puttHud.id = 'putt-hud';
+        puttHud.className = 'glass';
+        puttHud.style.cssText = 'position:absolute;right:18px;bottom:110px;z-index:26;padding:12px 14px;width:220px;font-size:12px;';
+        puttHud.innerHTML = [
+            '<div style="font-weight:700;letter-spacing:.04em;margin-bottom:8px;color:var(--accent-text)">PUTTING</div>',
+            sliderRow('putt-dist', 'Distance', 2, 40, 2, puttDistanceFt, 'ft'),
+            sliderRow('putt-stimp', 'Stimp', 7, 14, 1, puttStimp, ''),
+            '<button id="putt-random" type="button" style="margin-top:8px;width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);cursor:pointer;">Random distance</button>',
+            '<button id="putt-ladder-btn" type="button" style="margin-top:6px;width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);cursor:pointer;">Ladder off</button>',
+            '<div id="putt-ladder-stats" style="margin-top:6px;color:var(--text-2);font-variant-numeric:tabular-nums;">Lv 1 · 2 ft · 0/2 · PB 2 ft</div>',
+        ].join('');
+        const wrap = document.getElementById('hud-scale');
+        (wrap || document.body).appendChild(puttHud);
+
+        bindSlider('putt-dist', v => {
+            if (puttLadderOn) return;
+            puttDistanceFt = v;
+            if (puttScene) puttScene.setDistanceFt(v);
+            if (puttSim) puttSim.setDistanceFt(v);
+            resetPuttBall();
+            const badge = document.getElementById('target-dist-badge');
+            if (puttingActive && badge) badge.innerText = String(v);
+        });
+        bindSlider('putt-stimp', v => {
+            const intV = Math.round(v);
+            puttStimp = intV;
+            if (puttSim) puttSim.setGreen({ stimp: intV });
+        });
+        const rand = document.getElementById('putt-random');
+        if (rand) {
+            rand.addEventListener('click', () => {
+                if (!puttScene) return;
+                const p = puttScene.randomize();
+                if (!puttLadderOn) {
+                    puttDistanceFt = p.distanceFt;
+                    puttHud.querySelector('#putt-dist').value = p.distanceFt;
+                    puttHud.querySelector('#putt-dist-val').textContent = p.distanceFt + ' ft';
+                    const badge = document.getElementById('target-dist-badge');
+                    if (badge) badge.innerText = String(puttDistanceFt);
+                    if (puttSim) puttSim.setDistanceFt(puttDistanceFt);
+                }
+                resetPuttBall();
+            });
+        }
+        const ladderBtn = document.getElementById('putt-ladder-btn');
+        if (ladderBtn) {
+            ladderBtn.addEventListener('click', () => setLadderOn(!puttLadderOn));
+        }
+        setLadderOn(puttLadderOn);
+    }
+
+    function sliderRow(id, label, min, max, step, value, unit) {
+        return `<label style="display:block;margin:6px 0 2px;color:var(--text-2)">${label} <span id="${id}-val">${value}${unit ? ' ' + unit : ''}</span></label>`
+            + `<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%">`;
+    }
+
+    function bindSlider(id, onChange) {
+        const el = document.getElementById(id);
+        const val = document.getElementById(id + '-val');
+        if (!el) return;
+        el.addEventListener('input', () => {
+            const v = parseFloat(el.value);
+            if (val) {
+                const unit = id === 'putt-dist' ? ' ft' : '';
+                val.textContent = (id === 'putt-stimp' ? Math.round(v) : v) + unit;
+            }
+            onChange(v);
+        });
+    }
+
+    ball.update = function (delta) {
+        if (puttingActive && puttSim) {
+            if (puttSim.isMoving) puttSim.updatePhysics(delta);
+            syncPuttBallMesh();
+            if (!puttAnnounced && puttSim.result) {
+                puttAnnounced = true;
+                const result = puttSim.result;
+                if (puttLadderOn) {
+                    const snap = puttLadder.applyResult(result);
+                    applyLadderDistance(snap.distanceFt);
+                    updateLadderHud(snap);
+                }
+                const title = document.getElementById('range-mode-title');
+                if (title) title.innerText = result === 'make' ? 'Holed' : 'Miss';
+                setTimeout(() => {
+                    if (puttingActive) {
+                        resetPuttBall();
+                        const t = document.getElementById('range-mode-title');
+                        if (t) t.innerText = puttLadderOn ? 'Ladder' : 'Putting';
+                    }
+                }, result === 'make' ? 1600 : 1200);
+            }
+            return;
+        }
+        origBallUpdate(delta);
+    };
+
+    cameraController.update = function (deltaTime) {
+        if (puttingActive) {
+            const bp = ball.mesh.position;
+            const targetY = Math.max(1.15, bp.y + 1.25);
+            cameraController.desiredPosition.set(0, targetY, bp.z + 3.2);
+            cameraController.target.set(0, 0.08, 0);
+            if (puttSim && puttSim.isMoving) {
+                const lerpFactor = Math.min(1.0, 5.0 * deltaTime);
+                cameraController.currentPosition.lerp(cameraController.desiredPosition, lerpFactor);
+            } else {
+                cameraController.currentPosition.copy(cameraController.desiredPosition);
+            }
+            cameraController.camera.position.copy(cameraController.currentPosition);
+            cameraController.camera.lookAt(cameraController.target);
+            return;
+        }
+        origCamUpdate(deltaTime);
+    };
+
+    ensurePuttScene();
 
     // 6. Realistic Shot Generator for Demo Shots
     function generateRealisticShotForDistance(targetYds) {
@@ -2162,12 +2498,29 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                         if (rangeHeatmapCanvas) pressureRenderer.renderHeatmap(rangeHeatmapCanvas, p);
                         if (rangeCopCanvas) pressureRenderer.renderCOPDot(rangeCopCanvas, p);
                     }
-                } else if (msg.type === 'init' && msg.data) {
-                    const parsed = extractShotTelemetry(msg.data);
-                    if (parsed) {
-                        lastShotTelemetry = parsed;
-                        lastShotId = parsed.shotId;
-                        updateHUDTelemetry(parsed);
+                } else if (msg.type === 'club' && msg.club) {
+                    if (!manualClub || manualClub.name !== msg.club) {
+                        const found = bagClubs.find(c => c.name === msg.club);
+                        manualClub = found || { name: msg.club };
+                        applyClubChip();
+                        renderClubSheet();
+                        syncPuttingMode(msg.club);
+                    }
+                } else if (msg.type === 'init') {
+                    if (msg.club && !manualClub) {
+                        const found = bagClubs.find(c => c.name === msg.club);
+                        manualClub = found || { name: msg.club };
+                        applyClubChip();
+                        renderClubSheet();
+                        syncPuttingMode(msg.club);
+                    }
+                    if (msg.data) {
+                        const parsed = extractShotTelemetry(msg.data);
+                        if (parsed) {
+                            lastShotTelemetry = parsed;
+                            lastShotId = parsed.shotId;
+                            updateHUDTelemetry(parsed);
+                        }
                     }
                     loadRangeIndex();
                 }
@@ -2219,6 +2572,19 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     }
     setInterval(pollShotAPI, 2500);
+
+    fetchBag().then(res => {
+        if (!res.error && res.clubs && res.clubs.length > 0) {
+            bagClubs = res.clubs;
+            if (manualClub) {
+                const enriched = bagClubs.find(c => c.name === manualClub.name);
+                if (enriched) {
+                    manualClub = enriched;
+                    applyClubChip();
+                }
+            }
+        }
+    }).catch(() => {});
 
     loadRangeIndex();
     connectWS();

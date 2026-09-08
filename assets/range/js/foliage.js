@@ -303,7 +303,7 @@ function generatePlacements() {
                     species,
                     x: localX,
                     y: 0,
-                    z: z + (rand() * 3.6 - 1.8),
+                    z: Math.max(-460.0, z + (rand() * 3.6 - 1.8)),
                     rotY: rand() * Math.PI * 2,
                     // Small random lean -- perfectly vertical trees look CG.
                     tiltX: (rand() - 0.5) * 0.055,
@@ -316,14 +316,17 @@ function generatePlacements() {
     }
 
     // 3. Deep mountain-base backing forest.
+    // Hard-clamped to z >= -460 so no tree ever intersects or clips through
+    // the mountain panorama mesh at z = -470 (minimum 10m buffer guaranteed).
     for (let x = -220; x <= 220; x += 7.0) {
         const depth = 3;
         for (let d = 0; d < depth; d++) {
+            const rawZ = -446.0 - d * 5.0 - rand() * 3.5;
             placements.back.push({
                 species: pickSpecies(),
                 x: x + (rand() * 4.0 - 2.0),
                 y: 0,
-                z: -455 - d * 8.5 - rand() * 6,
+                z: Math.max(-460.0, rawZ),
                 rotY: rand() * Math.PI * 2,
                 tiltX: (rand() - 0.5) * 0.04,
                 tiltZ: (rand() - 0.5) * 0.04,
@@ -384,8 +387,9 @@ function buildInstancedForest(prefabs, usable) {
 
             parts.forEach((part, partIdx) => {
                 const inst = new THREE.InstancedMesh(part.geometry, part.material, items.length);
-                inst.castShadow = true;
-                inst.receiveShadow = true;
+                const isLod3 = lod === 'LOD3';
+                inst.castShadow = !isLod3;
+                inst.receiveShadow = !isLod3;
                 // Trees never move as a group; skip per-frame matrix recompute.
                 inst.instanceMatrix.setUsage(THREE.StaticDrawUsage);
 
@@ -451,17 +455,23 @@ function patchWindShaders() {
                     '#include <common>\nuniform float uWindTime;\nuniform float uTreeHeight;')
                 .replace('#include <begin_vertex>', `
                     #include <begin_vertex>
+                    // Camera-distance falloff: compute tree instance base in view space.
+                    #ifdef USE_INSTANCING
+                        vec4 viewBase = modelViewMatrix * (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0));
+                    #else
+                        vec4 viewBase = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+                    #endif
+                    float distToCam = length(viewBase.xyz);
+                    // Full sway near the player (0-60m), smoothly tapering to 0 by 130m.
+                    // Eliminates subpixel alpha-test crawling and shimmering on distant trees.
+                    float distFade = 1.0 - smoothstep(60.0, 130.0, distToCam);
+
                     // Sway grows with height above the baked base, normalised
                     // against this mesh's own height (species differ), so a 4m
                     // shrub and a 13.5m fir sway proportionally rather than by
                     // the same absolute distance.
-                    //
-                    // 0.55 gives roughly a half-metre of travel at the crown of
-                    // a 13.5m fir. Measured: at 0.16 the motion moved only
-                    // ~0.04% of treeline pixels between frames -- invisible from
-                    // the tee, i.e. shader cost for nothing.
                     float swayH = clamp(max(transformed.y, 0.0) / uTreeHeight, 0.0, 1.0);
-                    float swayAmt = swayH * swayH * 0.55 * uTreeHeight / 13.5;
+                    float swayAmt = swayH * swayH * 0.55 * (uTreeHeight / 13.5) * distFade;
                     #ifdef USE_INSTANCING
                         float instPhase = instanceMatrix[3][0] * 0.35
                                         + instanceMatrix[3][2] * 0.21;
