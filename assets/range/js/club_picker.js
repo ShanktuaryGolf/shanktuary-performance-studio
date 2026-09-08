@@ -118,3 +118,33 @@ export async function fetchBag() {
         return { clubs: [], is_left_handed: false, error: String(e && e.message || e) };
     }
 }
+
+/**
+ * Notify the server of a club selection from the range.
+ *
+ * Degrades gracefully: returns { ok: true/false, ... } and logs warnings on
+ * failure, but does not throw so local range selection is never broken.
+ */
+export async function postSelectedClub(clubName) {
+    if (!clubName || typeof clubName !== 'string') {
+        return { ok: false, error: 'Invalid club name' };
+    }
+    try {
+        const res = await fetch('/api/club', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ club: clubName.trim() }),
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            console.warn(`[!] /api/club failed: HTTP ${res.status}`, errText);
+            return { ok: false, status: res.status, error: errText };
+        }
+        const data = await res.json().catch(() => ({}));
+        return { ok: true, data };
+    } catch (err) {
+        console.warn('[!] Error posting club selection to /api/club:', err);
+        return { ok: false, error: String(err && err.message || err) };
+    }
+}
+

@@ -13,7 +13,9 @@ Based on the proven architecture from ShanktuaryGolf/SwingLab:
   - Serves /api/layout                   -> GET/POST saved layout preferences, widget positions, and divot physical calibration
   - Serves /api/shot                     -> GET last shot payload
   - Serves /api/index                    -> GET Shanktuary Index summary by club
+  - Serves /api/club                     -> POST the club selected on the range (must already be in My Bag)
   - Broadcasts live shot events to connected OBS browser sources over WebSocket
+    (message types: init, shot, pressure, shot_pressure, layout_update, club)
 """
 
 import base64
@@ -152,6 +154,11 @@ class OBSState:
         # on the pressure thread, so this is the only path by which the
         # desktop app can learn about a trace for a shot it has already saved.
         self.trace_listeners = []
+        # Club selected on the range (or None). In-process listeners (desktop
+        # app) get the name string; browsers get a `club` WS message and the
+        # current value on `init` so a late join agrees with the picker.
+        self.selected_club = None
+        self.club_listeners = []
         # Serializes writes to each WS client socket so concurrent broadcasts
         # can't interleave partial frames; held only around socket I/O and
         # NEVER while holding self.lock (a stalled client must not wedge the
@@ -271,6 +278,35 @@ class OBSState:
             except Exception as e:
                 print(f"[!] Error reading bag from {path}: {e}")
         return {"clubs": [], "is_left_handed": False}
+
+    def set_selected_club(self, club):
+        """Validate and apply a range club selection.
+
+        Returns ``(payload, http_code)``. Unknown or malformed names are
+        rejected with 400 and **do not** change state, notify listeners, or
+        broadcast — a bad payload must not move the desktop app's club.
+        """
+        if not isinstance(club, str) or not club.strip():
+            return (
+                {"status": "error", "message": "club must be a non-empty string"},
+                400,
+            )
+        club = club.strip()
+        names = {c.get("name") for c in self.load_bag().get("clubs", []) if c.get("name")}
+        if club not in names:
+            return (
+                {"status": "error", "message": "club not in bag"},
+                400,
+            )
+        with self.lock:
+            self.selected_club = club
+        for cb in list(self.club_listeners):
+            try:
+                cb(club)
+            except Exception as e:
+                print(f"[!] Club listener error: {e}")
+        self.broadcast({"type": "club", "club": club})
+        return {"status": "ok", "club": club}, 200
 
     def load_index(self):
         """Read shots from session history and compute the player shanktuary index.
@@ -1159,6 +1195,10 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(obs_state.load_layout())
         elif parsed_path == "/api/bag":
             self.send_json(obs_state.load_bag())
+        elif parsed_path == "/api/club":
+            with obs_state.lock:
+                club = obs_state.selected_club
+            self.send_json({"club": club})
         elif parsed_path == "/api/shot":
             # Aim-corrected: the browser overlay must agree with the desktop
             # app's shot table about which way the ball started.
@@ -1293,6 +1333,23 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"status": "ok" if success else "error"})
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
+        elif parsed_path == "/api/club":
+            body = self.read_post_body()
+            if body is None:
+                return
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json({"status": "error", "message": "invalid JSON"}, code=400)
+                return
+            if not isinstance(data, dict):
+                self.send_json(
+                    {"status": "error", "message": "body must be a JSON object"},
+                    code=400,
+                )
+                return
+            payload, code = obs_state.set_selected_club(data.get("club"))
+            self.send_json(payload, code=code)
         elif parsed_path == "/api/pressure/tare":
             ok = pressure_manager.tare()
             self.send_json({"status": "ok" if ok else "error"})
@@ -1441,11 +1498,14 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
         current_shot = obs_state.latest_shot_for_display()
+        with obs_state.lock:
+            current_club = obs_state.selected_club
 
         init_msg = json.dumps({
             "type": "init",
             "layout": obs_state.load_layout(),
-            "data": current_shot
+            "data": current_shot,
+            "club": current_club,
         })
         # Send init BEFORE registering, under send_lock, so no broadcast can
         # arrive ahead of (or interleave with) the init frame.

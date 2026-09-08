@@ -181,6 +181,11 @@ shot_queue = queue.Queue()
 # self.sessions from the capture thread would race json.dump().
 pressure_trace_queue = queue.Queue()
 
+# Club picks from the WebGPU range arrive on the HTTP/WS thread via
+# obs_state.club_listeners. Queue them here and apply on the Tk thread —
+# never touch current_club or draw_screen from the listener itself.
+club_select_queue = queue.Queue()
+
 # --- Official OpenLaunch Nova Zero-Config Auto-Discovery Engine ---
 def discover_nova_device():
     # 1. Environment Variable Override
@@ -821,6 +826,15 @@ class ShanktuaryApp:
             )
         except Exception as e:
             print(f"[!] Could not register pressure trace listener: {e}")
+
+        # Range club picker → desktop. Listener only enqueues; poll_queue
+        # applies on the Tk thread. Do not take obs_state.lock in the cb.
+        try:
+            obs_server.obs_state.club_listeners.append(
+                lambda club: club_select_queue.put(club)
+            )
+        except Exception as e:
+            print(f"[!] Could not register club listener: {e}")
 
     def set_aim_offset(self, offset_deg):
         """Set and persist the aim offset, clamped to the sane range."""
@@ -2742,6 +2756,12 @@ class ShanktuaryApp:
         except queue.Empty:
             pass
 
+        try:
+            while True:
+                self.apply_range_club(club_select_queue.get_nowait())
+        except queue.Empty:
+            pass
+
         # Repaint when hardware connection state changes, not only when a
         # shot lands. The worker threads update nova_status/gspro_status from
         # the background, and Nova typically connects ~0.5s AFTER the first
@@ -2763,6 +2783,26 @@ class ShanktuaryApp:
             pass
 
         self.root.after(100, self.poll_queue)
+
+    def apply_range_club(self, club):
+        """Apply a club selected on the range. Tk thread only.
+
+        Server already bag-checked the name. We still ignore anything that
+        is not in this process's club list so a stale range pick cannot
+        invent a phantom current_club. No-op if already selected.
+        """
+        if not isinstance(club, str) or not club.strip():
+            return
+        club = club.strip()
+        bag_names = [c.get("name") for c in getattr(self, "bag", []) or []]
+        if club not in self.clubs and club not in bag_names:
+            return
+        if club == self.current_club:
+            return
+        self.current_club = club
+        self.copy_feedback = f"✓ Selected {club}"
+        self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
 
     def poll_pressure_traces(self):
         """Attach completed pressure captures to their shots.
