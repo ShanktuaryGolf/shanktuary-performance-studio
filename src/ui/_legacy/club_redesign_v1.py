@@ -7,9 +7,6 @@ certainty explicit.
 
 import math
 
-import overview_redesign_v12 as shot_v12
-
-import shanktuary_performance_studio as studio
 import theme
 
 
@@ -101,37 +98,11 @@ def draw_top_metric_toolbar(app, avail_w, ball_speed, club_speed, smash, carry,
 
 
 def _impact_state(app):
-    shot = app.current_shot or {}
-    ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
-    impact = (
-        shot.get("face_impact") or shot.get("impact_location") or
-        ogc.get("face_impact") or ogc.get("impact_location") or
-        ogc.get("face_contact") or {}
-    ) if isinstance(shot, dict) else {}
+    from src.analytics.strike import contact_location
 
-    measured = False
-    if isinstance(impact, dict) and impact:
-        measured = any(k in impact for k in (
-            "lateral_offset_mm", "heel_toe_mm", "horizontal_offset_mm", "x_mm",
-            "vertical_offset_mm", "high_low_mm", "y_mm",
-        ))
-
-    conf = app.compute_smash_confidence(
-        shot.get("ball_speed_meters_per_second") if isinstance(shot, dict) else None,
-        shot.get("vertical_launch_angle_degrees") if isinstance(shot, dict) else None,
-        shot.get("total_spin_rpm") if isinstance(shot, dict) else None,
-    )
-    magnitude_known = not bool(conf.get("clamped"))
-    hx, vy = shot_v12._impact_offsets_mm(app)
-    dir_known = math.hypot(hx, vy) >= 0.5
-
-    if measured:
-        return "measured", hx, vy
-    if dir_known and magnitude_known:
-        return "estimated", hx, vy
-    if dir_known:
-        return "direction", hx, vy
-    return "unknown", 0.0, 0.0
+    contact = contact_location(app.current_shot)
+    return ("reported" if contact.available else "unknown",
+            contact.horizontal_mm, contact.vertical_mm)
 
 
 def _direction_text(hx, vy):
@@ -170,7 +141,6 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
     cap_f = (theme.ui_font(), max(7, int(8 * fs)))
     val_f = (theme.ui_font(), max(9, int(12 * fs)))
     small_bold = (theme.ui_font(), max(7, int(8 * fs)), "bold")
-    body_f = (theme.ui_font(), max(8, int(9 * fs)))
 
     gut_l = offset_x + int(18 * fs)
     gut_r = mid_x - int(18 * fs)
@@ -280,129 +250,7 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                   text=f"{int(total_spin)} / {int(backspin)} rpm",
                   fill=theme.TEXT, font=val_f, anchor="ne")
 
-    # --- Q4: certainty-aware strike state. Never plot a precise-looking point
-    # when we cannot locate it.
-    q4_top, q4_bot = mid_y, h - 10
-    q4_cx = mid_x + quad_w / 2
-    q4_cy = q4_top + quad_h / 2
-    c.create_rectangle(mid_x + 2, q4_top + 2,
-                       offset_x + avail_w - 2, q4_bot - 2,
-                       fill=theme.BG, outline="")
-
-    state, hx, vy = _impact_state(app)
-    vertical, horizontal = _direction_text(hx, vy)
-    state_label = {
-        "measured": "MEASURED",
-        "estimated": "ESTIMATE",
-        "direction": "DIRECTION ESTIMATE",
-        "unknown": "UNAVAILABLE",
-    }[state]
-    state_col = theme.ACCENT_TEXT if state == "measured" else (
-        theme.WARN if state in ("estimated", "direction") else theme.TEXT_3)
-
-    cap_y = q4_top + int(16 * fs)
-    cap_id = c.create_text(gut_l3, cap_y, text="IMPACT LOCATION",
-                           fill=theme.TEXT_3, font=cap_f, anchor="w")
-    # Measure the caption instead of assuming its width. A fixed 118px offset
-    # overlaps "IMPACT LOCATION" as soon as the font or scale changes -- which
-    # is exactly the trap production documents at the same spot.
-    cap_bb = c.bbox(cap_id)
-    chip_x = (cap_bb[2] + int(12 * fs)) if cap_bb else gut_l3 + int(118 * fs)
-
-    # Size the chip to the LABEL, not to a hardcoded width. "DIRECTION
-    # ESTIMATE" needs ~258px but the old constant reserved 116*fs (~214px),
-    # so the centred text spilled ~22px past each end of its own badge --
-    # eating the gap and colliding with "IMPACT LOCATION" on the left while
-    # hanging outside the box on the right.
-    probe = c.create_text(-4000, -4000, text=state_label, font=small_bold,
-                          anchor="w")
-    probe_bb = c.bbox(probe)
-    c.delete(probe)
-    label_w = (probe_bb[2] - probe_bb[0]) if probe_bb else int(62 * fs)
-    pad_x = int(10 * fs)
-    chip_w = label_w + pad_x * 2
-
-    c.create_rectangle(chip_x, cap_y - int(9 * fs),
-                       chip_x + chip_w,
-                       cap_y + int(10 * fs), fill=theme.SURFACE_2, outline="")
-    c.create_text(chip_x + chip_w // 2, cap_y,
-                  text=state_label, fill=state_col, font=small_bold,
-                  anchor="center")
-
-    info_y = q4_top + int(42 * fs)
-    if state == "unknown":
-        c.create_text(gut_l3, info_y, text="Location unavailable",
-                      fill=theme.TEXT, font=(theme.ui_font(), max(10, int(13 * fs)), "bold"),
-                      anchor="nw")
-        c.create_text(gut_l3, info_y + int(27 * fs),
-                      text="No reliable strike direction from this shot",
-                      fill=theme.TEXT_3, font=body_f, anchor="nw")
-    else:
-        if state in ("measured", "estimated"):
-            v_txt = f"{vertical} · {abs(vy):.1f} mm" if abs(vy) > 0.5 else vertical
-            h_txt = f"{horizontal} · {abs(hx):.1f} mm" if abs(hx) > 0.5 else horizontal
-        else:
-            v_txt, h_txt = vertical, horizontal
-        c.create_text(gut_l3, info_y, text="VERTICAL", fill=theme.TEXT_3,
-                      font=cap_f, anchor="nw")
-        c.create_text(gut_l3, info_y + int(16 * fs), text=v_txt,
-                      fill=theme.TEXT, font=val_f, anchor="nw")
-        c.create_text(gut_l3, info_y + int(43 * fs), text="HORIZONTAL",
-                      fill=theme.TEXT_3, font=cap_f, anchor="nw")
-        c.create_text(gut_l3, info_y + int(59 * fs), text=h_txt,
-                      fill=theme.TEXT, font=val_f, anchor="nw")
-
-    face_h = int(126 * scale)
-    face_img = app.get_scaled_club_asset(
-        studio.FACE_PATH, face_h, mirror=getattr(app, "is_left_handed", False))
-    if face_img:
-        c.create_image(q4_cx + int(32 * scale), q4_cy + int(2 * scale),
-                       image=face_img, anchor="c")
-
-    face_cx = q4_cx + int(32 * scale)
-    sweet_dx = -43.5 / 220.0
-    sweet_dy = -40.0 / 220.0
-    center_x = face_cx + (-int(sweet_dx * face_h) if getattr(app, "is_left_handed", False)
-                          else int(sweet_dx * face_h))
-    center_y = q4_cy + int(2 * scale) + int(sweet_dy * face_h)
-    cross_len = int(14 * scale)
-    c.create_line(center_x - cross_len, center_y, center_x + cross_len, center_y,
-                  fill=theme.GUIDE, width=1, dash=(2, 2))
-    c.create_line(center_x, center_y - cross_len, center_x, center_y + cross_len,
-                  fill=theme.GUIDE, width=1, dash=(2, 2))
-
-    if state != "unknown":
-        target_w = 290 * (face_h / 220.0)
-        scale_px = ((167.0 - 36.0) / 290.0 * target_w) / 52.0
-        dx_px = -int(hx * scale_px) if getattr(app, "is_left_handed", False) else int(hx * scale_px)
-        impact_x = center_x + dx_px
-        impact_y = center_y - int(vy * scale_px)
-        col = theme.ACCENT_TEXT if state == "measured" else theme.WARN
-        if state == "measured":
-            r = int(9 * scale)
-            c.create_oval(impact_x - r, impact_y - r, impact_x + r, impact_y + r,
-                          fill="", outline=col, width=2)
-        else:
-            r = int((12 if state == "estimated" else 18) * scale)
-            c.create_oval(impact_x - r, impact_y - r, impact_x + r, impact_y + r,
-                          fill="", outline=col, width=1, dash=(4, 3))
-        dot = max(3, int(3.2 * scale))
-        c.create_oval(impact_x - dot, impact_y - dot, impact_x + dot, impact_y + dot,
-                      fill=col, outline="")
-
-    if state == "measured":
-        foot = f"{math.hypot(hx, vy):.1f} mm from centre"
-    elif state == "estimated":
-        foot = f"~{math.hypot(hx, vy):.0f} mm from centre · estimated"
-    elif state == "direction":
-        foot = "Direction estimate only · distance not known"
-    else:
-        foot = "No face-location estimate shown"
-    c.create_text(gut_l3, q4_bot - int(30 * fs), text=foot,
-                  fill=theme.TEXT_3, font=cap_f, anchor="w")
-    c.create_text(gut_l3, q4_bot - int(14 * fs),
-                  text="Nova measures ball flight, not face contact",
-                  fill=theme.TEXT_3, font=cap_f, anchor="w")
+    # Q4 is owned by the shared production contact painter. Do not repaint it.
 
     # Redraw quadrant dividers because Q3/Q4 overlays intentionally covered
     # their interior edges.

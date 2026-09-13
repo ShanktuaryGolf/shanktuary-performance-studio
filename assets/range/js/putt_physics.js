@@ -20,6 +20,11 @@ export const STOP_SPEED = 0.001;
 export const FAST_BALL_SPEED = 2.0;
 export const MPH_TO_MS = 0.44704;
 export const FT_TO_M = 0.3048;
+// Kinetic friction while the contact point is sliding. Rolling uses the
+// GSPro-matched deceleration instead. Sphere inertia I = (2/5) m R².
+export const SLIDE_MU = 0.2;
+export const SLIP_EPS = 0.02;
+const SPHERE_I_FACTOR = 0.4;
 
 // GSPro putting distance coefficients: distance(ft) = a*v² + b*v + c (v in mph)
 // Derived from GSPro putting chart — matches every row to <0.1 ft
@@ -180,6 +185,55 @@ export class PuttSimulation {
         this.result = null; // 'make' | 'miss' | null
         this.tempSpinEffect = new Vec3(0, 0, 0);
         this.tempNormal = new Vec3(0, 0, 0);
+        this.slideMu = SLIDE_MU;
+        this.skidDistanceM = 0;
+        this.timeToFullRollS = 0;
+        this.totalRollM = 0;
+        this.fullRollReached = false;
+    }
+
+    resetRollTracking() {
+        this.skidDistanceM = 0;
+        this.timeToFullRollS = 0;
+        this.totalRollM = 0;
+        this.fullRollReached = false;
+    }
+
+    // Horizontal slip speed at the turf: |v - ω × n R|.
+    contactSlip() {
+        const r = this.ballRadius;
+        const sx = this.ballVelocity.x + this.ballSpin.z * r;
+        const sz = this.ballVelocity.z - this.ballSpin.x * r;
+        return Math.hypot(sx, sz);
+    }
+
+    lockPureRoll() {
+        const r = this.ballRadius;
+        if (r <= 0) return;
+        this.ballSpin.x = this.ballVelocity.z / r;
+        this.ballSpin.z = -this.ballVelocity.x / r;
+    }
+
+    applySlidingFriction(deltaTime) {
+        const r = this.ballRadius;
+        const slipX = this.ballVelocity.x + this.ballSpin.z * r;
+        const slipZ = this.ballVelocity.z - this.ballSpin.x * r;
+        const slip = Math.hypot(slipX, slipZ);
+        const aMag = this.slideMu * this.gravity;
+        const slipRate = aMag * (1 + 1 / SPHERE_I_FACTOR);
+        if (slip <= SLIP_EPS || slipRate * deltaTime >= slip - SLIP_EPS) {
+            this.lockPureRoll();
+            this.fullRollReached = true;
+            return;
+        }
+        const inv = 1 / slip;
+        const ax = -aMag * slipX * inv;
+        const az = -aMag * slipZ * inv;
+        this.ballVelocity.x += ax * deltaTime;
+        this.ballVelocity.z += az * deltaTime;
+        const invIR = (1 / SPHERE_I_FACTOR) / r;
+        this.ballSpin.x += (-az * invIR) * deltaTime;
+        this.ballSpin.z += (ax * invIR) * deltaTime;
     }
 
     setGreen({ stimp } = {}) {
@@ -229,6 +283,7 @@ export class PuttSimulation {
             -sidespin * Math.PI / 30  // sidespin
         );
 
+        this.resetRollTracking();
         this.isMoving = true;
         this.puttResultProcessed = false;
         this.result = null;
@@ -242,7 +297,10 @@ export class PuttSimulation {
         const speedMS = speedMPH * 0.44704;
         this.currentPuttDeceleration = computePuttDeceleration(speedMPH, this.currentStimp);
         this.ballVelocity.set(0, 0, speedMS);
-        this.ballSpin.set(0, 0, 0);
+        // Already rolling: stimpmeter-style QA must still match the GSPro curve.
+        this.ballSpin.set(speedMS / this.ballRadius, 0, 0);
+        this.resetRollTracking();
+        this.fullRollReached = true;
         this.isMoving = true;
         this.puttResultProcessed = false;
         this.result = null;
@@ -260,12 +318,21 @@ export class PuttSimulation {
         const tempNormal = this.tempNormal;
         const greenRadius = this.greenRadius;
 
-        // Apply GSPro-matched per-putt deceleration
         const speed = ballVelocity.length();
         if (speed > 0.001) {
-            const frictionForce = currentPuttDeceleration * deltaTime;
-            const frictionDecel = Math.min(frictionForce / speed, 1);
-            ballVelocity.multiplyScalar(1 - frictionDecel);
+            const wasSliding = !this.fullRollReached;
+            if (wasSliding) {
+                this.applySlidingFriction(deltaTime);
+            }
+            if (this.fullRollReached) {
+                const frictionForce = currentPuttDeceleration * deltaTime;
+                const now = ballVelocity.length();
+                if (now > 0.001) {
+                    const frictionDecel = Math.min(frictionForce / now, 1);
+                    ballVelocity.multiplyScalar(1 - frictionDecel);
+                }
+                this.lockPureRoll();
+            }
 
             // Apply spin effect (Magnus force - simplified)
             if (ballSpin.length() > 0.1) {
@@ -274,16 +341,34 @@ export class PuttSimulation {
                     .multiplyScalar(0.0001 * deltaTime);
                 ballVelocity.add(tempSpinEffect);
 
-                // Spin decay
-                ballSpin.multiplyScalar(1 - deltaTime * 2);
+                if (this.fullRollReached) {
+                    // Keep roll spin locked to v/R; only fade leftover sidespin.
+                    const sidespinY = ballSpin.y * (1 - deltaTime * 2);
+                    this.lockPureRoll();
+                    ballSpin.y = sidespinY;
+                } else {
+                    ballSpin.multiplyScalar(1 - deltaTime * 2);
+                }
+            } else if (this.fullRollReached) {
+                this.lockPureRoll();
             }
 
             // Check for hole collision BEFORE moving (predictive)
             const hadCollision = this.checkHoleCollisionPredictive(deltaTime);
 
+            const prevX = ball.position.x;
+            const prevZ = ball.position.z;
+
             // Update position (only if no collision happened, since collision already positioned the ball)
             if (!hadCollision) {
                 ball.position.addScaledVector(ballVelocity, deltaTime);
+            }
+
+            const step = Math.hypot(ball.position.x - prevX, ball.position.z - prevZ);
+            this.totalRollM += step;
+            if (wasSliding) {
+                this.skidDistanceM += step;
+                this.timeToFullRollS += deltaTime;
             }
 
             // Keep ball on green (simple collision)

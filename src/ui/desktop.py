@@ -265,12 +265,21 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         if getattr(self, "show_board_assign_modal", False):
             return studio.ShanktuaryApp.handle_mouse_press(self, event)
 
+        if getattr(self, "view_mode", None) in (9, 1):   # Shot, Quad
+            from src.ui.contact_panel import handle_face_click
+            if handle_face_click(self, x, y):
+                return
+
         if getattr(self, "view_mode", None) == 3:
             for rect, submode in getattr(self, "design_dispersion_tab_rects", []):
                 if self._design_hit(rect, x, y):
                     self.dispersion_view_submode = submode
                     self.draw_screen()
                     return
+            if self._design_hit(getattr(self, "dispersion_split_rect", None), x, y):
+                self.dispersion_split_by_ball = not getattr(self, "dispersion_split_by_ball", False)
+                self.draw_screen()
+                return
 
         if getattr(self, "sidebar_collapsed", False):
             gx1 = shell_ui.NAV_RAIL_W

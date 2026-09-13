@@ -138,6 +138,36 @@ export const METRICS = {
         label: 'Closure Rate', short: 'Closure', unit: 'deg/s', estIfDerived: 'closureRate',
         get: (t) => ({ text: fmtRound(t.closureRate) }),
     },
+    faceToTarget: {
+        label: 'Face to Target', short: 'Face/Tgt', unit: 'deg',
+        get: (t) => {
+            if (typeof t.faceToTarget !== 'number' || !isFinite(t.faceToTarget)) return null;
+            return { text: fmtSigned(t.faceToTarget) };
+        },
+    },
+    totalRoll: {
+        label: 'Total Roll', short: 'Roll', unit: 'ft', est: true,
+        get: (t, c) => {
+            const v = (c && c.totalRollFt != null) ? c.totalRollFt : t.totalRollFt;
+            return { text: fmtFixed(v) };
+        },
+    },
+    skid: {
+        label: 'Skid', short: 'Skid', unit: 'ft', est: true,
+        get: (t, c) => {
+            const v = (c && c.skidFt != null) ? c.skidFt : t.skidFt;
+            if (typeof v !== 'number' || !isFinite(v)) return null;
+            return { text: fmtFixed(v) };
+        },
+    },
+    timeToFullRoll: {
+        label: 'Time to Full Roll', short: 'Full Roll', unit: 'sec', est: true,
+        get: (t, c) => {
+            const v = (c && c.timeToFullRoll != null) ? c.timeToFullRoll : t.timeToFullRoll;
+            if (typeof v !== 'number' || !isFinite(v)) return null;
+            return { text: fmtFixed(v, 2) };
+        },
+    },
 };
 
 /** Strip layout limits. Below 4 the strip looks broken; above 10 cells clip. */
@@ -149,29 +179,52 @@ export const DEFAULT_STRIP = [
     'smash', 'launch', 'totalSpin', 'apex',
 ];
 
-const STORAGE_KEY = 'sps_range_strip_metrics';
+/** Putt-mode default. Separate storage so entering putting cannot wipe the full-swing strip. */
+export const PUTT_DEFAULT_STRIP = [
+    'ballSpeed', 'hla', 'launch', 'faceToPath',
+    'clubPath', 'dynamicLoft', 'faceToTarget', 'totalRoll',
+];
 
-/** Read the saved layout, falling back to DEFAULT_STRIP if absent/corrupt. */
-export function loadStripLayout() {
+const STORAGE_KEY = 'sps_range_strip_metrics';
+const PUTT_STORAGE_KEY = 'sps_range_putt_strip_metrics';
+
+function loadLayout(storageKey, fallback) {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return [...DEFAULT_STRIP];
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return [...fallback];
         const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [...DEFAULT_STRIP];
+        if (!Array.isArray(parsed)) return [...fallback];
         // Drop unknown keys so a renamed/removed metric can't wedge the strip.
         const clean = parsed.filter(k => Object.hasOwn(METRICS, k));
-        return clean.length >= MIN_STRIP ? clean.slice(0, MAX_STRIP) : [...DEFAULT_STRIP];
+        return clean.length >= MIN_STRIP ? clean.slice(0, MAX_STRIP) : [...fallback];
     } catch {
-        return [...DEFAULT_STRIP];
+        return [...fallback];
     }
 }
 
-export function saveStripLayout(keys) {
+function saveLayout(storageKey, keys) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+        localStorage.setItem(storageKey, JSON.stringify(keys));
     } catch {
         /* private mode / quota -- layout just won't persist */
     }
+}
+
+/** Read the saved layout, falling back to DEFAULT_STRIP if absent/corrupt. */
+export function loadStripLayout() {
+    return loadLayout(STORAGE_KEY, DEFAULT_STRIP);
+}
+
+export function saveStripLayout(keys) {
+    saveLayout(STORAGE_KEY, keys);
+}
+
+export function loadPuttStripLayout() {
+    return loadLayout(PUTT_STORAGE_KEY, PUTT_DEFAULT_STRIP);
+}
+
+export function savePuttStripLayout(keys) {
+    saveLayout(PUTT_STORAGE_KEY, keys);
 }
 
 /**

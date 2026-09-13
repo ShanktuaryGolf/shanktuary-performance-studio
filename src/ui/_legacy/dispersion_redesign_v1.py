@@ -43,6 +43,12 @@ def _shot_vals(shot):
 
 
 def _groups(app):
+    """Shots by club -- or by "club · ball" when Split by ball is on.
+
+    Shots with no ball stamped form their own "· no ball" series; they are
+    never folded into a named ball.
+    """
+    split = bool(getattr(app, "dispersion_split_by_ball", False))
     groups = {}
     for s in getattr(app, "session_shots", []) or []:
         if s.get("excluded"):
@@ -51,8 +57,37 @@ def _groups(app):
         carry, total, off, apex = _shot_vals(s)
         if carry <= 0:
             continue
-        groups.setdefault(club, []).append((s, carry, total, off, apex))
+        key = f"{club} · {s.get('ball') or 'no ball'}" if split else club
+        groups.setdefault(key, []).append((s, carry, total, off, apex))
     return groups
+
+
+def _series_colour(app, key, idx):
+    """Per-series colour. Split mode needs it to tell balls apart; club mode
+    keeps the quiet blue-lead / grey-rest look."""
+    if getattr(app, "dispersion_split_by_ball", False) and hasattr(app, "get_club_color"):
+        return app.get_club_color(key)
+    return BLUE if idx == 0 else theme.TEXT_3
+
+
+def _draw_split_toggle(app, c, x2, y1, y2):
+    """'Split by ball' toggle at the right end of the tab row; only when balls exist."""
+    app.dispersion_split_rect = None
+    if not (getattr(app, "balls", None)):
+        return
+    on = bool(getattr(app, "dispersion_split_by_ball", False))
+    label = ("☑" if on else "☐") + " Split by ball"
+    f = (theme.ui_font(), 9, "bold" if on else "normal")
+    probe = c.create_text(0, 0, text=label, font=f, anchor="nw")
+    bb = c.bbox(probe)
+    c.delete(probe)
+    tw = (bb[2] - bb[0]) if bb else 120
+    x1 = x2 - tw - 24
+    app.dispersion_split_rect = (x1, y1, x2, y2)
+    c.create_rectangle(x1, y1, x2, y2, fill=theme.ACCENT_DEEP if on else theme.BG,
+                       outline=BLUE if on else SOFT, width=1)
+    c.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=label,
+                  fill=theme.TEXT if on else theme.TEXT_2, font=f)
 
 
 def _avg(vals):
@@ -194,16 +229,17 @@ def _dispersion(app, x1, y1, x2, y2, groups):
         sd_o = max(1.1, _sd(offs))
         rx = abs(sx(mo + sd_o * 2.15) - sx(mo))
         ry = abs(sy(mc + sd_c * 2.15) - sy(mc))
-        ellipse_col = BLUE if idx == 0 else theme.TEXT_3
+        split = bool(getattr(app, "dispersion_split_by_ball", False))
+        ellipse_col = _series_colour(app, club, idx)
         c.create_oval(sx(mo)-rx, sy(mc)-ry, sx(mo)+rx, sy(mc)+ry,
-                      outline=ellipse_col, width=2 if idx == 0 else 1,
-                      dash=() if idx == 0 else (4, 4))
+                      outline=ellipse_col, width=2 if (idx == 0 or split) else 1,
+                      dash=() if (idx == 0 or split) else (4, 4))
 
         # label outside the ellipse instead of on top of the data
         label_x = min(px2 - 10, sx(mo) + rx + 10)
         label_y = max(py1 + 10, sy(mc) - ry - 4)
         c.create_text(label_x, label_y, text=f"{club}  {mc:.0f}y",
-                      fill=BLUE_TEXT if idx == 0 else theme.TEXT_2,
+                      fill=ellipse_col if split else (BLUE_TEXT if idx == 0 else theme.TEXT_2),
                       font=(theme.ui_font(), 9, "bold"), anchor="sw")
 
         for shot, carry, total, off, apex in rows:
@@ -211,7 +247,7 @@ def _dispersion(app, x1, y1, x2, y2, groups):
             sel = shot is current
             r = 6 if sel else 3
             c.create_oval(xx-r, yy-r, xx+r, yy+r,
-                          fill=ORANGE if sel else theme.TEXT_2,
+                          fill=ORANGE if sel else (ellipse_col if split else theme.TEXT_2),
                           outline=theme.TEXT if sel else "")
 
 
@@ -286,6 +322,8 @@ def draw_dispersion_and_gapping(app, avail_w, h, offset_x=0):
                       fill=theme.TEXT if active else theme.TEXT_2,
                       font=(theme.ui_font(), 9, "bold" if active else "normal"))
         tab_x += tw + 8
+
+    _draw_split_toggle(app, c, offset_x + avail_w - 18, tab_y1, tab_y2)
 
     content_top = 105
     gap = 12

@@ -564,9 +564,13 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
     identity_w = max(270, min(330, (x1 - x0) * .205))
     ix = x0 + 24
     club = (app.current_shot or {}).get("club") or app.current_club
-    c.create_text(ix, y0 + 22, text=f"Shot {idx}", fill=theme.TEXT_2,
-                  font=(_ui_font(), 12, "bold"), anchor="nw")
-    c.create_text(ix + 78, y0 + 19, text=club, fill=BLUE_TEXT,
+    shot_no_id = c.create_text(ix, y0 + 22, text=f"Shot {idx}", fill=theme.TEXT_2,
+                               font=(_ui_font(), 12, "bold"), anchor="nw")
+    # Place the club label after the measured "Shot N" width -- a fixed offset
+    # overlaps as soon as the shot number reaches three digits.
+    _shot_no_bb = c.bbox(shot_no_id)
+    club_x = (_shot_no_bb[2] + 12) if _shot_no_bb else (ix + 78)
+    c.create_text(club_x, y0 + 19, text=club, fill=BLUE_TEXT,
                   font=(_ui_font(), 16, "bold"), anchor="nw")
     # The identity column is width-capped by identity_w, but this label was
     # drawn at a fixed 28pt with no budget, so a wide name like "Straight Fade"

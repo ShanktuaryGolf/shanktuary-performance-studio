@@ -135,7 +135,5 @@ def _redraw_impact_face(app, *args, **kwargs):
 
 
 def draw_4_quadrant_studio(app, production_draw, *args, **kwargs):
-    with _without_production_clubface(app):
-        result = v3.draw_4_quadrant_studio(app, production_draw, *args, **kwargs)
-    _redraw_impact_face(app, *args, **kwargs)
-    return result
+    # The shared contact painter owns both labels and artwork, exactly once.
+    return v3.draw_4_quadrant_studio(app, production_draw, *args, **kwargs)

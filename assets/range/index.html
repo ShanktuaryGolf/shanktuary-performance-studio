@@ -1021,6 +1021,29 @@
             white-space: nowrap;
         }
 
+        /* Combine widget: same cell language as the target scorecard */
+        #combine-score-result {
+            padding: 7px 10px;
+            border-top: 1px solid var(--glass-line);
+            border-bottom: 1px solid var(--glass-line);
+            color: var(--text-2);
+            font-size: 0.68rem;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+        #combine-score-result.live { color: var(--accent-text); }
+        .combine-stations { display: grid; grid-template-columns: repeat(3, 1fr); flex: none; }
+        .combine-stations .target-stat.done .target-stat-value { color: var(--accent-text); }
+        .combine-stations .target-stat.current { background: var(--accent-deep); }
+        .combine-history {
+            padding: 6px 10px;
+            border-top: 1px solid var(--glass-line);
+            color: var(--text-3);
+            font-size: 0.62rem;
+            text-align: center;
+        }
+
         /* Pressure widget */
         .pressure-phase-badge,
         .index-tier-badge {
@@ -1170,6 +1193,23 @@
         }
         #settings-drawer.open, #game-modes-drawer.open { display: flex; }
 
+        /* Nine game modes read as a 3x3 board rather than a scrolling list.
+           Cards are equal-height rows; the grid collapses to 2 then 1 column
+           when the viewport cannot fit three 200px cards. */
+        #game-modes-drawer { width: 720px; }
+        #game-mode-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-auto-rows: 1fr;
+            gap: 10px;
+        }
+        @media (max-width: 760px) {
+            #game-mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 520px) {
+            #game-mode-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+
         /* Shared scrim behind whichever drawer is open. */
         #drawer-scrim {
             position: fixed;
@@ -1218,7 +1258,8 @@
             color: var(--accent-text);
             border: 1px solid var(--accent);
         }
-        .game-mode-desc { font-size: 0.76rem; color: var(--text-2); line-height: 1.35; }
+        .game-mode-desc { font-size: 0.74rem; color: var(--text-2); line-height: 1.35; }
+        .game-mode-title { font-size: 0.86rem; }
 
         .drawer-section-title {
             font-size: 0.78rem;
@@ -1603,6 +1644,16 @@
             </div>
         </div>
 
+        <div class="widget glass" id="combine-scorecard" style="display:none;">
+            <div class="widget-head">
+                <div class="widget-title">🏅 Combine</div>
+                <div class="widget-note" id="combine-score-headline">--</div>
+            </div>
+            <div id="combine-score-result">Select a station club to begin</div>
+            <div id="combine-score-stats" class="combine-stations"></div>
+            <div class="combine-history" id="combine-history">No combine recorded yet</div>
+        </div>
+
         <div class="widget glass" id="range-pressure-tile" style="display:none;">
             <div class="widget-head">
                 <div class="widget-title">⚖ Pressure</div>
@@ -1657,6 +1708,7 @@
             <button class="icon-btn" id="btn-close-game-modes"
                     style="width:24px;height:24px;font-size:0.75rem;border-radius:6px;">✕</button>
         </div>
+        <div id="game-mode-grid">
         <div class="game-mode-card active" data-mode="practice">
             <div class="game-mode-header">
                 <div class="game-mode-title">⛳ Free Practice</div>
@@ -1712,6 +1764,14 @@
                 <span class="game-mode-tag" id="tag-grid-custom" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Choose a custom start distance in even 10-yard increments (e.g. 50, 60, 70y). Generates 10 consecutive 10-yard zones.</div>
+        </div>
+        <div class="game-mode-card" data-mode="combine">
+            <div class="game-mode-header">
+                <div class="game-mode-title">🏅 Combine</div>
+                <span class="game-mode-tag" id="tag-combine" style="display:none;">Active</span>
+            </div>
+            <div class="game-mode-desc">Three stations from your bag (wedge, mid iron, long club), 10 swings each, scored by the Shanktuary Index. Your first ten valid swings count — extra swings never do.</div>
+        </div>
         </div>
     </div>
 

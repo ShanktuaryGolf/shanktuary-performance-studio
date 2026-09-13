@@ -159,6 +159,11 @@ class OBSState:
         # current value on `init` so a late join agrees with the picker.
         self.selected_club = None
         self.club_listeners = []
+        # Combine run started from the range (or None). Same contract as the
+        # club: in-process listeners get the run dict (None = ended) and apply
+        # it on the Tk thread; the desktop app owns stamping and recording.
+        self.combine_run = None
+        self.combine_listeners = []
         # Serializes writes to each WS client socket so concurrent broadcasts
         # can't interleave partial frames; held only around socket I/O and
         # NEVER while holding self.lock (a stalled client must not wedge the
@@ -307,6 +312,71 @@ class OBSState:
                 print(f"[!] Club listener error: {e}")
         self.broadcast({"type": "club", "club": club})
         return {"status": "ok", "club": club}, 200
+
+    def _read_history(self):
+        """Session history dict from disk, or {} -- never cached (see load_bag)."""
+        for path in (SESSION_LOG_PATH, SCRIPT_DIR / "shanktuary_session_history.json"):
+            try:
+                if path and Path(path).exists():
+                    data = json.loads(Path(path).read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        return data
+            except Exception as e:
+                print(f"[!] Could not read session history: {e}")
+        return {}
+
+    def combine_status(self):
+        """GET /api/combine: protocol from the bag, the live run scored from the
+        saved session shots, and the recorded history summary."""
+        from src.analytics import combine
+
+        data = self._read_history()
+        bag = data.get("bag") or []
+        protocol = combine.protocol_for_bag(bag if isinstance(bag, list) else [])
+        with self.lock:
+            run = self.combine_run
+        result = None
+        if run:
+            shots = []
+            for sess in data.get("sessions") or []:
+                if isinstance(sess, dict) and (sess.get("id") or sess.get("name")) == run.get("session_id"):
+                    shots = [x for x in (sess.get("shots") or []) if isinstance(x, dict)]
+            result = combine.score(run["stations"], shots,
+                                   is_left_handed=bool(data.get("is_left_handed", False)))
+        try:
+            history = combine.summary(combine.load(Path(SESSION_LOG_PATH).parent / combine.FILE_NAME))
+        except Exception:
+            history = None
+        return {"active": run is not None, "run": run, "result": result,
+                "protocol": protocol, "history": history}
+
+    def set_combine(self, action):
+        """POST /api/combine {"action": "start"|"end"} -> (payload, code)."""
+        from src.analytics import combine
+
+        if action == "start":
+            data = self._read_history()
+            bag = data.get("bag") or []
+            proto = combine.protocol_for_bag(bag if isinstance(bag, list) else [])
+            if not proto["stations"]:
+                return {"status": "error", "message": proto["reason"] or "Combine needs more clubs"}, 400
+            sessions = [x for x in (data.get("sessions") or []) if isinstance(x, dict)]
+            sess = sessions[-1] if sessions else {}
+            run = {"stations": [dict(x) for x in proto["stations"]],
+                   "session_id": sess.get("id") or sess.get("name")}
+        elif action == "end":
+            run = None
+        else:
+            return {"status": "error", "message": "action must be start or end"}, 400
+        with self.lock:
+            self.combine_run = run
+        for cb in list(self.combine_listeners):
+            try:
+                cb(run)
+            except Exception as e:
+                print(f"[!] Combine listener error: {e}")
+        self.broadcast({"type": "combine", "active": run is not None, "run": run})
+        return {"status": "ok", "active": run is not None, "run": run}, 200
 
     def load_index(self):
         """Read shots from session history and compute the player shanktuary index.
@@ -1203,6 +1273,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             # Aim-corrected: the browser overlay must agree with the desktop
             # app's shot table about which way the ball started.
             self.send_json(obs_state.latest_shot_for_display() or {})
+        elif parsed_path == "/api/combine":
+            try:
+                self.send_json(obs_state.combine_status())
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=500)
         elif parsed_path == "/api/index":
             try:
                 self.send_json(obs_state.load_index())
@@ -1349,6 +1424,20 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 )
                 return
             payload, code = obs_state.set_selected_club(data.get("club"))
+            self.send_json(payload, code=code)
+        elif parsed_path == "/api/combine":
+            body = self.read_post_body()
+            if body is None:
+                return
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json({"status": "error", "message": "invalid JSON"}, code=400)
+                return
+            if not isinstance(data, dict):
+                self.send_json({"status": "error", "message": "body must be a JSON object"}, code=400)
+                return
+            payload, code = obs_state.set_combine(data.get("action"))
             self.send_json(payload, code=code)
         elif parsed_path == "/api/pressure/tare":
             ok = pressure_manager.tare()

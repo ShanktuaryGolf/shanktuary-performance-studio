@@ -47,54 +47,6 @@ def _delivery_takeaway(v):
     return f"{p} · {f}"
 
 
-def _draw_face_with_clear_marker(app, cx, cy, size):
-    """Draw the production clubface with a higher-contrast impact marker."""
-    c = app.canvas
-    img = app.get_scaled_club_asset(
-        studio.FACE_PATH, int(size), mirror=getattr(app, "is_left_handed", False)
-    )
-    if img:
-        c.create_image(cx, cy, image=img, anchor="c")
-    else:
-        # Preserve a useful fallback if the image asset is unavailable.
-        c.create_oval(cx - size * .34, cy - size * .28,
-                      cx + size * .34, cy + size * .28,
-                      fill=theme.SURFACE_2, outline=theme.GUIDE)
-
-    # Match the estimator geometry used by the production helper, but replace
-    # the dotted orange ring with a calmer high-contrast impact lens.
-    left_handed = bool(getattr(app, "is_left_handed", False))
-    sdx = (43.5 / 220.0) * size * (1 if left_handed else -1)
-    sdy = (-40.0 / 220.0) * size
-    ssx, ssy = cx + sdx, cy + sdy
-
-    head, _, _ = app.summarize_strike(app.current_shot)
-    dy = 0.0
-    if "Low" in head:
-        dy = size * 0.14
-    elif "High" in head:
-        dy = -size * 0.14
-
-    mx, my = ssx + size * 0.05, ssy + dy
-
-    # Keep the sweet-spot reference subtle and neutral.
-    guide = _mix(theme.GUIDE, theme.TEXT_2, .10)
-    for d in (-5, 4):
-        c.create_line(ssx + d, ssy, ssx + d + 2, ssy, fill=guide)
-        c.create_line(ssx, ssy + d, ssx, ssy + d + 2, fill=guide)
-
-    lens_r = max(8, size * .075)
-    ring_r = max(11, size * .105)
-    lens = _mix(theme.BG, "#172231", .48)
-    c.create_oval(mx - lens_r, my - lens_r, mx + lens_r, my + lens_r,
-                  fill=lens, outline="")
-    c.create_oval(mx - ring_r, my - ring_r, mx + ring_r, my + ring_r,
-                  fill="", outline=ORANGE, width=2)
-    dot_r = max(3, size * .022)
-    c.create_oval(mx - dot_r, my - dot_r, mx + dot_r, my + dot_r,
-                  fill=ORANGE, outline="")
-
-
 def _draw_strike(app, x0, y0, x1, y1):
     """Top half of the cohesive Club Delivery panel."""
     c = app.canvas
@@ -107,27 +59,76 @@ def _draw_strike(app, x0, y0, x1, y1):
     else:
         tx = x0 + 96
         title_cy = y0 + 9
-    # Use the measured title centerline, rather than a guessed y-offset.
-    c.create_text(tx, title_cy, text="· Estimated", fill=ORANGE,
-                  font=(_ui_font(), 11, "bold"), anchor="w")
+    # Strike is no longer an estimate (contact is reported or unavailable),
+    # so the old "· Estimated" tag beside the title would now be a lie.
+    del tx, title_cy
+
+    # The panel is ~330px wide. Text beside a 176px clubface left a ~115px
+    # column that wrapped "Location unavailable" onto four lines and pushed
+    # the Boards line into the Path & Face panel below. So the face sits in
+    # the top-right beside the Strike heading, small, and the text runs at
+    # full panel width UNDER it, stacking from measured bboxes.
+    face_size = max(84, min(120, (y1 - y0) * .42, (x1 - x0) * .32))
+    face_w = face_size * 290 / 220  # the artwork is 290x220
+    face_cx = x1 - face_w / 2
+    face_cy = y0 + 20 + face_size * .5
+    # One face for Shot and Quad: reported reading, the golfer's mark, or
+    # nothing. It also registers the click-to-mark hit rect.
+    from src.ui.contact_panel import draw_contact_face
+    app.contact_clear_rect = None
+    est = draw_contact_face(app, face_cx, face_cy, face_size,
+                            left_limit=x0, right_limit=x1)
+    text_w = int(x1 - x0)
 
     strike_y = y0 + 43
     c.create_text(x0, strike_y, text="Strike", fill=theme.TEXT_2,
                   font=(_ui_font(), 11, "bold"), anchor="nw")
+    from src.analytics.strike import contact_location
+    contact = contact_location(app.current_shot)
+    head, detail = contact.headline, contact.detail
+    if contact.source is None:
+        # Approximate strike from the golfer's own marks (or the sweet spot
+        # with none): say so, and keep the click-to-mark invitation.
+        head = "Approximate"
+        detail = (est.label if est is not None else "EST") + " · click the face to mark it"
+    col = SECTION_TEXT
+    # Headline shares the row with the face: budget it to the face's left edge.
+    head_id = c.create_text(x0, strike_y + 24, text=head, fill=col,
+                            font=(_ui_font(), 14, "bold"), anchor="nw",
+                            width=max(110, int(x1 - face_w - 12 - x0)))
+    hbb = c.bbox(head_id)
+    y = max((hbb[3] + 4) if hbb else (strike_y + 52), int(face_cy + face_size * .5) + 6)
+    detail_id = c.create_text(x0, y, text=detail, fill=theme.TEXT_3,
+                              font=(_ui_font(), 10), anchor="nw", width=text_w)
+    if contact.source == "marked":
+        dbb0 = c.bbox(detail_id)
+        cid = c.create_text(x0, (dbb0[3] + 2) if dbb0 else (y + 16), text="clear mark",
+                            fill=BLUE_TEXT, font=(_ui_font(), 9), anchor="nw")
+        cbb = c.bbox(cid)
+        if cbb:
+            app.contact_clear_rect = (cbb[0] - 4, cbb[1] - 2, cbb[2] + 4, cbb[3] + 2)
+        detail_id = cid
 
-    head, detail, _ = app.summarize_strike(app.current_shot)
-    col = GOOD if ("center" in head.lower() or "pure" in head.lower()) else SECTION_TEXT
-    c.create_text(x0, strike_y + 28, text=head, fill=col,
-                  font=(_ui_font(), 15, "bold"), anchor="nw")
-    c.create_text(x0, strike_y + 55, text=detail, fill=theme.TEXT_3,
-                  font=(_ui_font(), 10), anchor="nw",
-                  width=max(110, int((x1 - x0) * .34)))
-
-    # Lower the clubface a touch so it clears the title/subhead visually.
-    face_cx = x0 + (x1 - x0) * .73
-    face_cy = y0 + (y1 - y0) * .62
-    face_size = max(132, min(176, (y1 - y0) * .72, (x1 - x0) * .55))
-    _draw_face_with_clear_marker(app, face_cx, face_cy, face_size)
+    # Boards, if this shot has a saved trace: measured, and ours alone.
+    from src.analytics.pressure_result import shot_line
+    line = shot_line(app.current_shot, getattr(app, "is_left_handed", False))
+    if line:
+        dbb = c.bbox(detail_id)
+        py = (dbb[3] + 10) if dbb else (y + 30)
+        lbl = c.create_text(x0, py, text="Boards", fill=theme.TEXT_2,
+                            font=(_ui_font(), 11, "bold"), anchor="nw")
+        lbb = c.bbox(lbl)
+        ly = (lbb[3] + 4) if lbb else (py + 22)
+        line_id = c.create_text(x0, ly, text=line, fill=BLUE_TEXT,
+                                font=(_ui_font(), 12, "bold"), anchor="nw", width=text_w)
+        lbb2 = c.bbox(line_id)
+        if lbb2 and lbb2[3] > y1:
+            # Out of room: drop the caption rather than paint into the divider.
+            c.delete(lbl)
+            c.coords(line_id, x0, py)
+            lbb2 = c.bbox(line_id)
+            if lbb2 and lbb2[3] > y1:
+                c.delete(line_id)
 
 
 def _draw_delivery(app, x0, y0, x1, y1, v):

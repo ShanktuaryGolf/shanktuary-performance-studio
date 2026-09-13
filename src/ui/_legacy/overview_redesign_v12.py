@@ -156,147 +156,15 @@ def _num(value, default=0.0):
 
 
 def _impact_offsets_mm(app):
-    """Return live horizontal/vertical impact offsets for the displayed shot.
+    """Compatibility seam: no ball-only strike inference, no missing-axis zero."""
+    from src.analytics.strike import contact_location
 
-    Prefer measured face-impact coordinates when the launch monitor supplies
-    them. Otherwise reuse the same gear-effect / launch-deviation signals as
-    production, but keep the visual position continuous rather than reducing it
-    to Low/High/Center text buckets.
-    """
-    shot = app.current_shot or {}
-    if not isinstance(shot, dict):
-        return 0.0, 0.0
-    ogc = shot.get("open_golf_coach", {}) or {}
-    us = ogc.get("us_customary_units", {}) or {}
-
-    impact = (
-        shot.get("face_impact") or shot.get("impact_location") or
-        ogc.get("face_impact") or ogc.get("impact_location") or
-        ogc.get("face_contact") or {}
-    )
-    if isinstance(impact, dict) and impact:
-        hx = None
-        vy = None
-        for key in ("lateral_offset_mm", "heel_toe_mm", "horizontal_offset_mm", "x_mm"):
-            if key in impact:
-                hx = _num(impact.get(key))
-                break
-        for key in ("vertical_offset_mm", "high_low_mm", "y_mm"):
-            if key in impact:
-                vy = _num(impact.get(key))
-                break
-        if hx is not None or vy is not None:
-            return max(-24.0, min(24.0, hx or 0.0)), max(-16.0, min(16.0, vy or 0.0))
-
-    club = str(shot.get("club") or getattr(app, "current_club", "7 Iron"))
-
-    # Configured loft is a better launch baseline than a generic club table.
-    configured_loft = None
-    for item in getattr(app, "bag", []) or []:
-        if isinstance(item, dict) and item.get("name") == club:
-            configured_loft = _num(item.get("loft_deg"), 0.0)
-            break
-    if configured_loft and configured_loft > 0:
-        if club in ("Driver", "3 Wood", "5 Wood", "7 Wood"):
-            base_launch = configured_loft * 1.10
-        elif "Hybrid" in club:
-            base_launch = configured_loft * 0.82
-        elif "Putter" in club:
-            base_launch = 2.0
-        else:
-            base_launch = configured_loft * 0.68
-    else:
-        base_launch = _CLUB_LAUNCH.get(club, 21.0)
-
-    ball_speed = _num(us.get("ball_speed_mph"))
-    if ball_speed <= 0:
-        ball_speed = _num(shot.get("ball_speed_meters_per_second")) * 2.23694
-    full_speed = _CLUB_BALL_SPEED.get(club, 105.0)
-    speed_ratio = max(0.2, min(1.3, ball_speed / full_speed)) if ball_speed > 0 else 1.0
-
-    sidespin = _num(ogc.get("sidespin_rpm"))
-    backspin = _num(ogc.get("backspin_rpm"))
-    if backspin <= 0:
-        backspin = _num(ogc.get("total_spin_rpm"))
-    face_to_path = _num(ogc.get("club_face_to_path_degrees"))
-    try:
-        face_to_path = float(app.resolve_handed(ogc.get("club_face_to_path_degrees"), face_to_path))
-    except Exception:
-        pass
-
-    hand_sign = -1.0 if getattr(app, "is_left_handed", False) else 1.0
-    expected_side = hand_sign * face_to_path * 150.0 * speed_ratio
-    side_residual = (sidespin - expected_side) * hand_sign
-    h_hint = max(-1.0, min(1.0, side_residual / max(80.0, 400.0 * speed_ratio)))
-
-    vert_launch = _num(shot.get("vertical_launch_angle_degrees"))
-    launch_dev = (vert_launch - base_launch) / 5.0
-    is_wood = club in ("Driver", "3 Wood", "5 Wood", "3 Hybrid", "7 Wood")
-    if is_wood:
-        expected_spin = _CLUB_SPIN.get(club, 7000) * speed_ratio
-        spin_dev = (backspin - expected_spin) / max(250.0, 1000.0 * speed_ratio)
-        v_hint = launch_dev * 0.7 - spin_dev * 0.3
-    else:
-        v_hint = launch_dev
-    v_hint = max(-1.0, min(1.0, v_hint))
-
-    mag = math.hypot(h_hint, v_hint)
-    if mag < 0.06:
-        return 0.0, 0.0
-
-    # A continuously varying visual radius fixes the old behaviour where every
-    # shot in the same Low/High bucket plotted at exactly the same location.
-    radius_mm = 4.0 + min(12.0, mag * 10.0)
-    return ((h_hint / mag) * radius_mm, (v_hint / mag) * radius_mm)
-
-
-def _draw_face_with_dynamic_marker(app, cx, cy, size):
-    c = app.canvas
-    img = app.get_scaled_club_asset(
-        studio.FACE_PATH, int(size), mirror=getattr(app, "is_left_handed", False)
-    )
-    if img:
-        c.create_image(cx, cy, image=img, anchor="c")
-    else:
-        c.create_oval(cx - size * .34, cy - size * .28,
-                      cx + size * .34, cy + size * .28,
-                      fill=theme.SURFACE_2, outline=theme.GUIDE)
-
-    left_handed = bool(getattr(app, "is_left_handed", False))
-    sdx = (43.5 / 220.0) * size * (1 if left_handed else -1)
-    sdy = (-40.0 / 220.0) * size
-    ssx, ssy = cx + sdx, cy + sdy
-
-    h_mm, v_mm = _impact_offsets_mm(app)
-
-    # Positive horizontal means heel. Mirror that screen direction with the
-    # clubface image for LH players. Positive vertical is high on the face,
-    # therefore screen-Y moves upward.
-    screen_h = h_mm * (-1.0 if left_handed else 1.0)
-    px_per_mm = size * 0.0060
-    mx = ssx + screen_h * px_per_mm
-    my = ssy - v_mm * px_per_mm
-
-    guide = _mix(theme.GUIDE, theme.TEXT_2, .10)
-    for d in (-5, 4):
-        c.create_line(ssx + d, ssy, ssx + d + 2, ssy, fill=guide)
-        c.create_line(ssx, ssy + d, ssx, ssy + d + 2, fill=guide)
-
-    lens_r = max(8, size * .075)
-    ring_r = max(11, size * .105)
-    lens = _mix(theme.BG, "#172231", .48)
-    c.create_oval(mx - lens_r, my - lens_r, mx + lens_r, my + lens_r,
-                  fill=lens, outline="")
-    c.create_oval(mx - ring_r, my - ring_r, mx + ring_r, my + ring_r,
-                  fill="", outline=ORANGE, width=2)
-    dot_r = max(3, size * .022)
-    c.create_oval(mx - dot_r, my - dot_r, mx + dot_r, my + dot_r,
-                  fill=ORANGE, outline="")
+    contact = contact_location(app.current_shot)
+    return contact.horizontal_mm, contact.vertical_mm
 
 
 def draw_overview(*args, **kwargs):
     # v10 installs its Shot Shape helper each draw; replace that helper itself.
     v10._draw_shape = _draw_shape
-    # v11's Strike renderer resolves this helper from its module globals.
-    v11._draw_face_with_clear_marker = _draw_face_with_dynamic_marker
+    # v11's Strike renderer now draws the shared contact face itself.
     return v11.draw_overview(*args, **kwargs)

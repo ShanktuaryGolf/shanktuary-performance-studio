@@ -7,8 +7,9 @@ import { ShotHistory, isSmashClamped } from './shot_history.js';
 import { drawDispersion } from './dispersion.js';
 import { WIDGET_REGISTRY } from './widgets.js';
 import {
-    METRICS, MIN_STRIP, MAX_STRIP, DEFAULT_STRIP,
-    loadStripLayout, saveStripLayout, readMetric,
+    METRICS, MIN_STRIP, MAX_STRIP, DEFAULT_STRIP, PUTT_DEFAULT_STRIP,
+    loadStripLayout, saveStripLayout,
+    loadPuttStripLayout, savePuttStripLayout, readMetric,
 } from './metrics.js';
 import { fetchBag, groupClubs, pillLabel, clubSubtitle, postSelectedClub, inferCategory } from './club_picker.js';
 import { gridMode, GRID_ZONE_WIDTH_YARDS, GRID_DEFAULT_START_YARDS, isValidGridStartYards } from './grid_mode.js';
@@ -343,6 +344,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const dsCarrySd = document.getElementById('ds-carry-sd');
     const dsOffline = document.getElementById('ds-offline');
     const targetScorecard = document.getElementById('target-scorecard');
+    const combineScorecard = document.getElementById('combine-scorecard');
     const targetScoreDistance = document.getElementById('target-score-distance');
     const targetScoreResult = document.getElementById('target-score-result');
     const targetScoreHits = document.getElementById('target-score-hits');
@@ -468,6 +470,100 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     }
 
+    // --- Combine: the desktop app owns stamping + scoring; the range starts/
+    // ends the run and mirrors GET /api/combine. Never scored in the browser.
+    let combineStatus = null;
+
+    function shortClub(name) {
+        const m = /^(\d)\s+(Hybrid|Wood)$/.exec(String(name || ''));
+        return m ? `${m[1]}${m[2][0]}` : String(name || '');
+    }
+
+    function renderCombine(status) {
+        combineStatus = status;
+        if (!combineScorecard) return;
+        const headline = document.getElementById('combine-score-headline');
+        const result = document.getElementById('combine-score-result');
+        const stats = document.getElementById('combine-score-stats');
+        const history = document.getElementById('combine-history');
+        if (!status) {
+            if (headline) headline.innerText = '--';
+            if (result) { result.innerText = 'Combine unavailable'; result.classList.remove('live'); }
+            if (stats) stats.innerHTML = '';
+            return;
+        }
+        const r = status.result;
+        const stations = (r && r.stations) || ((status.protocol && status.protocol.stations) || []).map(
+            s => ({ ...s, counted: 0, needed: 10, complete: false, score: null }));
+        const clubName = manualClub ? manualClub.name : null;
+        if (stats) {
+            stats.innerHTML = '';
+            stations.forEach(st => {
+                const cell = document.createElement('div');
+                cell.className = 'target-stat' + (st.complete ? ' done' : '') +
+                    (clubName && st.club === clubName ? ' current' : '');
+                const label = document.createElement('div');
+                label.className = 'target-stat-label';
+                label.textContent = shortClub(st.club);
+                const val = document.createElement('div');
+                val.className = 'target-stat-value';
+                val.textContent = `${st.counted}/${st.needed}${st.complete ? ' ✓' : ''}`;
+                cell.appendChild(label); cell.appendChild(val);
+                stats.appendChild(cell);
+            });
+        }
+        if (headline) {
+            headline.innerText = (r && typeof r.score === 'number') ? `Run ${r.score.toFixed(1)}` :
+                (status.active ? 'In progress' : 'Not started');
+        }
+        if (result) {
+            result.classList.toggle('live', !!status.active);
+            if (!status.active) {
+                result.innerText = status.protocol && status.protocol.stations.length
+                    ? 'Pick Combine in Modes to start' : (status.protocol && status.protocol.reason) || 'Bag too thin';
+            } else if (r && r.status === 'complete') {
+                result.innerText = 'Complete — recorded on the Index';
+            } else {
+                const next = stations.find(st => !st.complete);
+                result.innerText = next
+                    ? (clubName === next.club ? `Hit ${next.club} — ${next.needed - next.counted} to go`
+                                              : `Select ${next.club} on the club picker`)
+                    : 'Scoring…';
+            }
+        }
+        if (history) {
+            const h = status.history;
+            history.innerText = h
+                ? `Latest ${h.latest.toFixed(1)} · Best ${h.best.toFixed(1)} · ${h.runs} run${h.runs === 1 ? '' : 's'}`
+                : 'No combine recorded yet';
+        }
+    }
+
+    async function loadCombine() {
+        try {
+            const res = await fetch('/api/combine', { cache: 'no-store' });
+            renderCombine(res.ok ? await res.json() : null);
+        } catch (e) {
+            renderCombine(null);
+        }
+    }
+
+    async function postCombine(action) {
+        try {
+            const res = await fetch('/api/combine', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showBanner('🏅', 'COMBINE', body.message || `HTTP ${res.status}`);
+            }
+        } catch (e) {
+            console.warn('[!] /api/combine failed:', e);
+        }
+        loadCombine();
+    }
+
     let currentTargetYards = 150;
     let currentRangeMode = 'practice';
     try { localStorage.removeItem('sps_range_game_mode'); } catch (e) { /* ignore */ }
@@ -556,6 +652,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         if (targetScorecard) {
             targetScorecard.style.display = mode === 'target_practice' ? '' : 'none';
         }
+        if (combineScorecard) {
+            combineScorecard.style.display = mode === 'combine' ? '' : 'none';
+        }
+        if (mode !== 'combine' && combineStatus && combineStatus.active) {
+            // Leaving the card ends the run; the desktop keeps the tagged shots.
+            postCombine('end');
+        }
 
         if (mode === 'practice') {
             if (rangeModeTitle) rangeModeTitle.innerText = 'Free Practice';
@@ -598,6 +701,15 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             if (challengePtsContainer) challengePtsContainer.style.display = 'none';
             if (challengeProxContainer) challengeProxContainer.style.display = 'none';
             if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+        } else if (mode === 'combine') {
+            if (rangeModeTitle) rangeModeTitle.innerText = 'Combine';
+            if (practiceCarryContainer) practiceCarryContainer.style.display = 'block';
+            if (practiceOfflineContainer) practiceOfflineContainer.style.display = 'block';
+            if (challengePtsContainer) challengePtsContainer.style.display = 'none';
+            if (challengeProxContainer) challengeProxContainer.style.display = 'none';
+            if (targetScoringLegend) targetScoringLegend.style.display = 'none';
+            showBanner('🏅', 'COMBINE', '3 stations × 10 swings, scored by the Index. Select each station club as you go.');
+            postCombine('start');
         } else if (mode === 'target_practice') {
             resetTargetScore();
             if (rangeModeTitle) rangeModeTitle.innerText = 'Target Practice';
@@ -891,6 +1003,18 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
         return val ?? fallback;
     }
+    // Face to Target: absent means muted ——, never a fake 0.0°.
+    function handedOrNull(val) {
+        if (val && typeof val === 'object') {
+            const v = IS_LEFTY ? (val.left_handed ?? val.right_handed) : val.right_handed;
+            if (v === undefined || v === null || v === '') return null;
+            const n = parseFloat(v);
+            return Number.isFinite(n) ? n : null;
+        }
+        if (val === undefined || val === null || val === '') return null;
+        const n = parseFloat(val);
+        return Number.isFinite(n) ? n : null;
+    }
 
     function isPutterClub(name) {
         const n = (name || '').trim();
@@ -966,6 +1090,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         const clubPath = parseFloat(handed(ogc.club_path_degrees, null) ?? raw.club_path ?? raw.club_path_degrees ?? 0.0);
         const faceAngle = parseFloat(handed(ogc.club_face_to_path_degrees, null) ?? raw.face_to_path ?? raw.face_angle ?? 0.0);
+        const faceToTarget = handedOrNull(
+            ogc.club_face_to_target_degrees ?? raw.club_face_to_target_degrees ?? raw.face_to_target
+        );
         const attackAngle = parseFloat(handed(ogc.angle_of_attack_degrees, null) ?? raw.angle_of_attack_degrees ?? raw.attack_angle ?? (vla * 0.3 - 4.5));
         const dynamicLoft = parseFloat(handed(ogc.dynamic_loft_degrees, null) ?? raw.dynamic_loft_degrees ?? raw.dynamic_loft ?? (vla * 0.85));
         const hangTime = parseFloat(ogc.hang_time_seconds || raw.hang_time_seconds || raw.hang_time || (2.0 * Math.sin(vla * Math.PI / 180) * (ballSpeed * 0.44704) / 9.81));
@@ -1013,6 +1140,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             closureRate,
             clubPath,
             faceAngle,
+            faceToTarget,
             attackAngle,
             dynamicLoft,
             hangTime,
@@ -1207,7 +1335,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             if (stripLayout.length <= MIN_STRIP) return;
             stripLayout.splice(idx, 1);
         }
-        saveStripLayout(stripLayout);
+        persistStripLayout();
         buildStrip();
         renderStripMenu();
         // Metric count feeds the scale ceiling, so re-evaluate it.
@@ -1228,8 +1356,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     if (smReset) {
         smReset.addEventListener('click', (e) => {
             e.stopPropagation();
-            stripLayout = [...DEFAULT_STRIP];
-            saveStripLayout(stripLayout);
+            stripLayout = puttingActive ? [...PUTT_DEFAULT_STRIP] : [...DEFAULT_STRIP];
+            persistStripLayout();
             buildStrip();
             renderStripMenu();
         });
@@ -1330,6 +1458,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             postSelectedClub(club.name);
         }
         syncPuttingMode(club && club.name);
+        if (combineStatus) renderCombine(combineStatus);
     }
 
     function clearManualClub() {
@@ -1337,6 +1466,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         applyClubChip();
         renderClubSheet();
         exitPuttingMode();
+        if (combineStatus) renderCombine(combineStatus);
         // Fall back to whatever the last shot reported.
         if (lastShotTelemetry && hudClubName) {
             hudClubName.innerText = lastShotTelemetry.club || '--';
@@ -1758,8 +1888,12 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     let puttSim = null;
     let puttStimp = 10;
     let puttDistanceFt = 20;
-    const PUTT_STRIP = ['ballSpeed', 'hla', 'launch', 'faceToPath', 'total'];
     let savedStripBeforePutt = null;
+
+    function persistStripLayout() {
+        if (puttingActive) savePuttStripLayout(stripLayout);
+        else saveStripLayout(stripLayout);
+    }
     let puttAnnounced = false;
     let puttHud = null;
     let savedDistBadge = null;
@@ -1803,6 +1937,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
 
     function enterPuttingMode() {
+        const justEntered = !puttingActive;
         ensurePuttScene();
         if (puttScene.ball) puttScene.ball.visible = false;
         setTargetGreenVisible(false);
@@ -1828,9 +1963,11 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         if (badge) badge.innerText = String(puttDistanceFt);
         if (unit) unit.innerText = 'ft to cup';
         if (title) title.innerText = puttLadderOn ? 'Ladder' : 'Putting';
-        if (savedStripBeforePutt === null) savedStripBeforePutt = [...stripLayout];
-        stripLayout = [...PUTT_STRIP];
-        buildStrip();
+        if (justEntered) {
+            savedStripBeforePutt = [...stripLayout];
+            stripLayout = loadPuttStripLayout();
+            buildStrip();
+        }
     }
 
     function exitPuttingMode() {
@@ -1854,6 +1991,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             title.innerText = 'Practice';
         }
         if (savedStripBeforePutt) {
+            savePuttStripLayout(stripLayout);
             stripLayout = [...savedStripBeforePutt];
             savedStripBeforePutt = null;
             buildStrip();
@@ -1924,6 +2062,32 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         if (ball.landingRing) ball.landingRing.visible = false;
     }
 
+    function puttStripCtx(shotData) {
+        return {
+            carryYds: 0,
+            totalYds: shotData && shotData.ogcTotal,
+            offlineYds: shotData && shotData.ogcOffline,
+            apexFt: shotData && shotData.apexFt,
+            smashClamped: false,
+            totalRollFt: shotData && shotData.totalRollFt,
+            skidFt: shotData && shotData.skidFt,
+            timeToFullRoll: shotData && shotData.timeToFullRoll,
+        };
+    }
+
+    function applyPuttSimMetrics(shotData) {
+        if (!puttSim || !shotData) return;
+        shotData.skidFt = puttSim.skidDistanceM / FT_TO_M;
+        shotData.totalRollFt = puttSim.totalRollM / FT_TO_M;
+        if (puttSim.fullRollReached || !puttSim.isMoving) {
+            shotData.timeToFullRoll = puttSim.timeToFullRollS;
+        }
+        shotData.derived = Object.assign({}, shotData.derived, {
+            skid: true,
+            timeToFullRoll: true,
+        });
+    }
+
     function firePutt(shotData, opts = {}) {
         enterPuttingMode();
         lastShotTelemetry = shotData;
@@ -1937,6 +2101,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             shotData.sidespin || 0,
             shotData.horizontalLaunchAngle || 0
         );
+        applyPuttSimMetrics(shotData);
+        paintStrip(shotData, puttStripCtx(shotData));
         syncPuttBallMesh();
     }
 
@@ -2017,6 +2183,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         if (puttingActive && puttSim) {
             if (puttSim.isMoving) puttSim.updatePhysics(delta);
             syncPuttBallMesh();
+            if (lastShotTelemetry) {
+                applyPuttSimMetrics(lastShotTelemetry);
+                paintStrip(lastShotTelemetry, puttStripCtx(lastShotTelemetry));
+            }
             if (!puttAnnounced && puttSim.result) {
                 puttAnnounced = true;
                 const result = puttSim.result;
@@ -2484,6 +2654,11 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     const parsed = extractShotTelemetry(msg);
                     if (parsed) fireShot(parsed);
                     loadRangeIndex();
+                    // The desktop saves (and stamps) before broadcasting, but
+                    // give the file write a beat before re-reading progress.
+                    if (currentRangeMode === 'combine') setTimeout(loadCombine, 400);
+                } else if (msg.type === 'combine') {
+                    loadCombine();
                 } else if (msg.type === 'pressure' && msg.data) {
                     const p = msg.data;
                     pressureRenderer.pushSample(p);
@@ -2506,6 +2681,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                         renderClubSheet();
                         syncPuttingMode(msg.club);
                     }
+                    if (combineStatus) renderCombine(combineStatus);
                 } else if (msg.type === 'init') {
                     if (msg.club && !manualClub) {
                         const found = bagClubs.find(c => c.name === msg.club);
@@ -2587,5 +2763,6 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }).catch(() => {});
 
     loadRangeIndex();
+    loadCombine();
     connectWS();
 }

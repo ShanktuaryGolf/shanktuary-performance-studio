@@ -74,13 +74,19 @@ def _occluders(items):
     return out
 
 
+# The face artwork is 290x220 drawn at ~90px high, so ~118px wide. It used
+# to be padded to a 158px square, which is what the old >150 threshold
+# matched -- and that transparent padding was what buried the badge row.
+_FACE_MIN_W = 100
+
+
 def test_only_one_clubface_is_drawn():
     """Production's face plus the redesign's is what forced the opaque cover
     in the first place. Suppressing the asset should leave exactly one."""
     root, app = _quad_app()
     try:
         faces = [b for kind, _, b, _ in _panel_items(app)
-                 if kind == "image" and (b[2] - b[0]) > 150]
+                 if kind == "image" and (b[2] - b[0]) > _FACE_MIN_W]
         assert len(faces) == 1, f"expected 1 clubface, found {len(faces)}: {faces}"
     finally:
         root.destroy()
@@ -93,7 +99,7 @@ def test_the_clubface_clears_the_readout_column():
     try:
         items = _panel_items(app)
         faces = [b for kind, _, b, _ in items
-                 if kind == "image" and (b[2] - b[0]) > 150]
+                 if kind == "image" and (b[2] - b[0]) > _FACE_MIN_W]
         assert faces, "no clubface image in the panel"
         face_left = min(b[0] for b in faces)
 

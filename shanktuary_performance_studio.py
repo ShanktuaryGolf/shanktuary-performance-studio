@@ -185,6 +185,7 @@ pressure_trace_queue = queue.Queue()
 # obs_state.club_listeners. Queue them here and apply on the Tk thread —
 # never touch current_club or draw_screen from the listener itself.
 club_select_queue = queue.Queue()
+combine_queue = queue.Queue()      # range -> Tk: combine run dict, or None to end
 
 # --- Official OpenLaunch Nova Zero-Config Auto-Discovery Engine ---
 def discover_nova_device():
@@ -518,7 +519,9 @@ def websocket_worker():
                     pass
             time.sleep(3)
 
-def load_image_asset(path, target_h=210, mirror=False):
+def load_image_asset(path, target_h=210, mirror=False, pad_square=True):
+    """Scale an RGBA asset to `target_h`. `pad_square=False` returns the bare
+    scaled artwork, for callers that hit-test or clamp on its real extent."""
     if os.path.exists(path):
         try:
             img = Image.open(path).convert("RGBA")
@@ -527,7 +530,8 @@ def load_image_asset(path, target_h=210, mirror=False):
             w, h = img.size
             target_w = int(w * (target_h / h))
             resized = img.resize((target_w, target_h), resample=Image.LANCZOS)
-            
+            if not pad_square:
+                return resized
             dim = max(target_w, target_h) + 40
             canvas_img = Image.new("RGBA", (dim, dim), (0, 0, 0, 0))
             canvas_img.paste(resized, ((dim - target_w) // 2, (dim - target_h) // 2), resized)
@@ -622,6 +626,8 @@ class ShanktuaryApp:
 
         # Mode 3: Dispersion Viewport State
         self.dispersion_selected_club = "ALL"
+        self.dispersion_split_by_ball = False   # one group per club·ball
+        self.dispersion_split_rect = None
         self.dispersion_view_submode = "split" # "split", "topdown", "side"
         self.dispersion_submode_rects = []     # (x1, y1, x2, y2, submode_key)
         self.dispersion_club_chip_rects = []  # (x1, y1, x2, y2, club_name)
@@ -640,7 +646,26 @@ class ShanktuaryApp:
         self.custom_club_modal_add_rect = None
         self.custom_club_modal_cancel_rect = None
 
+        # Golf balls: a second equipment variable. Stamped on each shot as
+        # `ball` so Dispersion/Fit can split by it; a shot without a ball
+        # selected simply has no key (never a placeholder name).
+        self.balls = []                        # [{"name": ...}]
+        self.current_ball = None
+
+        # Combine: None, or {"stations": [{"role", "club"}, ...], "session_id"}.
+        # While active, incoming shots hit with a station club are tagged
+        # `combine_station`; the run is scored and recorded on save.
+        self.combine_run = None
+
+        # Click-to-mark contact on the drawn clubface (Shot + Quad).
+        self.contact_face_rect = None
+        self.contact_face_geometry = None
+        self.contact_clear_rect = None
+
         # Mode 6: My Bag Viewport State
+        self.bag_ball_chip_rects = []          # (x1, y1, x2, y2, ball_name)
+        self.bag_ball_remove_rects = []        # (x1, y1, x2, y2, ball_name)
+        self.bag_add_ball_rect = None
         self.bag = []
         self.bag_scope = "session"            # "session" or "all_time"
         self.bag_scroll_offset = 0
@@ -835,6 +860,14 @@ class ShanktuaryApp:
             )
         except Exception as e:
             print(f"[!] Could not register club listener: {e}")
+
+        # Range combine card -> desktop. Same shape: enqueue only.
+        try:
+            obs_server.obs_state.combine_listeners.append(
+                lambda run: combine_queue.put(run)
+            )
+        except Exception as e:
+            print(f"[!] Could not register combine listener: {e}")
 
     def set_aim_offset(self, offset_deg):
         """Set and persist the aim offset, clamped to the sane range."""
@@ -1279,6 +1312,12 @@ class ShanktuaryApp:
                     if c and self.get_bag_club(c) is None
                 ]
                 self.is_left_handed = bool(data.get("is_left_handed", False))
+                loaded_balls = data.get("balls")
+                if isinstance(loaded_balls, list):
+                    self.balls = [{"name": str(b.get("name"))} for b in loaded_balls
+                                  if isinstance(b, dict) and b.get("name")]
+                cur = data.get("current_ball")
+                self.current_ball = cur if cur and any(b["name"] == cur for b in self.balls) else None
             if not self.bag:
                 self.init_default_bag()
             # Backfill lie_deg for bags saved before the field existed. Uses the
@@ -1324,7 +1363,9 @@ class ShanktuaryApp:
                 "sessions": self.sessions,
                 "custom_clubs": custom_clubs,
                 "bag": self.bag,
-                "is_left_handed": self.is_left_handed
+                "is_left_handed": self.is_left_handed,
+                "balls": list(getattr(self, "balls", []) or []),
+                "current_ball": getattr(self, "current_ball", None),
             }
             # Atomic write: serialize to a temp file, then swap into place so
             # a crash mid-write can never truncate the whole history.
@@ -1334,6 +1375,66 @@ class ShanktuaryApp:
             os.replace(tmp_path, SESSION_LOG_PATH)
         except Exception as e:
             print(f"[!] Error saving session: {e}")
+        self._record_index_snapshot()
+        self._record_combine_run()
+
+    def _record_index_snapshot(self):
+        """Append today's Index to the progress series after every save.
+
+        The save is the one moment the shot count changes, and the store
+        itself refuses duplicates, so this is cheap and idempotent. Nothing
+        here may ever take the session save down with it.
+        """
+        try:
+            from src.analytics import index_history
+
+            shots = [s for sess in self.sessions
+                     for s in (sess.get("shots") or []) if isinstance(s, dict)]
+            result = player_shanktuary_index(shots, is_left_handed=self.is_left_handed)
+            index_history.record(result, len(shots))
+        except Exception as e:
+            print(f"[!] Index history not recorded: {e}")
+
+    def export_session_report(self, kind):
+        """Tools -> Export: ask where, then hand off to the dialog-free core."""
+        from tkinter import filedialog, messagebox
+
+        from src.analytics import session_report
+
+        session = self.get_active_session()
+        if not (session.get("shots") or []):
+            messagebox.showinfo("Export", "This session has no shots to export.", parent=self.root)
+            return None
+        initial = session_report.default_filename(session, kind)
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title=f"Export session {kind.upper()}",
+            initialdir=os.path.dirname(SESSION_LOG_PATH), initialfile=initial,
+            defaultextension=f".{kind}",
+            filetypes=[(kind.upper(), f"*.{kind}"), ("All files", "*.*")],
+        )
+        if not path:
+            return None
+        try:
+            out = self._export_session_report(kind, path)
+        except Exception as e:
+            messagebox.showerror("Export failed", str(e), parent=self.root)
+            return None
+        self.copy_feedback = f"Saved {os.path.basename(str(out))}"
+        self.root.after(2500, self.clear_copy_feedback)
+        return out
+
+    def _export_session_report(self, kind, path):
+        """Write the active session as CSV or PDF. Reads only; never saves state."""
+        from src.analytics import index_history, session_report
+
+        session = self.get_active_session()
+        if kind == "csv":
+            return session_report.write_csv(session, path, is_left_handed=self.is_left_handed)
+        shots = [s for sess in self.sessions for s in (sess.get("shots") or []) if isinstance(s, dict)]
+        result = player_shanktuary_index(shots, is_left_handed=self.is_left_handed)
+        trend = index_history.trend(index_history.load())
+        return session_report.write_pdf(session, path, index_result=result,
+                                        index_trend=trend, is_left_handed=self.is_left_handed)
 
     def _text_width(self, text, font_spec):
         """Measured pixel width of a string, cached.
@@ -1377,12 +1478,12 @@ class ShanktuaryApp:
             return self.img_cache[key]
         return None
 
-    def get_scaled_club_asset(self, path, target_h, mirror=False):
-        key = (path, target_h, mirror)
+    def get_scaled_club_asset(self, path, target_h, mirror=False, pad_square=True):
+        key = (path, target_h, mirror, pad_square)
         hit = self._cached_image(key)
         if hit is not None:
             return hit
-        img = load_image_asset(path, target_h=target_h, mirror=mirror)
+        img = load_image_asset(path, target_h=target_h, mirror=mirror, pad_square=pad_square)
         if img:
             return self._cache_image(key, ImageTk.PhotoImage(img))
         return None
@@ -1424,6 +1525,143 @@ class ShanktuaryApp:
             if c.get("name") == club_name:
                 return c
         return None
+
+    # ---- Balls --------------------------------------------------------------
+    @staticmethod
+    def _norm_ball(name):
+        return " ".join(str(name or "").split()).casefold()
+
+    def find_ball(self, name):
+        key = self._norm_ball(name)
+        if not key:
+            return None
+        for b in self.balls:
+            if self._norm_ball(b.get("name")) == key:
+                return b
+        return None
+
+    def add_ball(self, name):
+        """Add (or re-select) a ball by name; returns the canonical name."""
+        clean = " ".join(str(name or "").split())
+        if not clean:
+            return None
+        existing = self.find_ball(clean)
+        if existing is None:
+            existing = {"name": clean}
+            self.balls.append(existing)
+        self.current_ball = existing["name"]
+        self.save_session_to_file()
+        return existing["name"]
+
+    def remove_ball(self, name):
+        """Drop a ball from the picker. Shots already stamped keep their name."""
+        target = self.find_ball(name)
+        if target is None:
+            return False
+        self.balls = [b for b in self.balls if b is not target]
+        if self.current_ball == target["name"]:
+            self.current_ball = None
+        self.save_session_to_file()
+        return True
+
+    def set_current_ball(self, name):
+        if name is None:
+            self.current_ball = None
+        else:
+            b = self.find_ball(name)
+            self.current_ball = b["name"] if b else None
+        self.save_session_to_file()
+
+    def mark_contact(self, shot, horizontal_mm, vertical_mm):
+        """Record where the golfer says the ball hit the face (mm, +heel/+high).
+
+        A training label for a future Nova-only estimator -- stored on the
+        shot, exported in the CSV, never presented as a measurement.
+        """
+        if not isinstance(shot, dict):
+            return
+        shot["marked_contact"] = {
+            "horizontal_mm": round(float(horizontal_mm) * 2) / 2,
+            "vertical_mm": round(float(vertical_mm) * 2) / 2,
+            "source": "user",
+            "marked_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self.save_session_to_file()
+
+    def clear_contact_mark(self, shot):
+        if isinstance(shot, dict) and shot.pop("marked_contact", None) is not None:
+            self.save_session_to_file()
+
+    def _stamp_equipment(self, msg):
+        """Record which ball was in play and, during a combine, the station.
+
+        Club stamping lives in poll_queue; the station follows the club that
+        is already on the message so a shot never lands on the wrong station.
+        """
+        if self.current_ball:
+            msg["ball"] = self.current_ball
+        else:
+            msg.pop("ball", None)
+        station = self.combine_station(msg.get("club"))
+        if station:
+            msg["combine_station"] = station
+        else:
+            msg.pop("combine_station", None)
+        return msg
+
+    # --- Combine ---------------------------------------------------------------
+    def combine_station(self, club=None):
+        """Role of the active combine station whose club is `club` (default:
+        the selected club), or None when no run is active / club isn't one."""
+        run = getattr(self, "combine_run", None)
+        if not run:
+            return None
+        club = club or self.current_club
+        for st in run.get("stations") or []:
+            if st.get("club") == club:
+                return st.get("role")
+        return None
+
+    def apply_range_combine(self, run):
+        """Apply a combine run started (dict) or ended (None) on the range.
+        Tk thread only. The server built the protocol from the saved bag."""
+        if run is not None and not (isinstance(run, dict) and run.get("stations")):
+            return
+        self.combine_run = run
+        if run:
+            first = run["stations"][0]["club"]
+            self.copy_feedback = f"Combine started — {first} first, 10 swings per station"
+        else:
+            self.copy_feedback = "Combine ended"
+        # Bare test instances have no root/canvas yet; the run is the point.
+        if getattr(self, "canvas", None) is not None:
+            self.root.after(2000, self.clear_copy_feedback)
+            self.draw_screen()
+
+    def combine_result(self):
+        """Live score of the active run, or None."""
+        from src.analytics import combine
+
+        run = getattr(self, "combine_run", None)
+        if not run:
+            return None
+        shots = [s for s in (self.get_active_session().get("shots") or []) if isinstance(s, dict)]
+        return combine.score(run["stations"], shots, is_left_handed=self.is_left_handed)
+
+    def _record_combine_run(self):
+        """After a save: persist the active run once every station is complete.
+        Nothing here may ever take the session save down with it."""
+        try:
+            from src.analytics import combine
+
+            run = getattr(self, "combine_run", None)
+            if not run:
+                return
+            result = self.combine_result()
+            if result and result.get("status") == "complete":
+                combine.record(result, session_id=str(run.get("session_id")))
+        except Exception as e:
+            print(f"[!] Combine not recorded: {e}")
 
     def update_club_specs(self, club_name, brand=None, model=None, loft_deg=None, shaft=None, category=None, new_name=None, lie_deg=None, notes=None):
         c = self.get_bag_club(club_name)
@@ -2638,10 +2876,31 @@ class ShanktuaryApp:
         ]
         order = ["Driver", "3 Wood", "5 Wood", "3 Hybrid", "4 Iron", "5 Iron",
                  "6 Iron", "7 Iron", "8 Iron", "9 Iron", "PW", "GW", "SW", "LW"]
-        if club_name in order:
-            return ramp[order.index(club_name)]
+        name = str(club_name)
+        # "7 Iron · Pro V1" (Split by ball): keep the club's hue, vary the
+        # lightness by ball so the series stays in the club's family.
+        if " · " in name:
+            club, ball = name.split(" · ", 1)
+            base = self.get_club_color(club)
+            r, g, b = (int(base[i:i + 2], 16) for i in (1, 3, 5))
+            # Alternate darker/lighter around the base so the first two balls
+            # are clearly apart. Registered balls take slots in picker order;
+            # "no ball" and names no longer in the picker (stamped on old
+            # shots) get a stable slot from the name so they never collide.
+            steps = [0.78, 1.15, 0.62, 1.30, 0.50, 0.90]
+            balls = [x.get("name") for x in getattr(self, "balls", []) or []]
+            if ball == "no ball":
+                slot = len(steps) - 1
+            elif ball in balls:
+                slot = balls.index(ball) % (len(steps) - 1)
+            else:
+                slot = sum(ord(ch) for ch in ball) % (len(steps) - 1)
+            f = steps[slot]
+            return "#%02X%02X%02X" % tuple(max(0, min(255, int(c * f))) for c in (r, g, b))
+        if name in order:
+            return ramp[order.index(name)]
         # Custom clubs: deterministic slot in the same ramp.
-        h = sum(ord(c) for c in str(club_name))
+        h = sum(ord(c) for c in name)
         return ramp[h % len(ramp)]
 
     def poll_pressure_stream(self):
@@ -2723,6 +2982,7 @@ class ShanktuaryApp:
                     club_name = self.current_club
                 msg["club"] = club_name
                 msg["club_color"] = self.get_club_color(club_name)
+                self._stamp_equipment(msg)
                 msg["timestamp"] = datetime.now().strftime("%I:%M %p")
                 self.nova_connected = True
                 self.validate_shot_payload(msg)
@@ -2759,6 +3019,12 @@ class ShanktuaryApp:
         try:
             while True:
                 self.apply_range_club(club_select_queue.get_nowait())
+        except queue.Empty:
+            pass
+
+        try:
+            while True:
+                self.apply_range_combine(combine_queue.get_nowait())
         except queue.Empty:
             pass
 
@@ -3216,6 +3482,13 @@ class ShanktuaryApp:
             # Swallow every other click while the prompt is up.
             return
 
+        # 0a'. Click-to-mark on the Shot/Quad clubface (training labels).
+        if self.view_mode in (9, 1) and not (self.show_club_menu or self.show_tools_menu
+                                             or self.show_session_menu or self.show_filter_menu):
+            from src.ui.contact_panel import handle_face_click
+            if handle_face_click(self, event.x, event.y):
+                return
+
         # 0a. Rail Setup slot. Checked before the modal handler so the button
         # also closes the modal -- otherwise clicking it while open would be
         # swallowed by the modal's own hit testing and feel dead.
@@ -3413,6 +3686,10 @@ class ShanktuaryApp:
                         self.open_shot_source_picker()
                     elif action == "clear_session":
                         self.clear_session()
+                    elif action == "export_csv":
+                        self.export_session_report("csv")
+                    elif action == "export_pdf":
+                        self.export_session_report("pdf")
                     break
             self.show_tools_menu = False
             self.draw_screen()
@@ -3526,6 +3803,12 @@ class ShanktuaryApp:
                     self.dispersion_view_submode = sub_key
                     self.draw_screen()
                     return
+
+            r = getattr(self, "dispersion_split_rect", None)
+            if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                self.dispersion_split_by_ball = not self.dispersion_split_by_ball
+                self.draw_screen()
+                return
 
             for x1, y1, x2, y2, club_name in self.dispersion_club_chip_rects:
                 if x1 <= event.x <= x2 and y1 <= event.y <= y2:
@@ -3858,6 +4141,19 @@ class ShanktuaryApp:
                 return
             if self.bag_add_club_btn_rect and self.bag_add_club_btn_rect[0] <= event.x <= self.bag_add_club_btn_rect[2] and self.bag_add_club_btn_rect[1] <= event.y <= self.bag_add_club_btn_rect[3]:
                 self.open_club_spec_editor(None)
+                return
+            for x1, y1, x2, y2, b_name in self.bag_ball_remove_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.confirm_remove_ball(b_name)
+                    return
+            for x1, y1, x2, y2, b_name in self.bag_ball_chip_rects:
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.set_current_ball(None if self.current_ball == b_name else b_name)
+                    self.draw_screen()
+                    return
+            r = self.bag_add_ball_rect
+            if r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]:
+                self.prompt_add_ball()
                 return
             for x1, y1, x2, y2, c_name in self.bag_edit_btn_rects:
                 if x1 <= event.x <= x2 and y1 <= event.y <= y2:
@@ -4707,6 +5003,10 @@ class ShanktuaryApp:
                 ("copy_obs_url", "Copy OBS Overlay URL", f"http://localhost:{port}", False),
                 ("open_range", "Open 3D Range", "opens /range in your browser", False),
             ]),
+            ("SESSION REPORT", [
+                ("export_csv", "Export session CSV", "one row per shot — spreadsheets, AI coaching", False),
+                ("export_pdf", "Export session PDF", "summary, per-club table, dispersion, Index", False),
+            ]),
             ("FLOOR PROJECTION", [
                 ("copy_divot_url", "Copy Virtual Divot URL", f"http://localhost:{port}/divot", False),
                 ("open_divot", "Open Virtual Divot", "opens /divot in your browser", False),
@@ -5259,6 +5559,26 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=theme.ACCENT, outline="")
         self.canvas.create_text((bx1 + bx2) // 2, (by1 + by2) // 2, text="Open 3D WebGPU Range  ↗", fill="#EAF5EE", font=(theme.ui_font(), 9, "bold"))
 
+    def _dispersion_groups(self):
+        """Session shots grouped for the dispersion charts.
+
+        Keyed by club, or by "club · ball" when Split by ball is on. Shots
+        without a ball form their own "· no ball" series rather than being
+        merged into one of the named balls.
+        """
+        groups = {}
+        for idx, shot in enumerate(self.session_shots):
+            if shot.get("excluded", False):
+                continue
+            c_name = shot.get("club", "7 Iron")
+            if self.dispersion_selected_club != "ALL" and c_name != self.dispersion_selected_club:
+                continue
+            key = c_name
+            if getattr(self, "dispersion_split_by_ball", False):
+                key = f"{c_name} · {shot.get('ball') or 'no ball'}"
+            groups.setdefault(key, []).append((idx, shot))
+        return groups
+
     def draw_dispersion_and_gapping(self, avail_w, h, offset_x=0):
         self.dispersion_club_chip_rects.clear()
         self.dispersion_dot_rects.clear()
@@ -5294,17 +5614,25 @@ class ShanktuaryApp:
             self.canvas.create_text((sm_rect[0] + sm_rect[2]) // 2, (sm_rect[1] + sm_rect[3]) // 2, text=sm_label, fill=theme.ACCENT_TEXT if is_active else theme.TEXT_2, font=(theme.ui_font(), 8, "bold" if is_active else "normal"))
             sub_x += sm_w + 8
 
-        # Filter session shots
-        grouped_shots = {}
-        for idx, shot in enumerate(self.session_shots):
-            if shot.get("excluded", False):
-                continue
-            c_name = shot.get("club", "7 Iron")
-            if self.dispersion_selected_club != "ALL" and c_name != self.dispersion_selected_club:
-                continue
-            if c_name not in grouped_shots:
-                grouped_shots[c_name] = []
-            grouped_shots[c_name].append((idx, shot))
+        # Filter session shots (optionally one series per club·ball).
+        grouped_shots = self._dispersion_groups()
+
+        # "Split by ball" toggle, only when there is a ball to split on.
+        self.dispersion_split_rect = None
+        if getattr(self, "balls", None):
+            label = ("☑" if self.dispersion_split_by_ball else "☐") + " Split by ball"
+            tw = self._text_width(label, (theme.ui_font(), 8, "bold")) + 22
+            sx2 = offset_x + plot_w
+            sx1 = sx2 - tw
+            if sx1 > sub_x + 6:
+                self.dispersion_split_rect = (sx1, top_y, sx2, top_y + 24)
+                on = self.dispersion_split_by_ball
+                self.canvas.create_rectangle(sx1, top_y, sx2, top_y + 24,
+                                             fill=theme.SURFACE_2 if on else theme.SURFACE,
+                                             outline=theme.ACCENT_TEXT if on else theme.HAIRLINE)
+                self.canvas.create_text((sx1 + sx2) // 2, top_y + 12, text=label,
+                                        fill=theme.ACCENT_TEXT if on else theme.TEXT_2,
+                                        font=(theme.ui_font(), 8, "bold"))
 
         content_top = top_y + 30
         content_h = bot_y - content_top
@@ -6236,44 +6564,9 @@ class ShanktuaryApp:
         return (sum((o - mean) ** 2 for o in offs) / len(offs)) ** 0.5
 
     def _draw_overview_face(self, cx, cy, size):
-        """Small clubface with the estimated strike marker."""
-        img = self.get_scaled_club_asset(FACE_PATH, int(size),
-                                         mirror=self.is_left_handed)
-        if img:
-            self.canvas.create_image(cx, cy, image=img, anchor="c")
-        else:
-            half = size / 2
-            self.canvas.create_rectangle(cx - half * 0.7, cy - half,
-                                         cx + half * 0.7, cy + half,
-                                         fill=theme.SURFACE_2, outline="")
-
-        # Sweet spot: same groove-centre offsets the quad studio uses
-        # (-43.5, -40.0 px on a 290x220 asset), mirrored for LH.
-        sdx = (43.5 / 220.0) * size * (1 if self.is_left_handed else -1)
-        sdy = (-40.0 / 220.0) * size
-        ssx, ssy = cx + sdx, cy + sdy
-        for d in (-6, -3, 3, 6):
-            self.canvas.create_line(ssx + d, ssy, ssx + d + 2, ssy,
-                                    fill=theme.GUIDE)
-            self.canvas.create_line(ssx, ssy + d, ssx, ssy + d + 2,
-                                    fill=theme.GUIDE)
-
-        head, _, hcol = self.summarize_strike(self.current_shot)
-        dy = 0.0
-        if "Low" in head:
-            dy = size * 0.14
-        elif "High" in head:
-            dy = -size * 0.14
-        mx_, my_ = ssx + size * 0.05, ssy + dy
-        r = size * 0.13
-        for a in range(0, 360, 12):
-            a1 = math.radians(a)
-            a2 = math.radians(a + 6)
-            self.canvas.create_line(mx_ + r * math.cos(a1), my_ + r * math.sin(a1),
-                                    mx_ + r * math.cos(a2), my_ + r * math.sin(a2),
-                                    fill=hcol, width=2)
-        self.canvas.create_oval(mx_ - 3, my_ - 3, mx_ + 3, my_ + 3,
-                                fill=hcol, outline="")
+        """Use the same explicit contact evidence as the Quad view."""
+        from src.ui.contact_panel import draw_contact_face
+        draw_contact_face(self, cx, cy, size)
 
     def _draw_overview_dispersion(self, x, y, w, hh):
         """Scatter of the session's landing points, left/right vs distance."""
@@ -6405,42 +6698,13 @@ class ShanktuaryApp:
                                     font=(theme.ui_font(), 8), anchor="e")
 
     def summarize_strike(self, shot):
-        """Plain-language strike direction for the current shot.
+        """One evidence-based contact summary shared by desktop views."""
+        from src.analytics.strike import contact_location
 
-        Reuses the same launch-deviation signal the quad studio plots, but
-        returns text rather than drawing, so Overview can show a verdict
-        without duplicating the estimator.
-
-        Returns (headline, detail, colour).
-        """
         if not shot:
             return ("No shot", "", theme.TEXT_3)
-
-        club = shot.get("club") or self.current_club
-        vla = float(shot.get("vertical_launch_angle_degrees") or 0.0)
-
-        c = self.get_bag_club(club) or {}
-        loft = float(c.get("loft_deg") or 0.0)
-        if loft > 0:
-            base_launch = 2.0 if "Putter" in club else loft * 0.68
-        else:
-            base_launch = 21.0
-
-        clamped = self.compute_smash_confidence(
-            shot.get("ball_speed_meters_per_second"),
-            shot.get("vertical_launch_angle_degrees"),
-            shot.get("total_spin_rpm"),
-        )["clamped"]
-
-        dev = vla - base_launch
-        if abs(dev) < 1.0:
-            return ("Centre strike", "launch matches this club's loft",
-                    theme.ACCENT_TEXT)
-
-        side = "High on face" if dev > 0 else "Low on face"
-        detail = ("direction only — no club-speed data" if clamped
-                  else f"{abs(dev):.1f}° from expected launch")
-        return (side, detail, theme.WARN)
+        contact = contact_location(shot)
+        return contact.headline, contact.detail, theme.TEXT_2
 
     def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108, club_path_known=True, face_to_path_known=True, face_to_target_known=True):
         if isinstance(shot_rank, dict):
@@ -6659,383 +6923,13 @@ class ShanktuaryApp:
         annot(gut_r3, spin_y + pair_h, "BACKSPIN",
               f"{int(backspin)} rpm", anchor="e")
 
-        # Quadrant 4 (Bottom-Right): High-Precision Face Impact Location & Strike Coordinates
-        q4_cx, q4_cy = offset_x + (3 * quad_w // 2), mid_y + (quad_h // 2)
-        q4_top = mid_y
-        q4_bot = h - 10
+        # Contact is rendered once through the shared evidence-based panel.
+        self.draw_contact_panel(mid_x + 2, mid_y + 2,
+                                offset_x + avail_w - 2, h - 12)
 
-        # --- Strike estimation ---
-        # The Nova / OpenGolfCoach payload carries NO measured face-impact
-        # location. If a future firmware adds one we use it verbatim
-        # ("measured"); otherwise we build an honest ESTIMATE:
-        #   * MAGNITUDE from smash-factor deficit vs. the club's max
-        #     achievable smash (energy loss on off-center strikes is real,
-        #     well-documented physics).
-        #   * DIRECTION as a low-confidence hint from gear-effect residuals
-        #     (sidespin not explained by face-to-path; launch/spin deviation
-        #     from club-typical for high/low face).
-        shot_obj = self.current_shot or {}
-        ogc = shot_obj.get("open_golf_coach", {}) if isinstance(shot_obj, dict) else {}
-        impact_data = (
-            shot_obj.get("face_impact") or
-            shot_obj.get("impact_location") or
-            ogc.get("face_impact") or
-            ogc.get("impact_location") or
-            ogc.get("face_contact") or {}
-        )
-
-        measured = False
-        h_impact_mm = 0.0
-        v_impact_mm = 0.0
-        smash_deficit = 0.0
-        est_offset_mm = 0.0
-        if isinstance(impact_data, dict) and impact_data:
-            for key in ("lateral_offset_mm", "heel_toe_mm", "horizontal_offset_mm", "x_mm"):
-                if key in impact_data:
-                    h_impact_mm = float(impact_data[key])
-                    measured = True
-                    break
-            for key in ("vertical_offset_mm", "high_low_mm", "y_mm"):
-                if key in impact_data:
-                    v_impact_mm = float(impact_data[key])
-                    measured = True
-                    break
-
-        # Club specs must come from the SHOT being displayed, not from whatever
-        # is selected in the dropdown right now. Reviewing shot history, or
-        # changing club after a shot, would otherwise re-score old shots against
-        # the wrong loft and silently flip their strike verdict.
-        strike_club = (shot_obj.get("club") if isinstance(shot_obj, dict) else None) or self.current_club
-
-        if not measured:
-            # 1) Magnitude from smash deficit.
-            #
-            # CAUTION: this is only meaningful when OGC's clubhead-speed model
-            # is NOT saturated. When the effective-COR clamp engages (common
-            # below ~90 mph ball speed) smash_factor is a constant, so this
-            # yields the SAME offset for every shot with a given club -- a
-            # fabricated number, not an estimate. compute_smash_confidence()
-            # detects that case and we suppress the magnitude entirely.
-            club_max_smash = {
-                "Driver": 1.50, "3 Wood": 1.48, "5 Wood": 1.47, "3 Hybrid": 1.46,
-                "4 Iron": 1.43, "5 Iron": 1.41, "6 Iron": 1.39, "7 Iron": 1.37,
-                "8 Iron": 1.34, "9 Iron": 1.31, "PW": 1.27, "GW": 1.24,
-                "SW": 1.21, "LW": 1.18
-            }
-            max_smash = club_max_smash.get(strike_club, 1.37)
-            smash_val = float(smash or 0.0)
-            if smash_val <= 0.0:
-                smash_val = max_smash
-            smash_conf = self.compute_smash_confidence(
-                shot_obj.get("ball_speed_meters_per_second"),
-                shot_obj.get("vertical_launch_angle_degrees"),
-                shot_obj.get("total_spin_rpm"),
-            )
-            magnitude_known = not smash_conf["clamped"]
-            if magnitude_known:
-                smash_deficit = max(0.0, min(0.35, max_smash - smash_val))
-                # ~0.01 smash lost per mm off-center near the sweet spot
-                est_offset_mm = min(20.0, smash_deficit * 100.0)
-            else:
-                smash_deficit = 0.0
-                est_offset_mm = 0.0
-
-            # 2) Direction hints from gear-effect residuals (low confidence)
-            club_baselines = {
-                "Driver": 11.5, "3 Wood": 13.0, "5 Wood": 14.5, "3 Hybrid": 16.0,
-                "4 Iron": 16.5, "5 Iron": 17.5, "6 Iron": 19.0, "7 Iron": 21.0,
-                "8 Iron": 23.5, "9 Iron": 26.5, "PW": 29.0, "GW": 32.0,
-                "SW": 35.0, "LW": 38.0
-            }
-            club_spin_baselines = {
-                "Driver": 2700, "3 Wood": 3600, "5 Wood": 4300, "3 Hybrid": 4800,
-                "4 Iron": 4800, "5 Iron": 5300, "6 Iron": 6200, "7 Iron": 7000,
-                "8 Iron": 7800, "9 Iron": 8500, "PW": 9300, "GW": 10000,
-                "SW": 10500, "LW": 11000
-            }
-            club_speed_baselines = {
-                "Driver": 160.0, "3 Wood": 150.0, "5 Wood": 140.0, "3 Hybrid": 130.0,
-                "4 Iron": 125.0, "5 Iron": 120.0, "6 Iron": 115.0, "7 Iron": 105.0,
-                "8 Iron": 95.0, "9 Iron": 90.0, "PW": 85.0, "GW": 80.0,
-                "SW": 75.0, "LW": 70.0
-            }
-            # Dynamic baseline launch angle from club's configured loft in My Bag (Mitchell standards fallback)
-            configured_loft = None
-            for c in getattr(self, "bag", []):
-                if isinstance(c, dict) and c.get("name") == strike_club:
-                    configured_loft = c.get("loft_deg")
-                    break
-            if configured_loft and float(configured_loft) > 0:
-                c_loft = float(configured_loft)
-                if strike_club in ("Driver", "3 Wood", "5 Wood", "7 Wood"):
-                    base_launch = c_loft * 1.10
-                elif "Hybrid" in strike_club:
-                    base_launch = c_loft * 0.82
-                elif "Putter" in strike_club:
-                    base_launch = 2.0
-                else:
-                    # Irons & Wedges: forward shaft lean delofting delivers ~68% of static loft launch angle
-                    base_launch = c_loft * 0.68
-            else:
-                base_launch = club_baselines.get(strike_club, 21.0)
-
-            base_spin = club_spin_baselines.get(strike_club, 7000)
-            full_speed = club_speed_baselines.get(strike_club, 105.0)
-
-            # Scale expected baseline spin and sidespin by swing speed ratio so partial swings don't falsely skew
-            ball_spd = float(ball_speed or 0.0)
-            if ball_spd <= 0.0 and self.current_shot:
-                ogc_s = self.current_shot.get("open_golf_coach", {}) if isinstance(self.current_shot, dict) else {}
-                us_s = ogc_s.get("us_customary_units", {}) if isinstance(ogc_s, dict) else {}
-                ball_spd = float(us_s.get("ball_speed_mph", 0.0) or (self.current_shot.get("ball_speed_meters_per_second", 0.0) * 2.23694 if isinstance(self.current_shot, dict) else 0.0))
-            speed_ratio = max(0.2, min(1.3, ball_spd / full_speed)) if ball_spd > 0 else 1.0
-            expected_spin = base_spin * speed_ratio
-
-            # Horizontal: sidespin beyond what face-to-path predicts.
-            # For RH: open face (+f2p) → fade (+sidespin); heel gear-effect
-            # adds fade spin, toe adds draw spin. Mirrored for LH.
-            hand_sign = -1.0 if self.is_left_handed else 1.0
-            expected_side = hand_sign * face_to_path * 150.0 * speed_ratio
-            side_residual = (sidespin - expected_side) * hand_sign
-            h_hint = max(-1.0, min(1.0, side_residual / (400.0 * speed_ratio)))  # + = heel, - = toe
-
-            # Vertical: Launch deviation is the primary physical indicator of strike height.
-            # On flat-faced irons, low-face/thin/bladed shots launch low (e.g. worm burners); high hits launch higher.
-            # On drivers/woods with roll curvature, vertical gear effect also reduces backspin on high strikes.
-            launch_dev = (vert_launch - base_launch) / 5.0
-            is_wood = strike_club in ("Driver", "3 Wood", "5 Wood", "3 Hybrid")
-            if is_wood:
-                spin_dev = (backspin - expected_spin) / (1000.0 * speed_ratio)
-                v_hint = (launch_dev * 0.7) - (spin_dev * 0.3)
-            else:
-                # Irons/wedges: flat face means launch angle directly determines vertical contact point
-                v_hint = launch_dev
-            v_hint = max(-1.0, min(1.0, v_hint))
-
-            hint_mag = math.sqrt(h_hint**2 + v_hint**2)
-            # Direction is independent of magnitude: launch-angle deviation is a
-            # genuinely measured signal even when smash (and therefore the mm
-            # offset) is unavailable. Only require a usable magnitude when we
-            # actually have one to scale by.
-            dir_known = hint_mag >= 0.15 and (est_offset_mm >= 2.0 or not magnitude_known)
-            if dir_known and magnitude_known:
-                h_impact_mm = (h_hint / hint_mag) * est_offset_mm
-                v_impact_mm = (v_hint / hint_mag) * est_offset_mm
-            elif dir_known:
-                # Direction only. Plot at a fixed nominal radius so the face
-                # graphic still shows WHERE, while the text omits any mm value.
-                nominal = 6.0
-                h_impact_mm = (h_hint / hint_mag) * nominal
-                v_impact_mm = (v_hint / hint_mag) * nominal
-            else:
-                h_impact_mm = 0.0
-                v_impact_mm = 0.0
-        else:
-            dir_known = True
-            magnitude_known = True
-
-        # Clamp offsets to physical face dimensions
-        h_impact_mm = max(-24.0, min(24.0, h_impact_mm))
-        v_impact_mm = max(-16.0, min(16.0, v_impact_mm))
-        total_offset_mm = math.sqrt(h_impact_mm**2 + v_impact_mm**2)
-        if not measured:
-            if not dir_known:
-                total_offset_mm = est_offset_mm
-
-        # Coordinate Tags & Strike Tier Styling
-        est_tag = "" if measured else " (EST)"
-        if measured:
-            def fmt_mm(val):
-                return f"{abs(val):.1f} mm"
-        elif magnitude_known:
-            def fmt_mm(val):
-                return f"~{abs(val):.0f} mm"
-        else:
-            # No usable magnitude -- report direction only, never a mm figure.
-            def fmt_mm(val):
-                return ""
-
-        if not dir_known and not measured:
-            h_text = "↔ DIR UNKNOWN"
-            h_badge_col = theme.TEXT_2
-        elif abs(h_impact_mm) < 1.0:
-            h_text = f"↔ CENTER{est_tag}"
-            h_badge_col = theme.ACCENT_TEXT
-        else:
-            h_side = "HEEL" if h_impact_mm > 0 else "TOE"
-            if magnitude_known:
-                h_text = f"↔ {fmt_mm(h_impact_mm)} {h_side}{est_tag}"
-                h_badge_col = theme.DANGER if abs(h_impact_mm) > 8.0 else (theme.WARN if abs(h_impact_mm) > 3.0 else theme.ACCENT_TEXT)
-            else:
-                # Direction-only: readable amber, uncertainty lives in the label.
-                h_text = f"↔ {h_side}{est_tag}"
-                h_badge_col = "#FF9100"
-
-        if not dir_known and not measured:
-            v_text = "↕ DIR UNKNOWN"
-            v_badge_col = theme.TEXT_2
-        elif abs(v_impact_mm) < 1.0:
-            v_text = f"↕ FLUSH{est_tag}"
-            v_badge_col = theme.ACCENT_TEXT
-        else:
-            v_side = "HIGH" if v_impact_mm > 0 else "LOW"
-            if magnitude_known:
-                v_text = f"↕ {fmt_mm(v_impact_mm)} {v_side}{est_tag}"
-                v_badge_col = theme.DANGER if abs(v_impact_mm) > 6.0 else (theme.WARN if abs(v_impact_mm) > 2.5 else theme.ACCENT_TEXT)
-            else:
-                v_text = f"↕ {v_side}{est_tag}"
-                v_badge_col = "#FF9100"
-
-        if not measured and not magnitude_known:
-            # Direction-only: never imply a severity tier we cannot compute.
-            if dir_known:
-                h_part = "HEEL" if h_impact_mm > 1.5 else ("TOE" if h_impact_mm < -1.5 else "")
-                v_part = "HIGH" if v_impact_mm > 1.5 else ("THIN" if v_impact_mm < -1.5 else "")
-                strike_rank = f"{h_part} {v_part}".strip() or "OFF-CENTER"
-                # Direction IS a real signal (launch-angle derived) -- keep it
-                # clearly readable. The "DIR EST" tag carries the uncertainty,
-                # so the marker itself doesn't need to be dimmed.
-                strike_color = "#FF9100"
-            else:
-                strike_rank = "STRIKE UNKNOWN"
-                strike_color = theme.TEXT_2
-        elif total_offset_mm < 3.0:
-            strike_rank = "CENTER FLUSH"
-            strike_color = theme.ACCENT_TEXT
-        elif not dir_known and not measured:
-            strike_rank = "OFF-CENTER (DIR ?)"
-            strike_color = theme.WARN if total_offset_mm < 8.0 else theme.DANGER
-        elif total_offset_mm < 8.0:
-            h_part = "HEEL" if h_impact_mm > 1.5 else ("TOE" if h_impact_mm < -1.5 else "")
-            v_part = "HIGH" if v_impact_mm > 1.5 else ("THIN" if v_impact_mm < -1.5 else "")
-            strike_rank = f"{h_part} {v_part}".strip() or "OFF-CENTER"
-            strike_color = theme.WARN
-        else:
-            h_part = "EXTREME HEEL" if h_impact_mm > 0 else "EXTREME TOE"
-            v_part = "HIGH" if v_impact_mm > 2.5 else ("THIN" if v_impact_mm < -2.5 else "")
-            strike_rank = f"{h_part} {v_part}".strip()
-            strike_color = theme.DANGER
-        # The "~" prefix denotes an approximate MAGNITUDE; skip it when we only
-        # have a direction (and for the explicit unknown states).
-        if (not measured and magnitude_known and strike_rank != "CENTER FLUSH"
-                and "(DIR ?)" not in strike_rank and strike_rank != "STRIKE UNKNOWN"):
-            strike_rank = f"~{strike_rank}"
-
-        # Caption + ESTIMATE chip, then the two readings as gutter
-        # annotations -- the mockup has no outlined pills here.
-        gut_l4 = offset_x + quad_w + int(18 * font_scale)
-        cap_y4 = q4_top + int(16 * font_scale)
-        # Measure the caption rather than assuming its width: a fixed offset
-        # overlaps once the font or scale changes.
-        cap_id4 = self.canvas.create_text(gut_l4, cap_y4,
-                                          text="IMPACT LOCATION",
-                                          fill=theme.TEXT_3, font=cap_f,
-                                          anchor="w")
-        cap_bb4 = self.canvas.bbox(cap_id4)
-        chip_x = (cap_bb4[2] + int(12 * font_scale)) if cap_bb4 else (
-            gut_l4 + int(110 * font_scale))
-        chip_f = (theme.ui_font(), max(7, int(8 * font_scale)), "bold")
-        chip_id = self.canvas.create_text(chip_x + int(9 * font_scale), cap_y4,
-                                          text="ESTIMATE", fill=theme.WARN,
-                                          font=chip_f, anchor="w")
-        chip_bb = self.canvas.bbox(chip_id)
-        if chip_bb:
-            self.canvas.create_rectangle(chip_x, chip_bb[1] - int(4 * font_scale),
-                                         chip_bb[2] + int(9 * font_scale),
-                                         chip_bb[3] + int(4 * font_scale),
-                                         fill="#2A2118", outline="")
-            self.canvas.tag_raise(chip_id)
-
-        imp_y = q4_top + int(34 * font_scale)
-        annot(gut_l4, imp_y, "VERTICAL",
-              v_text.split(" ", 1)[-1] if " " in v_text else v_text,
-              col=v_badge_col)
-        annot(gut_l4, imp_y + pair_h, "HORIZONTAL",
-              h_text.split(" ", 1)[-1] if " " in h_text else h_text,
-              col=h_badge_col)
-
-        # Clubface Graphic
-        # Raw iron_face.png: toe on LEFT (x: 36..167 are grooves), hosel on RIGHT (x: 180..290)
-        # For LH: mirror the image so hosel moves to LEFT, toe to RIGHT
-        face_h = int(130 * scale)
-        face_img = self.get_scaled_club_asset(FACE_PATH, face_h, mirror=self.is_left_handed)
-        if face_img:
-            self.canvas.create_image(q4_cx, q4_cy, image=face_img, anchor="c")
-
-        # Sweet Spot Origin — exact center of the scoring grooves
-        # Raw image 290x220: grooves X in [36, 167] -> Center X = 101.5 (dX = -43.5px from image center 145.0)
-        # Grooves Y in [23, 117] -> Center Y = 70.0 (dY = -40.0px from image center 110.0)
-        sweet_dx_ratio = -43.5 / 220.0  # -0.1977 (grooves are on the LEFT in raw image)
-        sweet_dy_ratio = -40.0 / 220.0  # -0.1818 (grooves are above image center)
-        # RH (raw image): shift LEFT into center of grooves (sweet_dx_ratio is negative)
-        # LH (mirrored image): shift RIGHT into center of mirrored grooves (-sweet_dx_ratio is positive)
-        center_offset_x = -int(sweet_dx_ratio * face_h) if self.is_left_handed else int(sweet_dx_ratio * face_h)
-        center_offset_y = int(sweet_dy_ratio * face_h)
-        center_x = q4_cx + center_offset_x
-        center_y = q4_cy + center_offset_y
-        cross_len = int(18 * scale)
-        self.canvas.create_line(center_x - cross_len, center_y, center_x + cross_len, center_y, fill="#3A445C", width=1, dash=(2, 2))
-        self.canvas.create_line(center_x, center_y - cross_len, center_x, center_y + cross_len, fill="#3A445C", width=1, dash=(2, 2))
-        self.canvas.create_oval(center_x - int(3 * scale), center_y - int(3 * scale), center_x + int(3 * scale), center_y + int(3 * scale), fill=theme.ACCENT_TEXT, outline="")
-
-        # Impact Contact Location
-        # Real groove width: 131px across 290px -> ~52mm physical width on a standard iron face
-        target_w = int(290 * (face_h / 220.0))
-        scale_px = ((167.0 - 36.0) / 290.0 * target_w) / 52.0
-        # OpenGolfCoach: h_impact_mm < 0 is TOE, h_impact_mm > 0 is HEEL
-        # Raw image: TOE is on LEFT (-X), HOSEL is on RIGHT (+X)
-        # RH (raw): h_impact_mm < 0 (TOE) moves LEFT (-X), h_impact_mm > 0 (HEEL) moves RIGHT (+X)
-        # LH (mirrored): h_impact_mm < 0 (TOE) moves RIGHT (+X), h_impact_mm > 0 (HEEL) moves LEFT (-X)
-        dx_px = -int(h_impact_mm * scale_px) if self.is_left_handed else int(h_impact_mm * scale_px)
-        impact_x = center_x + dx_px
-        impact_y = center_y - int(v_impact_mm * scale_px)
-
-        # Vector Line from Sweet Spot to Impact
-        if total_offset_mm >= 2.0 and (measured or dir_known):
-            self.canvas.create_line(center_x, center_y, impact_x, impact_y, fill=strike_color, width=1, dash=(3, 2))
-
-        if measured:
-            # Precision Strike Reticle (real measurement)
-            r_outer = int(14 * scale)
-            r_mid = int(7 * scale)
-            r_dot = int(3.5 * scale)
-            self.canvas.create_oval(impact_x - r_outer, impact_y - r_outer, impact_x + r_outer, impact_y + r_outer, fill="", outline=strike_color, width=2)
-            self.canvas.create_oval(impact_x - r_mid, impact_y - r_mid, impact_x + r_mid, impact_y + r_mid, fill="", outline=strike_color, width=1)
-            self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
-        elif dir_known:
-            # Fuzzy estimate zone: dashed halo sized by uncertainty, soft dot.
-            # With no usable magnitude the halo is deliberately wide -- the dot
-            # marks a DIRECTION on the face, not a located point.
-            if magnitude_known:
-                r_zone = max(int(10 * scale), int((4.0 + total_offset_mm * 0.6) * scale_px))
-                zone_tag = "EST"
-            else:
-                r_zone = max(int(18 * scale), int(11.0 * scale_px))
-                zone_tag = "DIR EST"
-            r_dot = int(3.5 * scale)
-            self.canvas.create_oval(impact_x - r_zone, impact_y - r_zone, impact_x + r_zone, impact_y + r_zone, fill="", outline=strike_color, width=1, dash=(4, 3))
-            self.canvas.create_oval(impact_x - r_dot, impact_y - r_dot, impact_x + r_dot, impact_y + r_dot, fill=strike_color, outline="")
-            self.canvas.create_text(impact_x, impact_y - r_zone - int(8 * scale), text=zone_tag, fill=strike_color, font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"))
-        else:
-            # Off-center but direction unknown: dashed ring around sweet spot
-            r_ring = max(int(12 * scale), int(total_offset_mm * scale_px))
-            self.canvas.create_oval(center_x - r_ring, center_y - r_ring, center_x + r_ring, center_y + r_ring, fill="", outline=strike_color, width=1, dash=(4, 3))
-            self.canvas.create_text(center_x, center_y - r_ring - int(8 * scale), text="EST RADIUS", fill=strike_color, font=(theme.ui_font(), max(7, int(8 * font_scale)), "bold"))
-
-        # Footer sits in the gutter as quiet caption text, matching the
-        # mockup -- no centred bold banner.
-        if measured:
-            foot1 = f"{total_offset_mm:.1f} mm from centre"
-        elif magnitude_known:
-            foot1 = f"~{total_offset_mm:.0f} mm from centre, from smash"
-        else:
-            foot1 = "Direction only — no club-speed data"
-        self.canvas.create_text(gut_l4, q4_bot - int(30 * font_scale),
-                                text=foot1, fill=theme.TEXT_3, font=cap_f,
-                                anchor="w")
-        self.canvas.create_text(gut_l4, q4_bot - int(14 * font_scale),
-                                text="Nova measures ball flight, not face contact",
-                                fill=theme.TEXT_3, font=cap_f, anchor="w")
+    def draw_contact_panel(self, x0, y0, x1, y1):
+        from src.ui.contact_panel import draw_contact_panel
+        draw_contact_panel(self, x0, y0, x1, y1)
 
     def draw_divot_focus(self, pane_w, h, club_path, face_to_path, ball_speed, club_speed, carry, shot_name, offset_x=0):
         calib = obs_server.obs_state.load_layout().get("divot_calibration", {})
@@ -7132,8 +7026,12 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(add_x1, py1, add_x2, py2, fill=theme.ACCENT_TEXT, outline="")
         self.canvas.create_text((add_x1 + add_x2) // 2, (py1 + py2) // 2, text="+ Add Club to Bag", fill="#08090C", font=(theme.ui_font(), 8, "bold"), anchor="center")
 
+        # 2b. Ball row: which ball is in play. A chip per ball, ✕ to remove,
+        # + to add. Stamped on every shot so Dispersion can split by it.
+        ball_row_h = self._draw_bag_ball_row(offset_x, bar_y2, avail_w, p1_x1 - 12)
+
         # 3. Dual-Pane Dimensions
-        content_y = 104
+        content_y = bar_y2 + ball_row_h + 6
         content_h = h - content_y - 12
         left_w = int(avail_w * 0.54)
         right_w = avail_w - left_w - 18
@@ -7141,6 +7039,74 @@ class ShanktuaryApp:
 
         self._draw_bag_rack_pane(offset_x + 6, content_y, left_w, content_h)
         self._draw_bag_gapping_ladder_pane(right_x, content_y, right_w, content_h)
+
+    def _draw_bag_ball_row(self, x0, y0, avail_w, right_limit):
+        """One row of ball chips under the My Bag toolbar; returns its height."""
+        self.bag_ball_chip_rects.clear()
+        self.bag_ball_remove_rects.clear()
+        self.bag_add_ball_rect = None
+        row_h = 30
+        y1, y2 = y0 + 4, y0 + row_h - 2
+        cy = (y1 + y2) // 2
+        f = (theme.ui_font(), 8, "bold")
+        lbl = self.canvas.create_text(x0 + 18, cy, text="BALLS", fill=theme.TEXT_3,
+                                      font=(theme.ui_font(), 8), anchor="w")
+        bb = self.canvas.bbox(lbl)
+        x = (bb[2] + 12) if bb else (x0 + 60)
+        for b in getattr(self, "balls", []) or []:
+            name = str(b.get("name") or "")
+            if not name:
+                continue
+            tw = self._text_width(name, f)
+            chip_w = tw + 20 + 16   # padding + ✕ zone
+            if x + chip_w > right_limit:
+                self.canvas.create_text(x, cy, text="…", fill=theme.TEXT_3, font=f, anchor="w")
+                break
+            on = (name == self.current_ball)
+            self.canvas.create_rectangle(x, y1, x + chip_w, y2,
+                                         fill=theme.ACCENT_DEEP if on else theme.SURFACE_2,
+                                         outline=theme.ACCENT_TEXT if on else theme.HAIRLINE)
+            self.canvas.create_text(x + 10, cy, text=name,
+                                    fill=theme.ACCENT_TEXT if on else theme.TEXT_2, font=f, anchor="w")
+            rx1 = x + chip_w - 16
+            self.canvas.create_text(rx1 + 6, cy, text="✕", fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), anchor="w")
+            # ✕ zone is registered FIRST so it wins the linear scan.
+            self.bag_ball_remove_rects.append((rx1, y1, x + chip_w, y2, name))
+            self.bag_ball_chip_rects.append((x, y1, rx1, y2, name))
+            x += chip_w + 6
+        add_w = self._text_width("+ Add ball", f) + 20
+        if x + add_w <= right_limit:
+            self.bag_add_ball_rect = (x, y1, x + add_w, y2)
+            self.canvas.create_rectangle(x, y1, x + add_w, y2, fill="#10252E",
+                                         outline=theme.ACCENT_TEXT)
+            self.canvas.create_text(x + add_w // 2, cy, text="+ Add ball",
+                                    fill="#E3BC70", font=f)
+        if not (getattr(self, "balls", None)):
+            hint_x = (self.bag_add_ball_rect[2] + 12) if self.bag_add_ball_rect else x
+            self.canvas.create_text(hint_x, cy, text="Add a ball to split dispersion by ball",
+                                    fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="w")
+        return row_h
+
+    def prompt_add_ball(self):
+        from tkinter import simpledialog
+        name = simpledialog.askstring("Add ball", "Ball name (e.g. Pro V1):", parent=self.root)
+        if name and name.strip():
+            self.add_ball(name)
+            self.copy_feedback = f"✓ Ball: {self.current_ball}"
+            self.root.after(2000, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def confirm_remove_ball(self, name):
+        from tkinter import messagebox
+        stamped = sum(1 for s in self.sessions for sh in (s.get("shots") or [])
+                      if isinstance(sh, dict) and sh.get("ball") == name)
+        msg = f"Remove {name} from the picker?"
+        if stamped:
+            msg += f"\n\n{stamped} shot{'s' if stamped != 1 else ''} already stamped with it keep the name."
+        if messagebox.askyesno("Remove ball", msg, parent=self.root):
+            self.remove_ball(name)
+        self.draw_screen()
 
     def _draw_bag_rack_pane(self, x1, y1, w, h):
         self.canvas.create_rectangle(x1, y1, x1 + w, y1 + h, fill=theme.SURFACE, outline=theme.HAIRLINE)
@@ -7532,7 +7498,9 @@ class ShanktuaryApp:
 
     def _draw_index_score_pane(self, x1, y1, w, h, result):
         x2, y2 = x1 + w, y1 + h
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE)
+        # Tagged so tests can measure the pane without the view writing state.
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE,
+                                     tags="index-score-pane")
         self.canvas.create_text(x1 + 18, y1 + 16, text="OVERALL SCORE", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
 
         if result.get("status") == "available":
@@ -7540,20 +7508,178 @@ class ShanktuaryApp:
             tier = result.get("tier")
             tier_label = (tier.value if hasattr(tier, "value") else str(tier)).upper() if tier is not None else ""
             score_text = f"{score:.1f}" if isinstance(score, (int, float)) else "--"
-            self.canvas.create_text(x1 + 18, y1 + 48, text=score_text, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 42, "bold"), anchor="nw")
-            self.canvas.create_text(x1 + 18, y1 + 104, text=tier_label, fill=theme.TEXT_2, font=(theme.ui_font(), 10, "bold"), anchor="nw")
-
-            ly = y1 + 134
+            score_id = self.canvas.create_text(x1 + 18, y1 + 48, text=score_text, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 42, "bold"), anchor="nw")
+            # Place the tier from the score's MEASURED bottom: a 42pt line is
+            # ~56px on this font, so a fixed +104 sat on top of its descenders.
+            score_bb = self.canvas.bbox(score_id)
+            tier_y = (score_bb[3] + 6) if score_bb else (y1 + 104)
+            tier_id = self.canvas.create_text(x1 + 18, tier_y, text=tier_label, fill=theme.TEXT_2, font=(theme.ui_font(), 10, "bold"), anchor="nw")
+            tier_bb = self.canvas.bbox(tier_id)
+            ly = (tier_bb[3] + 10) if tier_bb else (y1 + 134)
             spread = result.get("spread_ratio")
             if isinstance(spread, (int, float)):
-                self.canvas.create_text(x1 + 18, ly, text=f"Carry spread ratio {spread:.2f}", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
-                ly += 16
+                sid = self.canvas.create_text(x1 + 18, ly, text=f"Carry spread ratio {spread:.2f}", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+                sbb = self.canvas.bbox(sid)
+                ly = (sbb[3] + 4) if sbb else (ly + 16)
             anchor = result.get("anchor_carry")
             if isinstance(anchor, (int, float)):
-                self.canvas.create_text(x1 + 18, ly, text=f"Anchor carry {anchor:.0f} yds", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+                aid = self.canvas.create_text(x1 + 18, ly, text=f"Anchor carry {anchor:.0f} yds", fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+                abb = self.canvas.bbox(aid)
+                ly = (abb[3] + 4) if abb else (ly + 16)
+            # COMBINE sits directly under whatever PROGRESS drew (measured,
+            # not offset) and slides up if the pane is too short for both.
+            prog_bottom = self._draw_index_progress(x1 + 18, ly + 18, x2 - 18, y2 - 18)
+            self._draw_index_combine(x1 + 18, x2 - 18, prog_bottom + 18, y2 - 18)
         else:
             reason = result.get("reason") or "Not enough data yet"
             self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=reason, fill=theme.TEXT_3, font=(theme.ui_font(), 10), anchor="center", width=max(1, w - 40))
+
+    def _draw_index_combine(self, x0, x1, y_top, y_max):
+        """COMBINE block: latest/best from the recorded runs and, while a run
+        is active, per-station progress. Drawn top-down from y_top; if the
+        measured block would run past y_max it is moved up as a whole."""
+        from src.analytics import combine
+
+        c = self.canvas
+        font_small = (theme.ui_font(), 8)
+        font_body = (theme.ui_font(), 9)
+        try:
+            import tkinter.font as _tkf
+            line_h = _tkf.Font(family=theme.ui_font(), size=9).metrics("linespace") + 4
+        except Exception:
+            line_h = 16
+
+        try:
+            summ = combine.summary(combine.load())
+        except Exception:
+            summ = None
+        result = None
+        try:
+            result = self.combine_result()
+        except Exception as e:
+            print(f"[!] Combine progress unavailable: {e}")
+
+        rows = []   # (text, fill, font)
+        if summ:
+            rows.append((f"Latest {summ['latest']:.1f}  ·  {summ['latest_date'][:10]}", theme.TEXT_2, (theme.ui_font(), 10, "bold")))
+            rows.append((f"Best {summ['best']:.1f}  ·  {summ['best_date'][:10]}  ·  {summ['runs']} run{'' if summ['runs'] == 1 else 's'}", theme.TEXT_3, font_small))
+        else:
+            rows.append(("No combine yet — start one from the 3D Range", theme.TEXT_3, font_body))
+        if result and result.get("stations"):
+            parts = []
+            for st in result["stations"]:
+                tick = " ✓" if st["complete"] else ""
+                parts.append(f"{self._combine_short_club(st['club'])} {st['counted']}/{st['needed']}{tick}")
+            live = result.get("score")
+            head = f"Run {live:.1f}  ·  " if isinstance(live, (int, float)) else ""
+            rows.append((head + " · ".join(parts), theme.ACCENT_TEXT, font_body))
+
+        tag = "index-combine"
+        c.delete(tag)
+        c.create_line(x0, y_top, x1, y_top, fill=theme.HAIRLINE, tags=tag)
+        y = y_top + 10
+        hid = c.create_text(x0, y, text="COMBINE", fill=theme.TEXT_3, font=font_small, anchor="nw", tags=tag)
+        hb = c.bbox(hid)
+        y = (hb[3] + 4) if hb else (y + line_h)
+        for text, fill, font in rows:
+            tid = c.create_text(x0, y, text=text, fill=fill, font=font, anchor="nw",
+                                width=max(60, x1 - x0), tags=tag)
+            bb = c.bbox(tid)
+            y = (bb[3] + 4) if bb else (y + line_h)
+        bb = c.bbox(tag)
+        if bb and bb[3] > y_max:
+            c.move(tag, 0, y_max - bb[3])
+
+    @staticmethod
+    def _combine_short_club(name):
+        """'4 Hybrid' -> '4H', '5 Wood' -> '5W'; irons and wedges keep their name."""
+        parts = str(name).split()
+        if len(parts) == 2 and parts[1] in ("Hybrid", "Wood") and parts[0].isdigit():
+            return parts[0] + parts[1][0]
+        return str(name)
+
+    def _draw_index_progress(self, x0, y0, x1, y1):
+        """Dated Index series: delta vs last snapshot, best, and a sparkline.
+
+        This is what makes the Index a progress feature rather than a number:
+        the series is written by _record_index_snapshot() on every save.
+        """
+        from src.analytics import index_history
+
+        c = self.canvas
+        try:
+            import tkinter.font as _tkf
+            line_h = _tkf.Font(family=theme.ui_font(), size=9).metrics("linespace") + 4
+        except Exception:
+            line_h = 16
+        c.create_line(x0, y0 - 10, x1, y0 - 10, fill=theme.HAIRLINE)
+        c.create_text(x0, y0, text="PROGRESS", fill=theme.TEXT_3,
+                      font=(theme.ui_font(), 8), anchor="nw")
+        y = y0 + line_h
+        series = index_history.load()
+        t = index_history.trend(series)
+        if not t:
+            nid = c.create_text(x0, y, text="No history yet — recorded after each session",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="nw",
+                                width=max(60, x1 - x0))
+            nb = c.bbox(nid)
+            return nb[3] if nb else (y + line_h)
+        if t["delta"] is None:
+            delta_txt, delta_col = "First snapshot", theme.TEXT_2
+        else:
+            delta_txt = f"{t['delta']:+.1f} vs last snapshot"
+            delta_col = theme.ACCENT_TEXT if t["delta"] >= 0 else theme.WARN
+        c.create_text(x0, y, text=delta_txt, fill=delta_col,
+                      font=(theme.ui_font(), 10, "bold"), anchor="nw")
+        y += line_h
+        c.create_text(x0, y, text=f"Best {t['best']:.1f}  ·  {t['best_at'][:10]}  ·  {t['points']} snapshots",
+                      fill=theme.TEXT_3, font=(theme.ui_font(), 8), anchor="nw")
+        y += line_h + 6
+        pts = [e for e in series if isinstance(e.get("score"), (int, float))]
+        if len(pts) < 2 or y1 - y < 24:
+            return y
+        scores = [float(e["score"]) for e in pts]
+        lo, hi = min(scores), max(scores)
+        span = max(1.0, hi - lo)
+        plot_h = min(90, y1 - y - 18)
+        # Reserve a right gutter for the hi/lo labels so the line never runs
+        # under them; measure the widest label rather than guessing.
+        try:
+            lbl_w = max(self._text_width(f"{v:.1f}", (theme.ui_font(), 8)) for v in (lo, hi)) + 8
+        except Exception:
+            lbl_w = 34
+        px1 = x1 - lbl_w
+        coords = []
+        for i, s in enumerate(scores):
+            px = x0 + (px1 - x0) * i / (len(scores) - 1)
+            py = y + plot_h - (s - lo) / span * plot_h
+            coords.extend((px, py))
+        c.create_line(*coords, fill=theme.ACCENT_LINE, width=2, smooth=False,
+                      tags="index-sparkline")
+        c.create_text(x1, y, text=f"{hi:.1f}", fill=theme.TEXT_3,
+                      font=(theme.ui_font(), 8), anchor="ne")
+        c.create_text(x1, y + plot_h, text=f"{lo:.1f}", fill=theme.TEXT_3,
+                      font=(theme.ui_font(), 8), anchor="se")
+        d0 = c.create_text(x0, y + plot_h + 4, text=pts[0]["at"][:10], fill=theme.TEXT_3,
+                           font=(theme.ui_font(), 7), anchor="nw")
+        d1 = c.create_text(px1, y + plot_h + 4, text=pts[-1]["at"][:10], fill=theme.TEXT_3,
+                           font=(theme.ui_font(), 7), anchor="ne")
+        # Best point marked; the last point is the live number in the pane.
+        best_i = scores.index(hi)
+        bx, by = coords[best_i * 2], coords[best_i * 2 + 1]
+        c.create_oval(bx - 3, by - 3, bx + 3, by + 3, fill=theme.ACCENT_TEXT, outline="")
+        # Bottom of the date labels (measured): the next block is placed from it.
+        bottoms = [b[3] for b in (c.bbox(d0), c.bbox(d1)) if b]
+        return max(bottoms) if bottoms else (y + plot_h + 4 + line_h)
+
+    def _pressure_sentence_for(self, club_name):
+        try:
+            from src.analytics.pressure_result import compare
+            shots = [s for sess in self.sessions
+                     for s in (sess.get("shots") or []) if isinstance(s, dict)]
+            return compare(club_name, shots, is_left_handed=self.is_left_handed).get("headline")
+        except Exception:
+            return None
 
     def _draw_index_detail_pane(self, x1, y1, w, h, result):
         x2, y2 = x1 + w, y1 + h
@@ -7609,6 +7735,13 @@ class ShanktuaryApp:
             self.canvas.create_text(x1 + 16, row_y, text=f"{marker} {club_name}", fill=theme.TEXT, font=(theme.ui_font(), 9), anchor="w")
             self.canvas.create_text(x2 - 16, row_y, text=f"{score_text}  {tier_name}", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="e")
             row_y += 20
+            # Balance-board sentence for this club, when enough traced full
+            # swings exist. Measured, descriptive, and unique to SPS.
+            sentence = self._pressure_sentence_for(club_name)
+            if sentence and row_y <= y2 - 12:
+                self.canvas.create_text(x1 + 30, row_y, text=sentence, fill=theme.ACCENT_TEXT,
+                                        font=(theme.ui_font(), 8), anchor="w")
+                row_y += 18
 
         if not clubs:
             self.canvas.create_text((x1 + x2) / 2, row_y + 20, text="Hit shots to build club data", fill=theme.TEXT_3, font=(theme.ui_font(), 9), anchor="center")
