@@ -574,7 +574,24 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     let ladderStreak = 0;
     let lastShotTelemetry = null;
     let lastShotId = null;
+    // Dedupe state for the HTTP fallback poller, tracked SEPARATELY from
+    // lastShotId. Locally-generated shots (Demo, replay) also write
+    // lastShotId, which used to desync the poller: after a demo fired,
+    // the server's unchanged stored shotId no longer matched lastShotId,
+    // so the next poll replayed that stale stored shot as a phantom 0.0.
+    let lastServerShotId = null;
+    // Set once the poller (or an init message) has established what the
+    // server's current stored shot is. Until then nothing may fire, or a
+    // page load / OBS scene switch replays the previous session's shot.
+    let pollBaselined = false;
     let lastLandingPt = null;
+    // Shots that arrive while the ball is still mid-flight (fast repeat
+    // Demo clicks, or a real Nova shot fired again before the previous one
+    // lands) used to hit ball.launch()'s immediate reset(), yanking the
+    // airborne ball and truncating its flight. Queue them FIFO and drain
+    // one per landing instead.
+    const pendingShots = [];
+    const MAX_PENDING_SHOTS = 8;
     const targetScore = {
         currentStreak: 0,
         bestStreak: 0,
@@ -1841,6 +1858,19 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
         if (puttingActive) exitPuttingMode();
 
+        // Don't interrupt a ball still in flight: ball.launch() resets
+        // immediately, which would truncate the current shot mid-air and
+        // leave stray in-flight state (tracer/divots) behind. Queue this one
+        // and it fires when the current flight ends.
+        if (ball.isAnimating) {
+            // Bounded so a wedged flight can't grow this without limit.
+            // drainPendingShots' watcher interval fires these as the ball frees up.
+            if (pendingShots.length < MAX_PENDING_SHOTS) {
+                pendingShots.push({ shotData, opts });
+            }
+            return;
+        }
+
         lastShotTelemetry = shotData;
         lastShotId = shotData.shotId;
 
@@ -1880,6 +1910,22 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         cameraController.setLandingPosition(new THREE.Vector3(finalPt.x, 0.05, finalPt.z));
         ball.launch(trajectory, shotData.clubColor);
     }
+
+    // Drain queued shots one per landing (see the ball.isAnimating guard in
+    // fireShot above). ball.js defers its onFlightEndCallback out of the
+    // update() frame, so re-entering launch() from here is safe.
+    //
+    // Driven by ONE always-on watcher rather than chained timeouts: chained
+    // retries could all terminate together and strand the queue, silently
+    // swallowing shots. A single interval has no such failure mode.
+    function drainPendingShots() {
+        if (!pendingShots.length) return;
+        if (ball.isAnimating) return;
+        const next = pendingShots.shift();
+        fireShot(next.shotData, next.opts);
+    }
+    ball.onFlightEndCallback = drainPendingShots;
+    setInterval(drainPendingShots, 150);
 
     // Putting practice (SHA-55 T4). PT-only branch; non-PT uses the flight
     // path above. Scene/physics live in putt_scene.js / putt_physics.js.
@@ -2652,7 +2698,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'shot') {
                     const parsed = extractShotTelemetry(msg);
-                    if (parsed) fireShot(parsed);
+                    if (parsed) {
+                        // Keep the poller's baseline in sync: the same shot
+                        // is also sitting in /api/shot, and without this the
+                        // next poll would re-fire it as a duplicate.
+                        if (parsed.shotId) lastServerShotId = parsed.shotId;
+                        fireShot(parsed);
+                    }
                     loadRangeIndex();
                     // The desktop saves (and stamps) before broadcasting, but
                     // give the file write a beat before re-reading progress.
@@ -2695,6 +2747,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                         if (parsed) {
                             lastShotTelemetry = parsed;
                             lastShotId = parsed.shotId;
+                            // init carries the server's CURRENT stored shot and
+                            // deliberately doesn't fire it (HUD only). Baseline
+                            // the poller on it so it isn't replayed as new.
+                            if (parsed.shotId) {
+                                lastServerShotId = parsed.shotId;
+                                pollBaselined = true;
+                            }
                             updateHUDTelemetry(parsed);
                         }
                     }
@@ -2717,7 +2776,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     // First successful poll only ESTABLISHES the baseline shotId — it must
     // never fire. Otherwise a page load (or OBS scene switch) replays the
     // previous session's stored shot as if it were just hit.
-    let pollBaselined = false;
+    // (pollBaselined / lastServerShotId are declared with the other shot
+    // state above, so the WS init handler can baseline them too.)
     async function pollShotAPI() {
         try {
             const res = await fetch('/api/shot');
@@ -2728,12 +2788,11 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     if (parsed && parsed.shotId) {
                         if (!pollBaselined) {
                             pollBaselined = true;
-                            if (lastShotId === null || lastShotId === undefined) {
-                                lastShotId = parsed.shotId;
-                            }
+                            lastServerShotId = parsed.shotId;
                             return;
                         }
-                        if (parsed.shotId !== lastShotId) {
+                        if (parsed.shotId !== lastServerShotId) {
+                            lastServerShotId = parsed.shotId;
                             fireShot(parsed);
                         }
                     }
