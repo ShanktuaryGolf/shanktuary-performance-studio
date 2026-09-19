@@ -6,13 +6,18 @@ export class GolfBall {
     this.visualRadius = 0.055;
     
     // 1. 3D Geometrically-Dimpled Golf Ball (392 Dimples)
+    // Deliberately untextured. This previously carried a painted
+    // CanvasTexture (PRO V1 stamp + seam), which rendered as grey/striped
+    // garbage whenever its WebGL upload failed -- see getDivotAssets() for
+    // the underlying canvas-upload issue. The per-vertex AO baked into the
+    // dimpled geometry already sells the dimple look, and a plain cover is
+    // the preferred look here, so there is nothing to upload at all.
     const geometry = this.createDimpledGeometry(this.visualRadius);
-    const texture = this.createBallTexture();
     
     const material = new THREE.MeshStandardMaterial({
-      map: texture,
+      color: 0xf8fafc,
       vertexColors: true,
-      roughness: 0.2,
+      roughness: 0.25,
       metalness: 0.05,
     });
     
@@ -52,10 +57,17 @@ export class GolfBall {
       color: 0x00FF66,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.85,
+      // Sits above the same turf plane as the divots; bias it in depth and
+      // draw it last so it reads on top of whatever decals it overlaps.
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
     });
     this.landingRing = new THREE.Mesh(ringGeo, ringMat);
     this.landingRing.position.set(0, 0.03, 0);
+    this.landingRing.renderOrder = 30;
     this.landingRing.visible = false;
     this.scene.add(this.landingRing);
     
@@ -71,6 +83,11 @@ export class GolfBall {
     this.lastBounces = 0;
     
     this.onResetCallback = null;
+    // Fired the instant flight ends (ball reaches its final trajectory
+    // point), before the 3s tee-return delay. Lets callers queue a shot
+    // that arrived mid-flight instead of yanking the current one out from
+    // under itself via launch()'s immediate reset().
+    this.onFlightEndCallback = null;
   }
 
   createDimpledGeometry(radius) {
@@ -123,49 +140,6 @@ export class GolfBall {
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
     return geometry;
-  }
-
-  createBallTexture() {
-    const size = 512;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    
-    // Crisp glossy white cover
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 0, size, size);
-    
-    // Equator seam line (faint)
-    ctx.strokeStyle = 'rgba(210, 220, 230, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(0, size / 2);
-    ctx.lineTo(size, size / 2);
-    ctx.stroke();
-    
-    // Tour Putting Alignment Stamp: ◄—— PRO V1 ——►
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 22px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('◄—— PRO V1 ——►', size / 2, size / 2 - 32);
-    
-    // Tournament Player Number
-    ctx.fillStyle = '#dc2626';
-    ctx.font = 'bold 38px sans-serif';
-    ctx.fillText('1', size / 2, size / 2 + 28);
-    
-    // Secondary alignment dots
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.arc(size / 2 - 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
-    ctx.arc(size / 2 + 42, size / 2 + 28, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    return texture;
   }
 
   reset() {
@@ -278,36 +252,71 @@ export class GolfBall {
     cArray[idx * 3 + 2] = b;
   }
 
-  createTurfDivot(x, z) {
-    // 1. Realistic Soil Divot & Pitch Mark Decal
+  /**
+   * Divot decal resources, built once and shared by every divot mesh.
+   *
+   * These used to be created per landing: a fresh <canvas> + CanvasTexture
+   * for each divot, forever. Firefox only keeps a bounded number of 2D
+   * canvas backing surfaces alive and discards older ones under pressure,
+   * after which uploading from them fails with
+   *   "WebGL warning: texSubImage: Failed to map source surface for upload"
+   * and the texture samples uninitialized GPU memory -- the shredded
+   * turf/confetti pattern on the green. Every divot is visually identical,
+   * so one shared texture removes the churn entirely.
+   */
+  getDivotAssets() {
+    if (this._divotAssets) return this._divotAssets;
+
     const divotGeo = new THREE.CircleGeometry(0.24, 24);
     divotGeo.rotateX(-Math.PI / 2);
-    
-    // Create dark organic soil texture with displacement lip
+
     const dCanvas = document.createElement('canvas');
     dCanvas.width = 128;
     dCanvas.height = 128;
-    const dCtx = dCanvas.getContext('2d');
-    
+    // CPU-backed surface so the WebGL upload can't fail (see environment.js).
+    const dCtx = dCanvas.getContext('2d', { willReadFrequently: true });
+
     const grad = dCtx.createRadialGradient(64, 64, 4, 64, 64, 60);
     grad.addColorStop(0, '#2d1808'); // Dark soil crater center
     grad.addColorStop(0.5, '#422812'); // Earth
     grad.addColorStop(0.85, '#2e591b'); // Bruised grass rim
     grad.addColorStop(1.0, 'rgba(0,0,0,0)');
-    
+
     dCtx.fillStyle = grad;
     dCtx.fillRect(0, 0, 128, 128);
-    
+
     const dTex = new THREE.CanvasTexture(dCanvas);
+    dTex.colorSpace = THREE.SRGBColorSpace;
+
     const divotMat = new THREE.MeshBasicMaterial({
       map: dTex,
       transparent: true,
       opacity: 0.95,
-      depthWrite: false
+      depthWrite: false,
+      // Ground decals sit a hair above a large turf plane. polygonOffset
+      // biases them in depth without moving them geometrically.
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1
     });
-    
+
+    this._divotAssets = { divotGeo, divotMat, dTex };
+    return this._divotAssets;
+  }
+
+  createTurfDivot(x, z) {
+    // 1. Realistic Soil Divot & Pitch Mark Decal (shared geometry/material)
+    const { divotGeo, divotMat } = this.getDivotAssets();
+
     const divotMesh = new THREE.Mesh(divotGeo, divotMat);
-    divotMesh.position.set(x, 0.022, z);
+    // Small per-divot height stagger: shots cluster around the same pin, so
+    // these transparent decals overlap constantly and identical Y values
+    // make coplanar quads fight. Range 0.0235..0.0273 stays clear of
+    // cupRim (0.022) and landingRing (0.03).
+    this.divotSeq = (this.divotSeq || 0) + 1;
+    const slot = this.divotSeq % 20;
+    divotMesh.position.set(x, 0.0235 + (slot * 0.0002), z);
+    divotMesh.renderOrder = 2 + slot;
     divotMesh.scale.set(1.0, 1.0, 1.4); // Stretched in direction of impact
     this.scene.add(divotMesh);
     
@@ -315,25 +324,25 @@ export class GolfBall {
     if (this.divots.length > 20) {
       const old = this.divots.shift();
       this.scene.remove(old);
-      // Dispose GPU resources — evicted divots otherwise leak geometry,
-      // material, and canvas texture for every shot in a long OBS session.
-      if (old.geometry) old.geometry.dispose();
-      if (old.material) {
-        if (old.material.map) old.material.map.dispose();
-        old.material.dispose();
-      }
+      // NOTE: geometry/material/texture are SHARED with every other divot --
+      // disposing them here would blank the divots still on the green.
+      // Removing the mesh from the scene is the whole cleanup.
     }
     
     // 2. Flying Turf / Dirt Particle Spray
+    // Geometry is shared (identical quad); each particle keeps its own
+    // material because they fade independently via material.opacity.
+    if (!this._particleGeo) {
+      this._particleGeo = new THREE.PlaneGeometry(0.12, 0.12);
+      this._particleGeo.rotateX(-Math.PI / 2);
+    }
     for (let i = 0; i < 10; i++) {
-      const pGeo = new THREE.PlaneGeometry(0.12, 0.12);
-      pGeo.rotateX(-Math.PI / 2);
       const pMat = new THREE.MeshBasicMaterial({
         color: (i % 2 === 0) ? 0x3d2314 : 0x6e964b,
         transparent: true,
         opacity: 0.85
       });
-      const pMesh = new THREE.Mesh(pGeo, pMat);
+      const pMesh = new THREE.Mesh(this._particleGeo, pMat);
       pMesh.position.set(x + (Math.random() * 0.4 - 0.2), 0.04, z + (Math.random() * 0.4 - 0.2));
       this.scene.add(pMesh);
       this.particles.push({ mesh: pMesh, life: 0.8, maxLife: 0.8 });
@@ -368,6 +377,14 @@ export class GolfBall {
         this.isAnimating = false;
         this.isAtRest = true;
         this.restTimer = 0;
+        if (typeof this.onFlightEndCallback === 'function') {
+          // Deferred: the callback typically starts the NEXT shot, and
+          // launch() re-enters this object's state. Calling it inline would
+          // mutate trajectory/isAnimating in the middle of the frame we are
+          // still executing, wedging the ball permanently in isAnimating.
+          const cb = this.onFlightEndCallback;
+          setTimeout(() => cb(), 0);
+        }
       }
     } else if (this.isAtRest) {
       this.restTimer += deltaTime;
@@ -390,8 +407,9 @@ export class GolfBall {
       p.mesh.scale.multiplyScalar(1.02);
       if (p.life <= 0) {
         this.scene.remove(p.mesh);
-        // Dispose per-particle GPU resources (10 leak per bounce otherwise)
-        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        // Dispose the per-particle material only. The geometry is shared by
+        // every particle (see createTurfDivot) -- disposing it here would
+        // break all future sprays.
         if (p.mesh.material) p.mesh.material.dispose();
         this.particles.splice(i, 1);
       }

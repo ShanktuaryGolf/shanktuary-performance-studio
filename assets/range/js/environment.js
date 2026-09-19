@@ -229,7 +229,12 @@ function createConcentricTargetGreen(scene, yardage) {
     const signCanvas = document.createElement('canvas');
     signCanvas.width = 512;
     signCanvas.height = 256;
-    signContext = signCanvas.getContext('2d');
+    // willReadFrequently keeps the 2D backing store in CPU memory. Firefox
+    // otherwise GPU-accelerates canvas2d, and uploading such a surface into
+    // a WebGL texture can fail with
+    //   "WebGL warning: texSubImage: Failed to map source surface for upload"
+    // leaving this sign blank (the texture samples uninitialized memory).
+    signContext = signCanvas.getContext('2d', { willReadFrequently: true });
     signTexture = new THREE.CanvasTexture(signCanvas);
     signTexture.colorSpace = THREE.SRGBColorSpace;
     

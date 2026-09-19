@@ -316,7 +316,9 @@ export function createGrid3DHighlight(scene) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 128;
-    const ctx = canvas.getContext('2d');
+    // CPU-backed surface: see the note in environment.js's yardage sign.
+    // A GPU-accelerated canvas2d can fail WebGL texture upload in Firefox.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const spriteTexture = new THREE.CanvasTexture(canvas);
     spriteTexture.colorSpace = THREE.SRGBColorSpace;
 
