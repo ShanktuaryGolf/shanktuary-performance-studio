@@ -41,8 +41,8 @@ from src.processing.pressure.stance import (
     StanceCalibrator,
 )
 
-APP_VERSION = "v1.5.0"
-BUILD_NUMBER = "2026.09.04.1"
+APP_VERSION = "v1.6.0"
+BUILD_NUMBER = "2026.09.21.1"
 OBS_PORT = 9321
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
