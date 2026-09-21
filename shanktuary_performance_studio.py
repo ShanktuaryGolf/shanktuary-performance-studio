@@ -3839,33 +3839,50 @@ class ShanktuaryApp:
                 return
 
             if _h(self.setup_pair_rect):
-                self.copy_feedback = "Scanning for balance boards..."
-                self.root.after(2000, self.clear_copy_feedback)
+                self.copy_feedback = "Press SYNC on the board now — pairing..."
+                self.draw_screen()
 
                 def _do_pair():
-                    # On Windows connect_board() only prints instructions --
-                    # and a --windowed build has no console, so the button
-                    # looked dead. Report the real, checkable outcome: how
-                    # many boards the OS actually hands us.
+                    # Pair natively via the Win32 Bluetooth API: the PIN is six
+                    # raw bytes and Windows' PIN text box cannot carry them
+                    # (control chars rejected, high bytes re-encoded), so the
+                    # old "paste the PIN" flow could never work for most
+                    # adapters. BluetoothSendAuthenticationResponseEx takes the
+                    # PIN as bytes + length, so it survives exactly.
+                    outcome = None
                     try:
-                        from src.hardware.pressure import connect_board
-                        connect_board()
+                        from src.hardware.pressure import (
+                            native_pairing_available,
+                            pair_balance_board,
+                        )
+                        if native_pairing_available():
+                            outcome = pair_balance_board(log=print)
+                        else:
+                            from src.hardware.pressure import connect_board
+                            connect_board()
                     except Exception as e:
                         print(f"[!] Pairing notice: {e}")
+                        outcome = {"success": False,
+                                   "message": f"Pairing error: {e}"}
 
                     def _report():
                         try:
                             n = len(pm.enumerate_boards(max_age_sec=0.0)) if pm else 0
                         except Exception:
                             n = 0
-                        if n == 0:
+                        if outcome and outcome.get("success"):
                             self.copy_feedback = (
-                                "No board found — press SYNC, then add it in "
-                                "Bluetooth settings using the PIN above")
+                                f"✓ Paired {outcome.get('address', '')} — "
+                                f"{n} board{'s' if n != 1 else ''} detected")
+                        elif outcome and outcome.get("message"):
+                            self.copy_feedback = outcome["message"]
+                        elif n == 0:
+                            self.copy_feedback = (
+                                "No board found — press SYNC and try again")
                         else:
                             self.copy_feedback = (
                                 f"{n} board{'s' if n != 1 else ''} detected")
-                        self.root.after(4000, self.clear_copy_feedback)
+                        self.root.after(6000, self.clear_copy_feedback)
                         self.draw_screen()
 
                     try:
@@ -3880,14 +3897,33 @@ class ShanktuaryApp:
             if _h(self.setup_pin_copy_rect):
                 pin = getattr(self, "setup_pin_text", "")
                 if pin:
+                    # Windows clipboard text is NUL-terminated (CF_UNICODETEXT),
+                    # so a raw PIN containing 0x00 -- e.g. adapter
+                    # 00:E0:4C:00:00:01 -> 01 00 00 4C E0 00 -- gets truncated
+                    # to its first byte on paste. Users saw a single box glyph.
+                    # Nothing can fix that at the clipboard layer, so say so
+                    # rather than silently handing over a broken PIN.
+                    safe_pin = pin.split("\x00")[0]
+                    truncated = safe_pin != pin
                     try:
                         self.root.clipboard_clear()
-                        self.root.clipboard_append(pin)
-                        self.copy_feedback = ("✓ PIN copied — paste into the "
-                                              "Windows Bluetooth prompt (Ctrl+V)")
-                        self.root.after(3000, self.clear_copy_feedback)
+                        self.root.clipboard_append(safe_pin)
+                        # Without update() the selection is never flushed to
+                        # the OS clipboard on Windows and the paste is empty.
+                        self.root.update()
+                        if truncated:
+                            self.copy_feedback = (
+                                "⚠ This PIN contains bytes Windows cannot "
+                                "accept — use Pair Board instead")
+                        else:
+                            self.copy_feedback = (
+                                "✓ PIN copied — paste into the "
+                                "Windows Bluetooth prompt (Ctrl+V)")
+                        self.root.after(4000, self.clear_copy_feedback)
                     except Exception as e:
                         print(f"[!] Clipboard copy failed: {e}")
+                        self.copy_feedback = f"Clipboard copy failed: {e}"
+                        self.root.after(4000, self.clear_copy_feedback)
                 self.draw_screen()
                 return
 
@@ -9499,20 +9535,29 @@ class ShanktuaryApp:
         pin_raw = ""
         pin_disp = ""
         mac_disp = ""
+        pin_typeable = True
+        native_ok = False
         try:
             from src.hardware.pressure.bluetooth_windows import (
                 format_mac_display,
                 get_host_bluetooth_mac,
                 mac_to_wii_pin,
                 mac_to_wii_pin_display,
+                pin_is_typeable,
             )
             mac = get_host_bluetooth_mac() or ""
             if mac:
                 pin_raw = mac_to_wii_pin(mac)
                 pin_disp = mac_to_wii_pin_display(mac)
                 mac_disp = format_mac_display(mac)
+                pin_typeable = pin_is_typeable(mac)
         except Exception as e:
             print(f"[!] Could not derive Bluetooth PIN: {e}")
+        try:
+            from src.hardware.pressure import native_pairing_available
+            native_ok = native_pairing_available()
+        except Exception:
+            native_ok = False
         self.setup_pin_text = pin_raw
 
         self.canvas.create_text(rx0 + 18, py, text="PAIRING",
@@ -9521,7 +9566,7 @@ class ShanktuaryApp:
         py += 16
 
         if pin_disp:
-            self.canvas.create_rectangle(rx0 + 18, py, rx1 - 18, py + 62,
+            self.canvas.create_rectangle(rx0 + 18, py, rx1 - 18, py + 78,
                                          fill=theme.SURFACE_2, outline="")
             self.canvas.create_text(rx0 + 30, py + 8,
                                     text=f"Pairing PIN  ·  adapter {mac_disp}",
@@ -9531,14 +9576,27 @@ class ShanktuaryApp:
                                     fill=theme.ACCENT_TEXT,
                                     font=(theme.ui_font(), 15, "bold"),
                                     anchor="nw")
+            # Be honest about what this PIN can and cannot do. Windows' PIN box
+            # rejects control bytes and re-encodes high bytes, so for most
+            # adapters manual entry is impossible -- saying "copy this" would
+            # send the user down a path that cannot succeed.
+            if pin_typeable:
+                note = "Plain ASCII — can be pasted into Windows"
+                note_fill = theme.TEXT_3
+            else:
+                note = "Windows cannot accept these bytes — use Pair Board"
+                note_fill = theme.WARN
+            self.canvas.create_text(rx0 + 30, py + 56, text=note,
+                                    fill=note_fill,
+                                    font=(theme.ui_font(), 7), anchor="nw")
             self.setup_pin_copy_rect = (rx1 - 96, py + 22, rx1 - 30, py + 48)
             self.canvas.create_rectangle(*self.setup_pin_copy_rect,
-                                         fill=theme.ACCENT_DEEP,
+                                         fill=theme.SURFACE,
                                          outline=theme.ACCENT_LINE)
             self.canvas.create_text((rx1 - 96 + rx1 - 30) / 2, py + 35,
-                                    text="Copy PIN", fill=theme.ACCENT_TEXT,
+                                    text="Copy PIN", fill=theme.TEXT_2,
                                     font=(theme.ui_font(), 8), anchor="center")
-            py += 70
+            py += 86
         else:
             self.setup_pin_copy_rect = None
             self.canvas.create_text(rx0 + 18, py,
@@ -9557,39 +9615,45 @@ class ShanktuaryApp:
                                     font=(theme.ui_font(), 7), anchor="nw")
             py += 38
 
-        # Two buttons: OS Bluetooth settings (where pairing actually happens)
-        # and the platform pairing helper.
+        # Pair Board is the primary action: it sends the PIN as raw bytes over
+        # the Win32 API, which is the only route that works for adapters whose
+        # PIN is not plain ASCII. Bluetooth Settings is kept as a secondary
+        # escape hatch (and for removing a stale pairing).
         pw_ = (rx1 - rx0 - 44) / 2
-        self.setup_bt_settings_rect = (rx0 + 18, py, rx0 + 18 + pw_, py + 32)
-        self.canvas.create_rectangle(*self.setup_bt_settings_rect,
+        self.setup_pair_rect = (rx0 + 18, py, rx0 + 18 + pw_, py + 32)
+        self.canvas.create_rectangle(*self.setup_pair_rect,
                                      fill=theme.ACCENT_DEEP,
                                      outline=theme.ACCENT_LINE)
         self.canvas.create_text((rx0 + 18 + rx0 + 18 + pw_) / 2, py + 16,
-                                text="Open Bluetooth Settings",
+                                text="Pair Board" if native_ok else "Scan for boards",
                                 fill=theme.ACCENT_TEXT,
                                 font=(theme.ui_font(), 8), anchor="center")
 
-        self.setup_pair_rect = (rx1 - 18 - pw_, py, rx1 - 18, py + 32)
-        self.canvas.create_rectangle(*self.setup_pair_rect,
+        self.setup_bt_settings_rect = (rx1 - 18 - pw_, py, rx1 - 18, py + 32)
+        self.canvas.create_rectangle(*self.setup_bt_settings_rect,
                                      fill=theme.SURFACE_2, outline="")
         self.canvas.create_text((rx1 - 18 - pw_ + rx1 - 18) / 2, py + 16,
-                                text="Scan for boards",
+                                text="Open Bluetooth Settings",
                                 fill=theme.TEXT_2,
                                 font=(theme.ui_font(), 8), anchor="center")
         py += 38
 
-        self.canvas.create_text(rx0 + 18, py,
-                                text="Hold the red SYNC button inside the battery compartment,",
-                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="nw")
-        self.canvas.create_text(rx0 + 18, py + 11,
-                                text="add the device in Bluetooth settings, and paste the PIN.",
-                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="nw")
-        self.canvas.create_text(rx0 + 18, py + 22,
-                                text="A blinking light means pairing has not completed.",
-                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
-                                anchor="nw")
+        if native_ok:
+            lines = [
+                "Hold the red SYNC button inside the battery compartment,",
+                "then press Pair Board — the PIN is sent automatically.",
+                "A blinking light means pairing has not completed.",
+            ]
+        else:
+            lines = [
+                "Hold the red SYNC button inside the battery compartment,",
+                "add the device in Bluetooth settings, and paste the PIN.",
+                "A blinking light means pairing has not completed.",
+            ]
+        for i, line in enumerate(lines):
+            self.canvas.create_text(rx0 + 18, py + i * 11, text=line,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 7), anchor="nw")
 
         # --- detected boards -------------------------------------------------
         wiz = getattr(pm, "assignment_wizard", None) if pm else None

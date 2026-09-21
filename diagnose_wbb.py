@@ -253,14 +253,17 @@ try:
     from src.hardware.pressure.bluetooth_windows import (
         _try_linux_bluetoothctl,
         _try_linux_sysfs,
+        _try_live_radio,
         _try_powershell_netadapter,
         _try_powershell_pnp,
         _try_registry,
+        describe_pin_entry,
         format_mac_display,
         get_host_bluetooth_mac,
         get_manual_mac_override,
         mac_has_zero_byte,
         mac_to_wii_pin_display,
+        pin_is_typeable,
     )
 
     override = get_manual_mac_override()
@@ -271,9 +274,11 @@ try:
     # Show EVERY method's answer, not just the winner. If two disagree, the
     # PnP one is the liar -- it scrapes any 12 hex digits out of a device id
     # and a BTHENUM id contains the REMOTE address, not the host adapter.
+    # The registry can also be stale, which is why the live radio outranks it.
     if sys.platform == "win32":
         methods = [
-            ("Registry BTHPORT (authoritative)", _try_registry),
+            ("Live radio via Win32 API (best)", _try_live_radio),
+            ("Registry BTHPORT (can be stale)", _try_registry),
             ("PowerShell NetAdapter", _try_powershell_netadapter),
             ("PowerShell PnP InstanceId (unreliable)", _try_powershell_pnp),
         ]
@@ -300,7 +305,7 @@ try:
 
     distinct = set(seen.values())
     if len(distinct) > 1:
-        print("\n[!] Methods DISAGREE. Trust the registry value; if pairing")
+        print("\n[!] Methods DISAGREE. Trust the live radio value; if pairing")
         print("    fails, try each PIN in turn.")
 
     mac = get_host_bluetooth_mac()
@@ -308,13 +313,48 @@ try:
     if mac:
         print(f"  Adapter MAC : {format_mac_display(mac)}")
         print(f"  PAIRING PIN : {mac_to_wii_pin_display(mac)}")
+        print(f"  Raw bytes   : {' '.join(f'{b:02X}' for b in bytes.fromhex(mac)[::-1])}")
+        print()
+        # The PIN is six raw binary bytes. Windows' "Add a device" PIN box is
+        # a text control: it rejects control characters and re-encodes
+        # non-ASCII, so for most adapters manual entry CANNOT work. Say that
+        # plainly instead of sending people to retry a dead end.
+        if pin_is_typeable(mac):
+            print("  This PIN is plain ASCII, so it can be pasted into the")
+            print("  Windows PIN box -- copy it from the app's Setup page")
+            print("  rather than retyping it.")
+        else:
+            print("  [!] This PIN contains bytes the Windows PIN box cannot")
+            print("      accept (control characters and/or non-ASCII). Typing")
+            print("      or pasting it WILL fail no matter how many times you")
+            print("      retry -- this is a limitation of the Windows dialog,")
+            print("      not of your board.")
+            print()
+            print("      Use 'Pair Board' on the app's Setup page instead: it")
+            print("      sends the PIN as raw bytes through the Win32")
+            print("      Bluetooth API, which has no such limit.")
         if mac_has_zero_byte(mac):
-            print("\n  [!] This PIN contains a NULL byte (shown as ␀). Some")
-            print("      Windows prompts cannot accept it. If pairing fails,")
-            print("      use a different Bluetooth adapter.")
-        print("\n  Enter that PIN when Windows asks. It is raw characters, not")
-        print("  digits -- copy it from the app's Setup page rather than")
-        print("  retyping it.")
+            print()
+            print("      (Note: a NULL byte is also why 'Copy PIN' pastes only")
+            print("      one character -- the Windows clipboard ends at NUL.)")
+        print()
+        print(f"  {describe_pin_entry(mac)}")
+
+        try:
+            from src.hardware.pressure.windows_pairing import (
+                is_available,
+                list_radios,
+            )
+            print()
+            if is_available():
+                radios = list_radios()
+                print(f"  Native pairing: AVAILABLE ({len(radios)} radio(s))")
+                for r in radios:
+                    print(f"    - {format_mac_display(r['address'])}  {r['name']}")
+            else:
+                print("  Native pairing: unavailable on this platform")
+        except Exception as e:
+            print(f"  Native pairing: check failed ({e})")
     else:
         print("  [!] Could not determine the host adapter MAC.")
         print("      Find it manually:")

@@ -1290,12 +1290,19 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/api/pressure/pin":
             try:
                 from src.hardware.pressure.bluetooth_windows import (
+                    describe_pin_entry,
                     format_mac_display,
                     get_host_bluetooth_mac,
                     mac_has_zero_byte,
                     mac_to_wii_pin,
                     mac_to_wii_pin_display,
+                    pin_is_typeable,
                 )
+                try:
+                    from src.hardware.pressure import native_pairing_available
+                    native_ok = native_pairing_available()
+                except Exception:
+                    native_ok = False
                 mac = get_host_bluetooth_mac() or ""
                 self.send_json({
                     "status": "ok",
@@ -1304,6 +1311,13 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     "pin_raw": mac_to_wii_pin(mac) if mac else "",
                     "pin_display": mac_to_wii_pin_display(mac) if mac else "",
                     "has_zero_byte": mac_has_zero_byte(mac) if mac else False,
+                    # Whether the PIN can be typed/pasted into the Windows PIN
+                    # box at all. False means manual entry is impossible and
+                    # native pairing is the only route -- clients must not
+                    # present "copy the PIN" as a workable step.
+                    "pin_typeable": pin_is_typeable(mac) if mac else False,
+                    "pin_entry_note": describe_pin_entry(mac) if mac else "",
+                    "native_pairing_available": native_ok,
                     "platform": sys.platform,
                 })
             except Exception as e:

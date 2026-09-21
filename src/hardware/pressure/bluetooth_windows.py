@@ -31,18 +31,25 @@ def get_host_bluetooth_mac() -> str | None:
         return override
 
     if sys.platform == "win32":
-        # Method 1: Registry — BTHPORT LocalDeviceAddress. This is the
-        # authoritative record of the HOST radio address and is checked first.
+        # Method 1: the LIVE radio, via BluetoothFindFirstRadio. This outranks
+        # the registry because BTHPORT's LocalDeviceAddress can be left over
+        # from a radio that is no longer installed -- a stale value yields a
+        # PIN that can never pair, with no visible sign anything is wrong.
+        mac = _try_live_radio()
+        if mac:
+            return mac
+
+        # Method 2: Registry — BTHPORT LocalDeviceAddress.
         mac = _try_registry()
         if mac:
             return mac
 
-        # Method 2: PowerShell NetAdapter (Bluetooth PAN adapter MAC).
+        # Method 3: PowerShell NetAdapter (Bluetooth PAN adapter MAC).
         mac = _try_powershell_netadapter()
         if mac:
             return mac
 
-        # Method 3: PnP InstanceId scraping. LAST resort: it regex-matches any
+        # Method 4: PnP InstanceId scraping. LAST resort: it regex-matches any
         # 12 hex digits in the id, and a BTHENUM id embeds the REMOTE device
         # address -- so this can confidently return the wrong MAC and hand the
         # user a PIN that will never pair. Only trust it if nothing else works.
@@ -142,6 +149,19 @@ def _try_powershell_netadapter() -> str | None:
     return None
 
 
+def _try_live_radio() -> str | None:
+    """Address of the first live Bluetooth radio via the Win32 API.
+
+    Authoritative in a way the registry is not: it reflects the radio that is
+    actually present right now.
+    """
+    try:
+        from .windows_pairing import get_live_radio_mac
+        return _normalize_mac(get_live_radio_mac())
+    except Exception:
+        return None
+
+
 def _try_registry() -> str | None:
     """Read the Bluetooth adapter MAC from the Windows registry."""
     try:
@@ -221,6 +241,31 @@ def mac_has_zero_byte(mac_hex: str) -> bool:
         return False
     pairs = [mac_hex[i:i + 2] for i in range(0, 12, 2)]
     return "00" in pairs
+
+
+def pin_is_typeable(mac_hex: str) -> bool:
+    """True only when every PIN byte is printable ASCII (0x20-0x7E).
+
+    The Windows "Add a device" PIN box is a text control: it rejects control
+    characters outright, and anything non-ASCII that *is* accepted gets encoded
+    (0xDC -> UTF-8 ``C3 9C``) so the transmitted PIN is wrong. Manual entry is
+    therefore only viable for the minority of adapters whose reversed address
+    is all printable ASCII -- and for everyone else the app must pair natively.
+    """
+    pin_bytes = mac_to_wii_pin_bytes(mac_hex)
+    if not pin_bytes:
+        return False
+    return all(0x20 <= b <= 0x7E for b in pin_bytes)
+
+
+def describe_pin_entry(mac_hex: str) -> str:
+    """One-line, honest explanation of whether the PIN can be typed/pasted."""
+    if not mac_to_wii_pin_bytes(mac_hex):
+        return "No adapter MAC — PIN unavailable."
+    if pin_is_typeable(mac_hex):
+        return "This PIN is plain ASCII and can be pasted into Windows."
+    return ("This PIN contains bytes Windows' PIN box cannot accept — "
+            "use Pair Board, which sends it directly.")
 
 
 def mac_to_wii_pin_bytes(mac_hex: str) -> bytes:

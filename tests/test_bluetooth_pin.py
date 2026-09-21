@@ -9,12 +9,14 @@ sys.path.insert(0, '/home/sean/sps')
 from src.hardware.pressure import bluetooth_windows
 from src.hardware.pressure.bluetooth_windows import (
     _normalize_mac,
+    describe_pin_entry,
     format_mac_display,
     get_manual_mac_override,
     mac_has_zero_byte,
     mac_to_wii_pin,
     mac_to_wii_pin_bytes,
     mac_to_wii_pin_display,
+    pin_is_typeable,
 )
 
 
@@ -110,6 +112,116 @@ class TestBluetoothPIN(unittest.TestCase):
         self.assertEqual(mac_to_wii_pin("INVALID"), "")
         self.assertEqual(mac_to_wii_pin_bytes("123"), b"")
         self.assertEqual(mac_to_wii_pin_display(""), "")
+
+
+class TestPinTypeability(unittest.TestCase):
+    """The Windows 'Add a device' PIN box is a text control: it rejects control
+    characters and re-encodes non-ASCII before transmitting. Telling a user to
+    paste a PIN that cannot survive that is worse than useless, so the app has
+    to know which PINs are actually enterable."""
+
+    def test_control_bytes_are_not_typeable(self):
+        # The adapter from the bug report: 00:E0:4C:00:00:01 -> 01 00 00 4C E0 00
+        self.assertFalse(pin_is_typeable("00E04C000001"))
+
+    def test_high_bytes_are_not_typeable(self):
+        # 0xDC etc. would be re-encoded as UTF-8 and arrive wrong.
+        self.assertFalse(pin_is_typeable("38FC983BB4DC"))
+
+    def test_all_printable_ascii_is_typeable(self):
+        # Reverses to 'ABCDEF' -- the lucky case that made this bug look
+        # intermittent rather than systematic.
+        self.assertTrue(pin_is_typeable("464544434241"))
+
+    def test_space_and_tilde_boundaries(self):
+        self.assertTrue(pin_is_typeable("7E7E7E202020"))   # 0x20..0x7E
+        self.assertFalse(pin_is_typeable("7F7E7E202020"))  # 0x7F is DEL
+
+    def test_no_mac_is_not_typeable(self):
+        self.assertFalse(pin_is_typeable(""))
+        self.assertFalse(pin_is_typeable("garbage"))
+
+    def test_description_names_the_native_route_when_untypeable(self):
+        note = describe_pin_entry("00E04C000001")
+        self.assertIn("Pair Board", note)
+
+    def test_description_is_reassuring_when_typeable(self):
+        note = describe_pin_entry("464544434241")
+        self.assertIn("ASCII", note)
+
+
+class TestClipboardTruncationRule(unittest.TestCase):
+    """The Windows clipboard carries text as NUL-terminated CF_UNICODETEXT, so
+    a PIN containing 0x00 is cut short on paste -- the user in the bug report
+    got a single character. The UI must detect that, not paste silently."""
+
+    @staticmethod
+    def _clipboard_payload(pin: str) -> tuple[str, bool]:
+        """Mirror of the UI's rule in shanktuary_performance_studio.py."""
+        safe = pin.split("\x00")[0]
+        return safe, safe != pin
+
+    def test_reported_pin_is_detected_as_truncated(self):
+        pin = mac_to_wii_pin("00E04C000001")
+        safe, truncated = self._clipboard_payload(pin)
+        self.assertTrue(truncated)
+        self.assertEqual(safe, "\x01")  # exactly the one glyph users saw
+
+    def test_ascii_pin_is_not_truncated(self):
+        pin = mac_to_wii_pin("464544434241")
+        safe, truncated = self._clipboard_payload(pin)
+        self.assertFalse(truncated)
+        self.assertEqual(len(safe), 6)
+
+    def test_nul_free_high_byte_pin_survives_the_clipboard(self):
+        """Not truncated -- but still not *correct* to type, which is why
+        pin_is_typeable is a separate, stricter check."""
+        pin = mac_to_wii_pin("38FC983BB4DC")
+        safe, truncated = self._clipboard_payload(pin)
+        self.assertFalse(truncated)
+        self.assertFalse(pin_is_typeable("38FC983BB4DC"))
+
+
+class TestLiveRadioPreferredOverRegistry(unittest.TestCase):
+    """BTHPORT's LocalDeviceAddress can be left over from a radio that is no
+    longer installed, which yields a PIN that can never pair."""
+
+    def setUp(self):
+        bluetooth_windows.get_host_bluetooth_mac.cache_clear()
+
+    def tearDown(self):
+        bluetooth_windows.get_host_bluetooth_mac.cache_clear()
+
+    def test_live_radio_wins(self):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(bluetooth_windows.sys, "platform", "win32"), \
+                mock.patch.object(bluetooth_windows, "_try_live_radio",
+                                  return_value="CCCCCCCCCCCC") as live, \
+                mock.patch.object(bluetooth_windows, "_try_registry",
+                                  return_value="AAAAAAAAAAAA") as reg:
+            self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
+                             "CCCCCCCCCCCC")
+            live.assert_called_once()
+            reg.assert_not_called()
+
+    def test_registry_still_used_when_no_live_radio(self):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(bluetooth_windows.sys, "platform", "win32"), \
+                mock.patch.object(bluetooth_windows, "_try_live_radio",
+                                  return_value=None), \
+                mock.patch.object(bluetooth_windows, "_try_registry",
+                                  return_value="AAAAAAAAAAAA"):
+            self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
+                             "AAAAAAAAAAAA")
+
+    def test_manual_override_still_beats_everything(self):
+        with mock.patch.dict(os.environ,
+                             {"SHANKTUARY_BT_MAC": "38FC983BB4DC"}), \
+                mock.patch.object(bluetooth_windows, "_try_live_radio",
+                                  return_value="CCCCCCCCCCCC") as live:
+            self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
+                             "38FC983BB4DC")
+            live.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
