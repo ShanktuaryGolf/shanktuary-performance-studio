@@ -10,8 +10,16 @@ Usage:
 import argparse
 import threading
 
-import shanktuary_performance_studio as studio
-from src.ui import ShanktuaryDesktopApp, SplashScreen, should_show_splash
+# Mirror the console into ~/.shanktuary/logs/ BEFORE the studio import.
+# Importing it initialises the pressure subsystem and prints several lines;
+# installing the tee inside main() came too late to capture them, and a
+# crash during that import would never reach the log at all.
+from src.session_log import install as _install_session_log
+
+_LOG_FILE = _install_session_log()
+
+import shanktuary_performance_studio as studio  # noqa: E402
+from src.ui import ShanktuaryDesktopApp, SplashScreen, should_show_splash  # noqa: E402
 
 
 def parse_args(argv=None):
@@ -35,13 +43,8 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
 
-    # First, before anything prints: mirror the console into a log file. In a
-    # --windowed build there is no console, so this file is the only record
-    # of what happened when a user reports a problem.
-    from src.session_log import install as install_session_log
-    log_file = install_session_log()
-    if log_file:
-        print(f"[+] Logging to {log_file}")
+    if _LOG_FILE:
+        print(f"[+] Logging to {_LOG_FILE}")
 
     # Keep the production connectivity lifecycle exactly aligned with the
     # original entry point: Nova worker + local OBS/browser server + Tk UI.

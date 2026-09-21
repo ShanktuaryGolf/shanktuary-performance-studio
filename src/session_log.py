@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime
 
-LOG_DIR = os.path.expanduser("~/.shanktuary/logs")
+LOG_DIR = os.path.normpath(os.path.expanduser("~/.shanktuary/logs"))
 LOG_NAME = "shanktuary.log"
 #: Rotate when the current file passes this size, keep this many old ones.
 MAX_BYTES = 2 * 1024 * 1024
@@ -28,7 +28,9 @@ KEEP = 3
 
 
 def log_path() -> str:
-    return os.path.join(LOG_DIR, LOG_NAME)
+    # normpath so Windows users see C:\Users\x\.shanktuary\logs\shanktuary.log
+    # rather than a mix of both slash styles they cannot paste anywhere.
+    return os.path.normpath(os.path.join(LOG_DIR, LOG_NAME))
 
 
 class _Tee:

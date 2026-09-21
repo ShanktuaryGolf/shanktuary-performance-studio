@@ -130,6 +130,62 @@ class TestToolsMenuEntry:
         assert "Open Log Folder" in src
         assert 'action == "open_log_folder"' in src, "menu item has no handler"
 
+    def test_setup_page_shows_the_log_path(self):
+        """Reported: the user could not find where the log lived from the
+        settings screen and had to copy it out of the console. The path must
+        be on the Setup page itself, with a button."""
+        src = open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "shanktuary_performance_studio.py"),
+            encoding="utf-8").read()
+        assert "HAVING A PROBLEM?" in src
+        assert "setup_log_folder_rect" in src
+        assert 'getattr(self, "setup_log_folder_rect", None)' in src, (
+            "Setup page log button has no click handler"
+        )
+
+
+class TestStartupCapture:
+    def test_lines_printed_during_studio_import_reach_the_log(self, tmp_path):
+        """Reported log showed '[+] Logging to ...' AFTER the pressure
+        subsystem's startup lines, meaning those lines were never captured.
+        Importing the studio module prints; the tee must be installed before
+        that import, not inside main()."""
+        import subprocess
+        import textwrap
+
+        home = tmp_path / "home"
+        home.mkdir()
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        code = textwrap.dedent("""
+            import os, sys
+            sys.path.insert(0, %r)
+            os.environ["SPS_SKIP_SPLASH"] = "1"
+            # Do what shanktuary_app.py does at import time, then stop.
+            import shanktuary_app
+            print("MARKER-AFTER-IMPORT")
+        """) % repo
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+        subprocess.run([sys.executable, "-c", code], env=env,
+                       capture_output=True, timeout=120, cwd=repo)
+
+        log = home / ".shanktuary" / "logs" / "shanktuary.log"
+        assert log.exists(), "no log file written during import"
+        body = log.read_text(encoding="utf-8")
+        assert "MARKER-AFTER-IMPORT" in body
+        # The pressure subsystem announces itself during import; that line
+        # is exactly what was missing from the reported log.
+        assert "Pressure Subsystem initialized" in body, (
+            f"startup lines were not captured:\n{body}"
+        )
+
+    def test_log_path_uses_native_separators(self, session_log):
+        """C:\\Users\\x/.shanktuary/logs\\shanktuary.log is not a path anyone
+        can paste anywhere."""
+        p = session_log.log_path()
+        assert p == os.path.normpath(p)
+        if os.name == "nt":
+            assert "/" not in p
+
     def test_open_log_folder_falls_back_to_clipboard(self, monkeypatch):
         """If the OS file browser cannot be launched, the path must still
         reach the user somehow."""

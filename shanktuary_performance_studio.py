@@ -790,6 +790,7 @@ class ShanktuaryApp:
         self.setup_step_b_rect = None
         self.setup_align_rect = None
         self.setup_stance_rect = None
+        self.setup_log_folder_rect = None
         # Full-screen step-on prompt for the dual-board assignment wizard.
         self.show_board_assign_modal = False
         self.board_modal_cancel_rect = None
@@ -3926,6 +3927,10 @@ class ShanktuaryApp:
                 # have, and it always re-targeted the first board found, so a
                 # second board could never be paired.
                 self.start_pairing_flow()
+                return
+
+            if _h(getattr(self, "setup_log_folder_rect", None)):
+                self.open_log_folder()
                 return
 
             if _h(self.setup_pin_copy_rect):
@@ -8982,14 +8987,29 @@ class ShanktuaryApp:
 
         pm = getattr(obs_server, "pressure_manager", None)
         if pm:
-            try:
-                # Newly paired boards only become readable once the backend is
-                # rebuilt; without this the user pairs successfully and Setup
-                # still shows nothing until they restart the app.
-                pm.enumerate_boards(max_age_sec=0.0)
-                pm.reopen_backend()
-            except Exception as e:
-                print(f"[!] Could not reopen board backend: {e}")
+            # Newly paired boards only become readable once the backend is
+            # rebuilt -- but Windows takes a few seconds to bring up the HID
+            # interface after a fresh bond. Reopening instantly fails and
+            # logs "could not be opened" right after a successful pairing,
+            # which reads as a failure. Retry a few times on a short delay.
+            def _reopen(attempt=1):
+                try:
+                    pm.enumerate_boards(max_age_sec=0.0)
+                    pm.reopen_backend()
+                    ok = bool(pm.backend and getattr(pm.backend, "is_open", False))
+                except Exception as e:
+                    print(f"[!] Could not reopen board backend: {e}")
+                    ok = False
+                if ok:
+                    print(f"[+] Board backend open after pairing (try {attempt}).")
+                    self.draw_screen()
+                elif attempt < 6:
+                    self.root.after(2000, lambda: _reopen(attempt + 1))
+                else:
+                    print("[!] Board still not readable 12s after pairing; "
+                          "the 2s background retry continues.")
+
+            self.root.after(1500, _reopen)
 
         if n:
             self.copy_feedback = (
@@ -9839,6 +9859,49 @@ class ShanktuaryApp:
             self.canvas.create_text(lx0 + 18, dy + 28 + i * 12, text=line,
                                     fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 7), anchor="nw")
+
+        # --- support: where the log lives ---------------------------------
+        # Users reporting a problem must be able to find the log without
+        # reading a console or knowing about hidden dot-folders. Show the
+        # actual path here, on the page they are already on when something
+        # goes wrong, with a button that opens the folder.
+        try:
+            from src.session_log import log_path as _log_path
+            log_p = _log_path()
+        except Exception:
+            log_p = ""
+        sy = bot - 62
+        self.canvas.create_line(lx0 + 18, sy, lx1 - 18, sy, fill=theme.HAIRLINE)
+        self.canvas.create_text(lx0 + 18, sy + 10, text="HAVING A PROBLEM?",
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.canvas.create_text(lx0 + 18, sy + 24,
+                                text="Send this log with your report:",
+                                fill=theme.TEXT_2, font=(theme.ui_font(), 8),
+                                anchor="nw")
+        # Ellipsize from the left so the filename -- the part that matters --
+        # always survives on a narrow column.
+        max_w = (lx1 - 18) - (lx0 + 18) - 120
+        shown = log_p
+        try:
+            import tkinter.font as _tkf
+            f_ = _tkf.Font(root=self.root, family=theme.ui_font(), size=7)
+            while shown and f_.measure("…" + shown) > max_w and len(shown) > 12:
+                shown = shown[8:]
+            if shown != log_p:
+                shown = "…" + shown
+        except Exception:
+            pass
+        self.canvas.create_text(lx0 + 18, sy + 40, text=shown,
+                                fill=theme.TEXT_3, font=(theme.ui_font(), 7),
+                                anchor="nw")
+        self.setup_log_folder_rect = (lx1 - 18 - 104, sy + 20, lx1 - 18, sy + 48)
+        self.canvas.create_rectangle(*self.setup_log_folder_rect,
+                                     fill=theme.SURFACE_2,
+                                     outline=theme.ACCENT_LINE)
+        self.canvas.create_text((lx1 - 18 - 104 + lx1 - 18) / 2, sy + 34,
+                                text="Open Log Folder", fill=theme.ACCENT_TEXT,
+                                font=(theme.ui_font(), 8), anchor="center")
 
         # ================= RIGHT COLUMN =================
         ry = y
