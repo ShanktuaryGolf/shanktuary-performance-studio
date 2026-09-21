@@ -11,6 +11,7 @@ are only ever used at runtime on Windows, where ctypes sizes them correctly.
 
 import ctypes
 import sys
+import time
 import unittest
 
 sys.path.insert(0, '/home/sean/sps')
@@ -280,6 +281,145 @@ class TestBusyRecovery(unittest.TestCase):
         self.assertFalse(ok)
         rm.assert_called_once_with("CC9E004CE1F9")
         self.assertIn("press SYNC", msg)
+
+
+class TestAuthTimeout(unittest.TestCase):
+    """Reported: the console stopped dead after 'Found Nintendo RVL-WBC-01'
+    and the board never paired.
+
+    BluetoothAuthenticateDeviceEx blocks with no timeout of its own and logs
+    nothing while it waits, so a stall there is indistinguishable from a crash
+    -- and it can outlast the ~20s the board stays awake after SYNC.
+    """
+
+    def _lib(self, block_for):
+        from unittest import mock
+        lib = mock.MagicMock()
+        lib.BluetoothRegisterForAuthenticationEx.return_value = wp.ERROR_SUCCESS
+
+        def _slow_auth(*a, **k):
+            time.sleep(block_for)
+            return wp.ERROR_SUCCESS
+
+        lib.BluetoothAuthenticateDeviceEx.side_effect = _slow_auth
+        return lib
+
+    def test_blocking_call_is_bounded(self):
+        from unittest import mock
+        lib = self._lib(block_for=5.0)
+        device = {"address": "0024446AEBFC", "radio_handle": 1,
+                  "radio_address": "38FC983BB4DC"}
+        started = time.time()
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for",
+                                  return_value=wp.BLUETOOTH_DEVICE_INFO()):
+            ok, msg = wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                           log=lambda *a: None,
+                                           auth_timeout=0.5)
+        elapsed = time.time() - started
+
+        self.assertFalse(ok)
+        self.assertLess(elapsed, 3.0,
+                        "pairing hung past its timeout; the UI would freeze")
+        self.assertIn("SYNC again", msg,
+                      "timeout message should tell the user what to do")
+
+    def test_timeout_keeps_the_callback_alive(self):
+        """Unregistering while Windows may still call back would hand it a
+        dangling pointer."""
+        from unittest import mock
+        lib = self._lib(block_for=3.0)
+        device = {"address": "0024446AEBFC", "radio_handle": 1,
+                  "radio_address": "38FC983BB4DC"}
+        before = len(wp._ORPHANED_AUTH)
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for",
+                                  return_value=wp.BLUETOOTH_DEVICE_INFO()):
+            wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                 log=lambda *a: None, auth_timeout=0.3)
+
+        self.assertEqual(len(wp._ORPHANED_AUTH), before + 1)
+        lib.BluetoothUnregisterAuthentication.assert_not_called()
+
+    def test_progress_is_logged_while_waiting(self):
+        """A silent stall is what made this impossible to diagnose."""
+        from unittest import mock
+        lines = []
+        lib = self._lib(block_for=0.05)
+        device = {"address": "0024446AEBFC", "radio_handle": 1,
+                  "radio_address": "38FC983BB4DC"}
+        info = wp.BLUETOOTH_DEVICE_INFO()
+        info.fAuthenticated = 1
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for", return_value=info), \
+                mock.patch.object(wp, "enable_hid_service",
+                                  return_value=wp.ERROR_SUCCESS):
+            wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                 log=lines.append, auth_timeout=5.0)
+
+        blob = " ".join(lines)
+        self.assertIn("Authenticating with the board", blob,
+                      "no log line before the blocking call")
+        self.assertIn("Authentication returned", blob,
+                      "no log line after the blocking call")
+
+
+class TestDiscoveryOrder(unittest.TestCase):
+    """The board answers for only ~20s after SYNC. A 10s inquiry before
+    authentication can spend most of that window, so the cached device list is
+    checked first."""
+
+    def test_cached_lookup_is_tried_before_inquiry(self):
+        from unittest import mock
+        calls = []
+
+        def _find(timeout_mult=4, include_known=True, issue_inquiry=True):
+            calls.append(issue_inquiry)
+            return [{"address": "0024446AEBFC", "name": "Nintendo RVL-WBC-01",
+                     "authenticated": False, "remembered": False,
+                     "connected": False, "radio_address": "38FC983BB4DC",
+                     "radio_handle": 1}]
+
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards", _find), \
+                mock.patch.object(wp, "pair_via_callback",
+                                  return_value=(True, "paired")):
+            wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertEqual(calls[0], False,
+                         "first lookup should be the instant cached one")
+        self.assertEqual(len(calls), 1,
+                         "an unpaired board was cached; no inquiry needed")
+
+    def test_falls_back_to_inquiry_when_cache_has_nothing_new(self):
+        from unittest import mock
+        calls = []
+
+        def _find(timeout_mult=4, include_known=True, issue_inquiry=True):
+            calls.append(issue_inquiry)
+            if issue_inquiry:
+                return [{"address": "0024446AEBFC", "name": "b",
+                         "authenticated": False, "remembered": False,
+                         "connected": False, "radio_address": "38FC983BB4DC",
+                         "radio_handle": 1}]
+            return []          # nothing cached
+
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards", _find), \
+                mock.patch.object(wp, "pair_via_callback",
+                                  return_value=(True, "paired")):
+            result = wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertEqual(calls, [False, True])
+        self.assertTrue(result["success"])
 
 
 class TestPlatformGuards(unittest.TestCase):

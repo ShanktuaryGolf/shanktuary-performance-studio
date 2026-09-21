@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import threading
 import time
 from ctypes import (
     POINTER,
@@ -242,6 +243,11 @@ def _auth_callback_type():
 
 _bt = None
 
+#: Registrations belonging to timed-out authentication attempts. Windows may
+#: still call back into them, so the handle AND the ctypes callback must stay
+#: referenced for the life of the process rather than being collected.
+_ORPHANED_AUTH = []
+
 
 def _api():
     """Return the bound bthprops.cpl module, or None when unavailable."""
@@ -417,12 +423,17 @@ def get_live_radio_mac() -> str | None:
 # --------------------------------------------------------------------------
 
 def find_balance_boards(timeout_mult: int = 4,
-                        include_known: bool = True) -> list[dict]:
-    """Inquire for Wii Balance Boards.
+                        include_known: bool = True,
+                        issue_inquiry: bool = True) -> list[dict]:
+    """Look for Wii Balance Boards.
 
-    ``timeout_mult`` is in units of 1.28 s (Windows caps it at 48). The board
-    only answers an inquiry for ~20 s after SYNC is pressed, so the caller must
-    prompt for SYNC immediately before this runs.
+    ``issue_inquiry=False`` searches only Windows' existing device cache and
+    returns immediately. That matters because a board answers for just ~20s
+    after SYNC, and a live inquiry burns most of that window before
+    authentication can even start -- so callers should try the cached lookup
+    first and fall back to an inquiry.
+
+    ``timeout_mult`` is in units of 1.28 s (Windows caps it at 48).
     """
     lib = _api()
     if lib is None:
@@ -437,8 +448,8 @@ def find_balance_boards(timeout_mult: int = 4,
         sp.fReturnRemembered = 1 if include_known else 0
         sp.fReturnUnknown = 1
         sp.fReturnConnected = 1 if include_known else 0
-        sp.fIssueInquiry = 1
-        sp.cTimeoutMultiplier = timeout_mult
+        sp.fIssueInquiry = 1 if issue_inquiry else 0
+        sp.cTimeoutMultiplier = timeout_mult if issue_inquiry else 0
         sp.hRadio = radio["handle"]
 
         info = BLUETOOTH_DEVICE_INFO()
@@ -547,12 +558,16 @@ def build_pin_response(device_addr: BLUETOOTH_ADDRESS,
     return resp
 
 
-def pair_via_callback(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
+def pair_via_callback(device: dict, pin: bytes, log=print,
+                      auth_timeout: float = 25.0) -> tuple[bool, str]:
     """Preferred route: answer the auth request with raw PIN bytes.
 
     ``BLUETOOTH_PIN_INFO`` carries ``UCHAR pin[16]`` plus an explicit length,
     so NUL bytes and high bytes survive exactly -- unlike anything typed or
     pasted into the Windows PIN box.
+
+    ``auth_timeout`` bounds the blocking Win32 call, which otherwise waits far
+    longer than the board stays awake after SYNC.
     """
     lib = _api()
     if lib is None:
@@ -593,9 +608,50 @@ def pair_via_callback(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
     if rc != ERROR_SUCCESS:
         return False, f"could not register for authentication: {describe_error(rc)}"
 
+    # BluetoothAuthenticateDeviceEx BLOCKS, with no timeout of its own, and
+    # logs nothing while it waits. A run that stalls here produces a console
+    # that simply stops -- which is exactly how this looked from the outside.
+    # Run it on a worker so we can bound the wait: the board sleeps ~20s after
+    # SYNC, so blocking past that is pointless and just looks frozen.
+    log("[i] Authenticating with the board (this can take a few seconds)...")
+    auth_result = {}
+    stop_beat = threading.Event()
+
+    def _authenticate():
+        try:
+            auth_result["rc"] = int(lib.BluetoothAuthenticateDeviceEx(
+                None, radio_handle, byref(info), None,
+                MITM_PROTECTION_NOT_REQUIRED))
+        except Exception as e:
+            auth_result["error"] = str(e)
+
+    def _heartbeat():
+        waited = 0
+        while not stop_beat.wait(3.0):
+            waited += 3
+            log(f"[i] ...still waiting on Windows to authenticate ({waited}s)"
+                + ("" if state["answered"] else " — no PIN request yet"))
+
+    worker = threading.Thread(target=_authenticate, daemon=True)
+    worker.start()
+    beat = threading.Thread(target=_heartbeat, daemon=True)
+    beat.start()
+    worker.join(timeout=auth_timeout)
+    stop_beat.set()
+
     try:
-        rc = lib.BluetoothAuthenticateDeviceEx(
-            None, radio_handle, byref(info), None, MITM_PROTECTION_NOT_REQUIRED)
+        if worker.is_alive():
+            # Deliberately not killed: the call is inside Windows and will
+            # finish on its own. Report instead of hanging the UI forever.
+            log(f"[!] Authentication did not return within {auth_timeout:.0f}s.")
+            return False, (f"Windows did not finish pairing within "
+                           f"{auth_timeout:.0f}s. Press SYNC again and retry — "
+                           f"the board sleeps a few seconds after SYNC.")
+        if "error" in auth_result:
+            return False, f"pairing call failed: {auth_result['error']}"
+
+        rc = auth_result.get("rc", WAIT_TIMEOUT)
+        log(f"[i] Authentication returned: {describe_error(rc)}")
         if rc != ERROR_SUCCESS:
             # ERROR_BUSY means Windows already holds a bond for this device, so
             # it never asks us for a PIN. Note the device record from an
@@ -620,7 +676,16 @@ def pair_via_callback(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
                 detail += " (Windows never asked us for the PIN)"
             return False, f"pairing failed: {detail}"
     finally:
-        lib.BluetoothUnregisterAuthentication(reg_handle)
+        stop_beat.set()
+        if worker.is_alive():
+            # The Win32 call is still in flight and may yet invoke our
+            # callback. Unregistering (and letting `cb` be collected) would
+            # leave Windows holding a dangling function pointer, so keep both
+            # alive and let the abandoned attempt finish on its own.
+            _ORPHANED_AUTH.append((reg_handle, cb, worker))
+            log("[i] Leaving the timed-out attempt registered until it ends.")
+        else:
+            lib.BluetoothUnregisterAuthentication(reg_handle)
 
     fresh = _device_info_for(device["address"], radio_handle) or info
     if not fresh.fAuthenticated:
@@ -757,13 +822,21 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
     log(f"[i] Live Bluetooth radio(s): "
         f"{', '.join(r['address'] for r in radios)}")
 
-    log("[i] Scanning for a Wii Balance Board — press the red SYNC button now.")
-    boards = find_balance_boards(timeout_mult=discovery_timeout_mult)
+    log("[i] Looking for a Wii Balance Board...")
+    # Try the cached device list FIRST. A live inquiry takes ~10s, and the
+    # board only answers for ~20s after SYNC -- so inquiring first can spend
+    # most of the window before authentication even begins, which then times
+    # out against a board that has already gone back to sleep.
+    boards = find_balance_boards(issue_inquiry=False)
+    skip = {str(a).replace(":", "").upper() for a in (exclude_addresses or ())}
+    candidates = [b for b in boards if b["address"].upper() not in skip]
+    if not any(not b["authenticated"] for b in candidates):
+        log("[i] Nothing new in the cache — scanning (press SYNC now).")
+        boards = find_balance_boards(timeout_mult=discovery_timeout_mult)
     result["boards_seen"] = len(boards)
 
     # Drop boards the caller has already dealt with, so a second pass targets
     # the board the user just synced rather than re-opening the first one.
-    skip = {str(a).replace(":", "").upper() for a in (exclude_addresses or ())}
     if skip:
         boards = [b for b in boards if b["address"].upper() not in skip]
 
