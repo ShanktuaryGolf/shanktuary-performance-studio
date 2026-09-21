@@ -1025,6 +1025,20 @@ class PressureManager:
         with self.lock:
             return self._set_simulator_unlocked(enabled)
 
+    def reopen_backend(self):
+        """Rebuild the hardware backend against whatever is connected NOW.
+
+        Called after pairing: a board that was just paired is not readable
+        through the existing (failed or stale) backend, so without this the
+        user pairs successfully and the app still shows no board until they
+        restart it. Also clears the device scan cache so the fresh device is
+        actually seen rather than a stale enumeration being reused.
+        """
+        with self.lock:
+            self._device_scan_cache = None
+            self._backend_error_logged = False
+            return self._set_simulator_unlocked(self.is_simulator)
+
     def set_board_mode(self, mode: str):
         """Toggle between 'single' and 'dual' board modes."""
         with self.lock:

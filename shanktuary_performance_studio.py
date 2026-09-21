@@ -795,6 +795,14 @@ class ShanktuaryApp:
         self.board_modal_cancel_rect = None
         self.board_modal_done_rect = None
         self.board_modal_skip_rect = None
+        # Guided pairing: a full-screen, numbered "press SYNC on board N"
+        # flow. Pairing narration used to go only to a console that a
+        # --windowed build does not have.
+        self.show_pairing_modal = False
+        self.pairing_flow = None
+        self.pairing_action_rect = None
+        self.pairing_cancel_rect = None
+        self._pairing_anim_id = None
         # Guided calibration flow: assign -> 50/50 -> stance width, run as one
         # pass because the user stands on the boards for all three.
         self.setup_flow_steps = []
@@ -3456,9 +3464,47 @@ class ShanktuaryApp:
         self.canvas.config(cursor="")
 
     def handle_mouse_press(self, event):
-        # 0. Board assignment prompt. Checked before anything else: it covers
-        # the whole window, so clicks must not fall through to the controls
-        # painted underneath it.
+        # 0. Guided pairing prompt. Checked before everything: it covers the
+        # whole window, so clicks must not reach the controls underneath.
+        if self.show_pairing_modal:
+            def _phit(r):
+                return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
+
+            flow = getattr(self, "pairing_flow", None)
+            if flow is None:
+                self.show_pairing_modal = False
+                self.draw_screen()
+                return
+
+            st = flow.status()
+            if _phit(getattr(self, "pairing_cancel_rect", None)):
+                if st["phase"] == "done":
+                    self._finish_pairing_flow()
+                else:
+                    flow.cancel()
+                    self.show_pairing_modal = False
+                    self._stop_pairing_animation()
+                self.draw_screen()
+                return
+
+            if _phit(getattr(self, "pairing_action_rect", None)):
+                phase = st["phase"]
+                if phase == "prompt":
+                    flow.confirm_sync_pressed()
+                elif phase == "step_ok":
+                    flow.advance()
+                elif phase == "failed":
+                    flow.retry()
+                elif phase == "done":
+                    self._finish_pairing_flow()
+                self.draw_screen()
+                return
+
+            # Swallow every other click: a full-screen prompt that lets stray
+            # clicks through is how users end up changing settings blind.
+            return
+
+        # 0b. Board assignment prompt. Same reasoning.
         if self.show_board_assign_modal:
             def _hit(r):
                 return r and r[0] <= event.x <= r[2] and r[1] <= event.y <= r[3]
@@ -3839,70 +3885,11 @@ class ShanktuaryApp:
                 return
 
             if _h(self.setup_pair_rect):
-                # Each click spawns a worker that runs a ~10s Bluetooth
-                # inquiry. Without this guard an impatient user stacks
-                # concurrent inquiries on one radio, which fight each other
-                # and produce a wall of interleaved, contradictory log lines.
-                if getattr(self, "_pairing_in_progress", False):
-                    self.copy_feedback = "Pairing already in progress..."
-                    self.root.after(2000, self.clear_copy_feedback)
-                    self.draw_screen()
-                    return
-                self._pairing_in_progress = True
-                self.copy_feedback = "Press SYNC on the board now — pairing..."
-                self.draw_screen()
-
-                def _do_pair():
-                    # Pair natively via the Win32 Bluetooth API: the PIN is six
-                    # raw bytes and Windows' PIN text box cannot carry them
-                    # (control chars rejected, high bytes re-encoded), so the
-                    # old "paste the PIN" flow could never work for most
-                    # adapters. BluetoothSendAuthenticationResponseEx takes the
-                    # PIN as bytes + length, so it survives exactly.
-                    outcome = None
-                    try:
-                        from src.hardware.pressure import (
-                            native_pairing_available,
-                            pair_balance_board,
-                        )
-                        if native_pairing_available():
-                            outcome = pair_balance_board(log=print)
-                        else:
-                            from src.hardware.pressure import connect_board
-                            connect_board()
-                    except Exception as e:
-                        print(f"[!] Pairing notice: {e}")
-                        outcome = {"success": False,
-                                   "message": f"Pairing error: {e}"}
-
-                    def _report():
-                        self._pairing_in_progress = False
-                        try:
-                            n = len(pm.enumerate_boards(max_age_sec=0.0)) if pm else 0
-                        except Exception:
-                            n = 0
-                        if outcome and outcome.get("success"):
-                            self.copy_feedback = (
-                                f"✓ Paired {outcome.get('address', '')} — "
-                                f"{n} board{'s' if n != 1 else ''} detected")
-                        elif outcome and outcome.get("message"):
-                            self.copy_feedback = outcome["message"]
-                        elif n == 0:
-                            self.copy_feedback = (
-                                "No board found — press SYNC and try again")
-                        else:
-                            self.copy_feedback = (
-                                f"{n} board{'s' if n != 1 else ''} detected")
-                        self.root.after(6000, self.clear_copy_feedback)
-                        self.draw_screen()
-
-                    try:
-                        self.root.after(0, _report)
-                    except Exception:
-                        self._pairing_in_progress = False
-
-                threading.Thread(target=_do_pair, daemon=True).start()
-                self.draw_screen()
+                # Guided, full-screen pairing. The old single-shot button put
+                # its whole narrative in a console a --windowed build does not
+                # have, and it always re-targeted the first board found, so a
+                # second board could never be paired.
+                self.start_pairing_flow()
                 return
 
             if _h(self.setup_pin_copy_rect):
@@ -5392,6 +5379,11 @@ class ShanktuaryApp:
         # until they finish or cancel.
         if self.show_board_assign_modal:
             self.draw_board_assign_modal(w, h)
+
+        # Pairing outranks assignment: there is nothing to assign until the
+        # boards are actually paired.
+        if self.show_pairing_modal:
+            self.draw_pairing_modal(w, h)
 
         # 6. Toast Notification (Always on Top)
         if self.copy_feedback:
@@ -8864,6 +8856,260 @@ class ShanktuaryApp:
                     self._advance_setup_flow()
         except Exception:
             pass
+
+    def start_pairing_flow(self, target_count=None):
+        """Open the guided pairing prompt.
+
+        Defaults to the number of boards the user has configured: a dual-plate
+        setup needs two, so walk them through both rather than pairing one and
+        leaving them to work out why the app still says a board is missing.
+        """
+        pm = getattr(obs_server, "pressure_manager", None)
+        if target_count is None:
+            target_count = 2 if (pm and getattr(pm, "board_mode", "single")
+                                 == "dual") else 1
+
+        try:
+            from src.hardware.pressure import native_pairing_available
+            if not native_pairing_available():
+                # No native API (Linux/macOS): the guided flow has nothing to
+                # drive, so say so instead of opening a prompt that cannot
+                # finish.
+                self.copy_feedback = (
+                    "Guided pairing needs Windows — pair via your OS "
+                    "Bluetooth settings")
+                self.root.after(5000, self.clear_copy_feedback)
+                self.draw_screen()
+                return
+            from src.hardware.pressure.pairing_flow import make_pairing_flow
+            self.pairing_flow = make_pairing_flow(target_count=target_count)
+        except Exception as e:
+            print(f"[!] Could not start pairing flow: {e}")
+            self.copy_feedback = f"Could not start pairing: {e}"
+            self.root.after(5000, self.clear_copy_feedback)
+            self.draw_screen()
+            return
+
+        self.pairing_flow.start()
+        self.show_pairing_modal = True
+        self.draw_screen()
+
+    def _stop_pairing_animation(self):
+        """Cancel the modal's pending repaint, if any."""
+        aid = getattr(self, "_pairing_anim_id", None)
+        if aid:
+            try:
+                self.root.after_cancel(aid)
+            except Exception:
+                pass
+        self._pairing_anim_id = None
+
+    def _finish_pairing_flow(self):
+        """Close the prompt and re-open the hardware with what is now paired."""
+        self.show_pairing_modal = False
+        self._stop_pairing_animation()
+        flow = getattr(self, "pairing_flow", None)
+        n = len(flow.paired) if flow else 0
+        self.pairing_flow = None
+
+        pm = getattr(obs_server, "pressure_manager", None)
+        if pm:
+            try:
+                # Newly paired boards only become readable once the backend is
+                # rebuilt; without this the user pairs successfully and Setup
+                # still shows nothing until they restart the app.
+                pm.enumerate_boards(max_age_sec=0.0)
+                pm.reopen_backend()
+            except Exception as e:
+                print(f"[!] Could not reopen board backend: {e}")
+
+        if n:
+            self.copy_feedback = (
+                f"✓ {n} board{'s' if n != 1 else ''} paired")
+            self.root.after(4000, self.clear_copy_feedback)
+        self.draw_screen()
+
+    def draw_pairing_modal(self, w, h):
+        """Full-screen, room-readable guided pairing.
+
+        Pairing used to be one button whose entire narrative went to a console
+        the user cannot see in a --windowed build. Worse, with two boards the
+        old single-shot call always re-targeted the first board found, so a
+        second board could never be paired. This states which board to touch,
+        what the app is doing right now, and what happened -- in type readable
+        from where the user is actually standing.
+        """
+        flow = getattr(self, "pairing_flow", None)
+        if flow is None:
+            return
+        st = flow.status()
+
+        self.canvas.create_rectangle(0, 0, w, h, fill="#04060A", outline="")
+
+        s = max(0.75, min(1.6, w / 1600.0))
+        f_head = max(26, int(46 * s))
+        f_sub = max(14, int(21 * s))
+        f_label = max(11, int(15 * s))
+        f_step = max(12, int(17 * s))
+
+        import tkinter.font as tkfont
+
+        def lh(size, bold=False):
+            try:
+                return tkfont.Font(root=self.root, family=theme.ui_font(),
+                                   size=size,
+                                   weight="bold" if bold else "normal",
+                                   ).metrics("linespace")
+            except Exception:
+                return int(size * 1.35)
+
+        h_head = lh(f_head, True)
+        h_sub = lh(f_sub)
+        h_label = lh(f_label)
+        cx = w // 2
+
+        dual = st["target_count"] == 2
+        btn_h = int(48 * s)
+        gap_head = int(16 * s)
+        gap_sub = int(30 * s)
+        gap_btn = int(34 * s)
+        rail_h = (h_label + int(24 * s)) if dual else 0
+        art_h = int(120 * s)
+
+        block_h = (rail_h + h_head + gap_head + h_sub + gap_sub + art_h
+                   + gap_btn + btn_h)
+        y = max(int(40 * s), (h - block_h) // 2)
+
+        # ---- step rail (two-board only) -----------------------------------
+        if dual:
+            done_n = st["paired_count"]
+            cur = st["step"]
+            labels = ["1. First board", "2. Second board"]
+            rail_gap = int(34 * s)
+            widths = []
+            for lbl in labels:
+                tid = self.canvas.create_text(-4000, -4000, text=lbl,
+                                              font=(theme.ui_font(), f_label))
+                bb = self.canvas.bbox(tid)
+                widths.append((bb[2] - bb[0]) if bb else int(140 * s))
+                self.canvas.delete(tid)
+            total = sum(widths) + rail_gap
+            rx = cx - total // 2
+            for i, lbl in enumerate(labels):
+                if i < done_n:
+                    col, txt, bold = theme.ACCENT, f"✓ {lbl[3:]}", False
+                elif i == cur - 1:
+                    col, txt, bold = theme.ACCENT_TEXT, lbl, True
+                else:
+                    col, txt, bold = theme.TEXT_3, lbl, False
+                self.canvas.create_text(
+                    rx, y, text=txt, fill=col, anchor="nw",
+                    font=(theme.ui_font(), f_label,
+                          "bold" if bold else "normal"))
+                rx += widths[i] + rail_gap
+            y += h_label + int(10 * s)
+            rule = max(int(220 * s), total // 2 + int(16 * s))
+            self.canvas.create_line(cx - rule, y, cx + rule, y,
+                                    fill=theme.HAIRLINE)
+            y += int(14 * s)
+
+        # ---- headline / subtitle ------------------------------------------
+        head_col = (theme.WARN if st["phase"] == "failed"
+                    else theme.ACCENT if st["phase"] in ("done", "step_ok")
+                    else theme.TEXT)
+        self.canvas.create_text(cx, y, text=st["headline"], fill=head_col,
+                                font=(theme.ui_font(), f_head, "bold"),
+                                anchor="n")
+        y += h_head + gap_head
+        self.canvas.create_text(cx, y, text=st["sub"],
+                                fill=theme.WARN if st["phase"] == "failed"
+                                else theme.TEXT_2,
+                                font=(theme.ui_font(), f_sub), anchor="n",
+                                width=int(w * 0.7), justify="center")
+        y += h_sub + gap_sub
+
+        # ---- the board + where the SYNC button is --------------------------
+        # A first-time user does not know the button is under a battery cover
+        # on the underside, so show it rather than describing it.
+        art_cx, art_cy = cx, y + art_h // 2
+        bw_, bh_ = int(190 * s), int(74 * s)
+        if st["phase"] in ("prompt", "searching"):
+            self.canvas.create_rectangle(art_cx - bw_ // 2, art_cy - bh_ // 2,
+                                         art_cx + bw_ // 2, art_cy + bh_ // 2,
+                                         fill=theme.SURFACE_2,
+                                         outline=theme.HAIRLINE)
+            # Blink the SYNC dot while we are waiting on the user, so the
+            # thing they must press is the thing that moves.
+            blink = int(time.time() * 2) % 2 == 0
+            dot_col = (theme.WARN if (st["phase"] == "prompt" and blink)
+                       else theme.ACCENT if st["phase"] == "searching"
+                       else theme.TEXT_3)
+            r_ = int(9 * s)
+            self.canvas.create_oval(art_cx - r_, art_cy - r_,
+                                    art_cx + r_, art_cy + r_,
+                                    fill=dot_col, outline="")
+            self.canvas.create_text(art_cx, art_cy + bh_ // 2 + int(14 * s),
+                                    text="red SYNC button, under the battery cover",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label), anchor="n")
+        elif st["phase"] in ("step_ok", "done"):
+            for i in range(st["paired_count"]):
+                off = (i - (st["paired_count"] - 1) / 2) * (bw_ + int(20 * s))
+                bx = art_cx + int(off)
+                self.canvas.create_rectangle(bx - bw_ // 2, art_cy - bh_ // 2,
+                                             bx + bw_ // 2, art_cy + bh_ // 2,
+                                             fill=theme.ACCENT_DEEP,
+                                             outline=theme.ACCENT_LINE)
+                self.canvas.create_text(bx, art_cy, text="✓ paired",
+                                        fill=theme.ACCENT_TEXT,
+                                        font=(theme.ui_font(), f_step, "bold"),
+                                        anchor="center")
+        y += art_h + gap_btn
+
+        # ---- actions -------------------------------------------------------
+        self.pairing_action_rect = None
+        self.pairing_cancel_rect = None
+
+        if st["phase"] == "searching":
+            # No action to offer: show that work is happening instead of an
+            # inert screen the user will click at.
+            dots = "." * (int(time.time() * 2) % 4)
+            self.canvas.create_text(cx, y + btn_h // 2,
+                                    text=f"Working{dots}",
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_sub),
+                                    anchor="center")
+        elif st["action_label"]:
+            bw2 = int(min(w * 0.42, 420 * s))
+            self.pairing_action_rect = (cx - bw2 // 2, y, cx + bw2 // 2, y + btn_h)
+            self.canvas.create_rectangle(*self.pairing_action_rect,
+                                         fill=theme.ACCENT_DEEP,
+                                         outline=theme.ACCENT_LINE)
+            self.canvas.create_text(cx, y + btn_h // 2, text=st["action_label"],
+                                    fill=theme.ACCENT_TEXT,
+                                    font=(theme.ui_font(), f_step, "bold"),
+                                    anchor="center")
+
+        if st["can_cancel"]:
+            cy_ = y + btn_h + int(26 * s)
+            label = "Close" if st["phase"] == "done" else "Cancel"
+            cw = int(160 * s)
+            self.pairing_cancel_rect = (cx - cw // 2, cy_, cx + cw // 2,
+                                        cy_ + int(34 * s))
+            self.canvas.create_text(cx, cy_ + int(17 * s), text=label,
+                                    fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label),
+                                    anchor="center")
+
+        # Keep the animation alive while the user is being asked to act.
+        # Tracked so it can be cancelled: an uncancelled repeat fires into a
+        # destroyed window ("invalid command name ...draw_screen") and keeps
+        # repainting a modal that is no longer on screen.
+        if st["phase"] in ("prompt", "searching"):
+            try:
+                self._pairing_anim_id = self.root.after(400, self.draw_screen)
+            except Exception:
+                self._pairing_anim_id = None
 
     def draw_board_assign_modal(self, w, h):
         """Full-screen, room-readable prompt for the guided setup flow.

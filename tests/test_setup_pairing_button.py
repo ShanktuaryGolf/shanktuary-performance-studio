@@ -95,23 +95,19 @@ def test_pair_button_is_labelled_for_native_pairing_when_available(app, monkeypa
     )
 
 
-def test_clicking_pair_invokes_native_pairing(app, monkeypatch):
-    """The click must reach pair_balance_board() through the redesigned
-    shell's hit testing -- ShanktuaryDesktopApp overrides handle_mouse_press,
-    so a handler that only works on the production class is not enough."""
+def test_clicking_pair_opens_the_guided_prompt(app, monkeypatch):
+    """The click must reach the pairing flow through the redesigned shell's
+    hit testing -- ShanktuaryDesktopApp overrides handle_mouse_press, so a
+    handler that only works on the production class is not enough.
+
+    Pairing itself is no longer fired straight from this button: it opens the
+    guided prompt, because a one-shot call narrated only to a console is
+    invisible in a --windowed build (and could never reach a second board).
+    """
     root, application, _ = app
     import src.hardware.pressure as pressure
 
-    calls = []
-
-    def _fake_pair(*args, **kwargs):
-        calls.append(kwargs)
-        return {"success": True, "message": "paired", "address": "001E35AABBCC",
-                "radio_address": "38FC983BB4DC", "method": "callback",
-                "boards_seen": 1}
-
     monkeypatch.setattr(pressure, "native_pairing_available", lambda: True)
-    monkeypatch.setattr(pressure, "pair_balance_board", _fake_pair)
 
     _open_setup(root, application)
     rect = getattr(application, "setup_pair_rect", None)
@@ -119,44 +115,32 @@ def test_clicking_pair_invokes_native_pairing(app, monkeypatch):
 
     _click(root, application, rect)
 
-    # Pairing runs on a worker thread so the UI does not freeze during the
-    # ~10s Bluetooth inquiry; give it a moment to land.
-    import time
-    for _ in range(50):
-        if calls:
-            break
-        time.sleep(0.05)
-        root.update()
-
-    assert calls, "clicking Pair Board did not invoke native pairing"
+    assert application.show_pairing_modal, (
+        "Pair Board did not open the guided pairing prompt"
+    )
+    assert application.pairing_flow is not None
 
 
-def test_pairing_failure_is_reported_in_the_gui(app, monkeypatch):
-    """A --windowed build has no console. A failure that only print()s is
-    invisible -- which is how the original 'Pair' button looked dead."""
+def test_pairing_unavailable_is_reported_in_the_gui(app, monkeypatch):
+    """A --windowed build has no console. A dead end that only print()s is
+    invisible -- which is how the original 'Pair' button looked dead.
+
+    (Failures *during* pairing are shown on the guided prompt itself; see
+    tests/test_pairing_modal.py.)
+    """
     root, application, _ = app
     import src.hardware.pressure as pressure
 
-    monkeypatch.setattr(pressure, "native_pairing_available", lambda: True)
-    monkeypatch.setattr(
-        pressure, "pair_balance_board",
-        lambda *a, **k: {"success": False, "message": "No balance board answered.",
-                         "address": "", "radio_address": "", "method": "",
-                         "boards_seen": 0},
-    )
+    monkeypatch.setattr(pressure, "native_pairing_available", lambda: False)
 
     _open_setup(root, application)
     _click(root, application, application.setup_pair_rect)
 
-    import time
-    for _ in range(50):
-        if application.copy_feedback and "board" in str(application.copy_feedback):
-            break
-        time.sleep(0.05)
-        root.update()
-
-    assert application.copy_feedback, "pairing failure produced no GUI feedback"
-    assert "board" in str(application.copy_feedback).lower()
+    assert not application.show_pairing_modal, (
+        "opened a guided prompt that cannot pair anything"
+    )
+    assert application.copy_feedback, "no GUI feedback when pairing is unavailable"
+    assert "Windows" in str(application.copy_feedback)
 
 
 def test_untypeable_pin_is_flagged_rather_than_offered_for_pasting(app, monkeypatch):
@@ -210,20 +194,24 @@ def test_copy_pin_warns_instead_of_pasting_a_truncated_pin(app, monkeypatch):
 
 
 def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
-    """Each click starts a ~10s Bluetooth inquiry on a worker thread. A real
+    """Each confirm starts a ~10s Bluetooth inquiry on a worker thread. A real
     run showed an impatient user stacking seven of them on one radio, which
     produced interleaved, contradictory log output as they fought each other.
+
+    The guard now lives in the flow, and the modal additionally hides its
+    action button while searching -- so there is nothing to double-click.
     """
     import threading
     import time
 
     root, application, _ = app
     import src.hardware.pressure as pressure
+    from src.hardware.pressure.pairing_flow import PairingFlow
 
     started = []
     release = threading.Event()
 
-    def _slow_pair(*args, **kwargs):
+    def _slow_pair(**kwargs):
         started.append(1)
         release.wait(timeout=5)
         return {"success": True, "message": "paired", "address": "001E35AABBCC",
@@ -231,16 +219,24 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
                 "boards_seen": 1}
 
     monkeypatch.setattr(pressure, "native_pairing_available", lambda: True)
-    monkeypatch.setattr(pressure, "pair_balance_board", _slow_pair)
+    monkeypatch.setattr(
+        "src.hardware.pressure.pairing_flow.make_pairing_flow",
+        lambda target_count=1: PairingFlow(target_count=target_count,
+                                           pair_fn=_slow_pair),
+    )
 
     _open_setup(root, application)
-    rect = application.setup_pair_rect
+    _click(root, application, application.setup_pair_rect)
+    assert application.show_pairing_modal
 
+    # Hammer the action button: the first click confirms SYNC, the rest must
+    # not launch more searches.
+    rect = application.pairing_action_rect
+    assert rect
     for _ in range(5):
         _click(root, application, rect)
         time.sleep(0.02)
 
-    # Let the first worker get going before judging.
     for _ in range(20):
         if started:
             break
@@ -250,16 +246,14 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
     assert len(started) == 1, (
         f"{len(started)} concurrent pairing attempts were started"
     )
-    assert "already in progress" in str(application.copy_feedback).lower()
 
     release.set()
-    for _ in range(20):
-        if not getattr(application, "_pairing_in_progress", False):
+    for _ in range(40):
+        if application.pairing_flow.status()["phase"] == "done":
             break
         time.sleep(0.05)
         root.update()
 
-    # The guard must clear, or the button is dead for the rest of the session.
-    assert not getattr(application, "_pairing_in_progress", False), (
-        "pairing guard never cleared; the button would stay stuck"
+    assert application.pairing_flow.status()["phase"] == "done", (
+        "flow never completed; the prompt would be stuck"
     )

@@ -18,7 +18,7 @@ except Exception:
 from .connection import AssignmentPhase, BoardAssignmentWizard, connect_board
 from .simulator import SimulatorBackend
 from .windows_pairing import is_available as native_pairing_available
-from .windows_pairing import pair_balance_board
+from .windows_pairing import list_paired_boards, pair_balance_board
 
 __all__ = [
     "BoardBackend",
@@ -32,5 +32,6 @@ __all__ = [
     "SimulatorBackend",
     "connect_board",
     "native_pairing_available",
+    "list_paired_boards",
     "pair_balance_board",
 ]

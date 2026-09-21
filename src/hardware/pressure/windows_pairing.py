@@ -667,10 +667,66 @@ def pair_via_legacy(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
     return True, "paired and HID service enabled (legacy route)"
 
 
+def list_paired_boards() -> list[dict]:
+    """Balance boards Windows already has a bond for (no inquiry).
+
+    Used to tell "the board we just paired" apart from "the next board we
+    still need", which is what makes a two-board flow possible at all.
+    """
+    lib = _api()
+    if lib is None:
+        return []
+    out: dict[str, dict] = {}
+    for radio in list_radios():
+        sp = BLUETOOTH_DEVICE_SEARCH_PARAMS()
+        sp.dwSize = sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS)
+        sp.fReturnAuthenticated = 1
+        sp.fReturnRemembered = 1
+        sp.fReturnUnknown = 0
+        sp.fReturnConnected = 1
+        sp.fIssueInquiry = 0
+        sp.cTimeoutMultiplier = 0
+        sp.hRadio = radio["handle"]
+
+        info = BLUETOOTH_DEVICE_INFO()
+        info.dwSize = sizeof(BLUETOOTH_DEVICE_INFO)
+        finder = lib.BluetoothFindFirstDevice(byref(sp), byref(info))
+        if not finder:
+            continue
+        try:
+            while True:
+                addr_hex = address_to_hex(info.Address)
+                if looks_like_balance_board(info.szName, addr_hex):
+                    out.setdefault(addr_hex, {
+                        "address": addr_hex,
+                        "name": info.szName,
+                        "authenticated": bool(info.fAuthenticated),
+                        "remembered": bool(info.fRemembered),
+                        "connected": bool(info.fConnected),
+                        "radio_address": radio["address"],
+                        "radio_handle": radio["handle"],
+                    })
+                nxt = BLUETOOTH_DEVICE_INFO()
+                nxt.dwSize = sizeof(BLUETOOTH_DEVICE_INFO)
+                if not lib.BluetoothFindNextDevice(finder, byref(nxt)):
+                    break
+                info = nxt
+        finally:
+            lib.BluetoothFindDeviceClose(finder)
+    return list(out.values())
+
+
 def pair_balance_board(discovery_timeout_mult: int = 8,
                        forget_existing: bool = False,
+                       exclude_addresses=None,
                        log=print) -> dict:
     """Find a Wii Balance Board in SYNC mode and pair it end to end.
+
+    ``exclude_addresses`` skips boards already handled. Without it a
+    two-board setup is impossible: discovery always returns the same first
+    board, so every attempt re-targets the board that is already paired
+    instead of the one the user just pressed SYNC on -- and the already-paired
+    branch could then tear that working bond down.
 
     ``forget_existing`` defaults to False: a board that is already bonded
     usually just needs its HID service re-enabled, and tearing down a working
@@ -704,12 +760,27 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
     log("[i] Scanning for a Wii Balance Board — press the red SYNC button now.")
     boards = find_balance_boards(timeout_mult=discovery_timeout_mult)
     result["boards_seen"] = len(boards)
+
+    # Drop boards the caller has already dealt with, so a second pass targets
+    # the board the user just synced rather than re-opening the first one.
+    skip = {str(a).replace(":", "").upper() for a in (exclude_addresses or ())}
+    if skip:
+        boards = [b for b in boards if b["address"].upper() not in skip]
+
     if not boards:
-        result["message"] = ("No balance board answered. Press SYNC inside the "
-                             "battery compartment and retry within ~20s.")
+        if skip and result["boards_seen"]:
+            result["message"] = (
+                "Only the board you already paired answered. Press SYNC on "
+                "the SECOND board and try again.")
+        else:
+            result["message"] = ("No balance board answered. Press SYNC inside "
+                                 "the battery compartment and retry within ~20s.")
         return result
 
-    board = boards[0]
+    # Prefer a board that is not yet bonded: that is almost always the one the
+    # user just pressed SYNC on, and it avoids disturbing a working pairing.
+    unpaired = [b for b in boards if not b["authenticated"]]
+    board = unpaired[0] if unpaired else boards[0]
     result["address"] = board["address"]
     result["radio_address"] = board["radio_address"]
     log(f"[i] Found {board['name'] or 'board'} at {board['address']} "
