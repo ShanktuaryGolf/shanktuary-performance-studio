@@ -270,6 +270,8 @@ class TestBusyRecovery(unittest.TestCase):
         forward is how this bug stayed stuck across restarts."""
         from unittest import mock
         lib, device, info, _ = self._setup(wp.ERROR_NOT_FOUND)
+        # A bond Windows actually holds -- only then is removing it correct.
+        info.fRemembered = 1
         with mock.patch.object(wp, "_api", return_value=lib), \
                 mock.patch.object(wp, "_device_info_for", return_value=info), \
                 mock.patch.object(wp, "enable_hid_service",
@@ -281,6 +283,24 @@ class TestBusyRecovery(unittest.TestCase):
         self.assertFalse(ok)
         rm.assert_called_once_with("CC9E004CE1F9")
         self.assertIn("press SYNC", msg)
+
+    def test_busy_does_not_remove_a_board_that_was_never_bonded(self):
+        """Removing a device Windows never bonded achieves nothing -- and on a
+        two-board setup that is how a working pairing got destroyed."""
+        from unittest import mock
+        lib, device, info, _ = self._setup(wp.ERROR_NOT_FOUND)
+        info.fAuthenticated = 0
+        info.fRemembered = 0
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for", return_value=info), \
+                mock.patch.object(wp, "enable_hid_service",
+                                  return_value=wp.ERROR_NOT_FOUND), \
+                mock.patch.object(wp, "remove_device") as rm:
+            ok, msg = wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                           log=lambda *a: None)
+        self.assertFalse(ok)
+        rm.assert_not_called()
+        self.assertIn("no pairing for it", msg)
 
 
 class TestAuthTimeout(unittest.TestCase):
@@ -365,11 +385,12 @@ class TestAuthTimeout(unittest.TestCase):
 
 
 class TestDiscoveryOrder(unittest.TestCase):
-    """The board answers for only ~20s after SYNC. A 10s inquiry before
-    authentication can spend most of that window, so the cached device list is
-    checked first."""
+    """The board answers for only ~20s after SYNC, and authenticating a
+    sleeping board is the call that blocks. Windows' cache also remembers
+    boards it has not heard from in hours, so a cached entry is only trusted
+    when it was seen very recently."""
 
-    def test_cached_lookup_is_tried_before_inquiry(self):
+    def test_recently_seen_cached_board_skips_the_inquiry(self):
         from unittest import mock
         calls = []
 
@@ -377,8 +398,8 @@ class TestDiscoveryOrder(unittest.TestCase):
             calls.append(issue_inquiry)
             return [{"address": "0024446AEBFC", "name": "Nintendo RVL-WBC-01",
                      "authenticated": False, "remembered": False,
-                     "connected": False, "radio_address": "38FC983BB4DC",
-                     "radio_handle": 1}]
+                     "connected": False, "age_sec": 2.0, "last_seen": 1.0,
+                     "radio_address": "38FC983BB4DC", "radio_handle": 1}]
 
         with mock.patch.object(wp, "is_available", return_value=True), \
                 mock.patch.object(wp, "list_radios",
@@ -390,10 +411,36 @@ class TestDiscoveryOrder(unittest.TestCase):
                                   return_value=(True, "paired")):
             wp.pair_balance_board(log=lambda *a: None)
 
-        self.assertEqual(calls[0], False,
-                         "first lookup should be the instant cached one")
-        self.assertEqual(len(calls), 1,
-                         "an unpaired board was cached; no inquiry needed")
+        self.assertEqual(calls, [False],
+                         "a board seen 2s ago needs no fresh inquiry")
+
+    def test_stale_cache_entry_forces_an_inquiry(self):
+        """The dangerous case: nothing is paired, but Windows still remembers
+        a board from hours ago. Authenticating that would block."""
+        from unittest import mock
+        calls = []
+
+        def _find(timeout_mult=4, include_known=True, issue_inquiry=True):
+            calls.append(issue_inquiry)
+            age = 5.0 if issue_inquiry else 9999.0
+            return [{"address": "0024446AEBFC", "name": "b",
+                     "authenticated": False, "remembered": False,
+                     "connected": False, "age_sec": age, "last_seen": 1.0,
+                     "radio_address": "38FC983BB4DC", "radio_handle": 1}]
+
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards", _find), \
+                mock.patch.object(wp, "pair_via_callback",
+                                  return_value=(True, "paired")):
+            result = wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertEqual(calls, [False, True],
+                         "a stale cached board must not skip the inquiry")
+        self.assertTrue(result["success"])
 
     def test_falls_back_to_inquiry_when_cache_has_nothing_new(self):
         from unittest import mock
@@ -404,7 +451,8 @@ class TestDiscoveryOrder(unittest.TestCase):
             if issue_inquiry:
                 return [{"address": "0024446AEBFC", "name": "b",
                          "authenticated": False, "remembered": False,
-                         "connected": False, "radio_address": "38FC983BB4DC",
+                         "connected": False, "age_sec": 3.0, "last_seen": 1.0,
+                         "radio_address": "38FC983BB4DC",
                          "radio_handle": 1}]
             return []          # nothing cached
 

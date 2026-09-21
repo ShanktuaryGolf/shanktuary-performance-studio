@@ -86,6 +86,12 @@ ERROR_NOT_FOUND = 1168
 NINTENDO_OUI = (0x00, 0x1E, 0x35)
 BOARD_NAME_HINTS = ("rvl-wbc", "balance")
 
+#: How recently the radio must have seen a board for a CACHED entry to be
+#: worth authenticating. The board sleeps ~20s after SYNC, and authenticating
+#: a sleeping board is the call that blocks -- so anything staler gets a real
+#: inquiry instead.
+CACHE_FRESH_SEC = 25.0
+
 _ERROR_TEXT = {
     ERROR_SUCCESS: "success",
     ERROR_INVALID_PARAMETER: "invalid parameter (87)",
@@ -422,16 +428,28 @@ def get_live_radio_mac() -> str | None:
 # Device discovery
 # --------------------------------------------------------------------------
 
+def _systemtime_to_epoch(st: SYSTEMTIME) -> float:
+    """SYSTEMTIME (UTC) -> POSIX timestamp, or 0.0 when unset/invalid."""
+    if not st.wYear:
+        return 0.0
+    try:
+        import calendar
+        return calendar.timegm((st.wYear, st.wMonth, st.wDay, st.wHour,
+                                st.wMinute, st.wSecond, 0, 0, 0))
+    except (ValueError, OverflowError):
+        return 0.0
+
+
 def find_balance_boards(timeout_mult: int = 4,
                         include_known: bool = True,
                         issue_inquiry: bool = True) -> list[dict]:
     """Look for Wii Balance Boards.
 
-    ``issue_inquiry=False`` searches only Windows' existing device cache and
-    returns immediately. That matters because a board answers for just ~20s
-    after SYNC, and a live inquiry burns most of that window before
-    authentication can even start -- so callers should try the cached lookup
-    first and fall back to an inquiry.
+    ``issue_inquiry=False`` searches only Windows' device cache and returns
+    immediately. The cache also holds devices that are no longer awake, so
+    each result carries ``last_seen``/``age_sec`` -- callers must not try to
+    authenticate a board the radio has not heard from recently, or the
+    attempt blocks against a board that is asleep.
 
     ``timeout_mult`` is in units of 1.28 s (Windows caps it at 48).
     """
@@ -439,6 +457,7 @@ def find_balance_boards(timeout_mult: int = 4,
     if lib is None:
         return []
     timeout_mult = max(1, min(48, int(timeout_mult)))
+    now = time.time()
 
     found: dict[str, dict] = {}
     for radio in list_radios():
@@ -461,12 +480,17 @@ def find_balance_boards(timeout_mult: int = 4,
             while True:
                 addr_hex = address_to_hex(info.Address)
                 if looks_like_balance_board(info.szName, addr_hex):
+                    seen_at = _systemtime_to_epoch(info.stLastSeen)
                     found.setdefault(addr_hex, {
                         "address": addr_hex,
                         "name": info.szName,
                         "authenticated": bool(info.fAuthenticated),
                         "remembered": bool(info.fRemembered),
                         "connected": bool(info.fConnected),
+                        "last_seen": seen_at,
+                        # Large when Windows has not heard from the board
+                        # recently -- i.e. it is almost certainly asleep.
+                        "age_sec": (now - seen_at) if seen_at else float("inf"),
                         "radio_address": radio["address"],
                         "radio_handle": radio["handle"],
                     })
@@ -666,11 +690,17 @@ def pair_via_callback(device: dict, pin: bytes, log=print,
                     return True, ("board was already paired; "
                                   "HID service re-enabled")
                 log(f"[!] Board is bonded but HID enable failed: "
-                    f"{describe_error(svc)}; clearing the stale bond.")
-                rm = remove_device(device["address"])
-                log(f"[i] Removed stale bond -> {describe_error(rm)}")
-                return False, ("board held a stale Windows pairing, now "
-                               "cleared — press SYNC and pair again")
+                    f"{describe_error(svc)}.")
+                # Only tear down a bond that actually exists. Removing a
+                # device Windows never bonded achieves nothing and, on a
+                # two-board setup, is how a working pairing got destroyed.
+                if fresh.fAuthenticated or fresh.fRemembered:
+                    rm = remove_device(device["address"])
+                    log(f"[i] Removed stale bond -> {describe_error(rm)}")
+                    return False, ("board held a stale Windows pairing, now "
+                                   "cleared — press SYNC and pair again")
+                return False, ("Windows says the board is busy but has no "
+                               "pairing for it — press SYNC and retry")
             detail = describe_error(rc)
             if not state["answered"]:
                 detail += " (Windows never asked us for the PIN)"
@@ -689,7 +719,12 @@ def pair_via_callback(device: dict, pin: bytes, log=print,
 
     fresh = _device_info_for(device["address"], radio_handle) or info
     if not fresh.fAuthenticated:
-        return False, "Windows reported success but the board is not bonded"
+        # Windows said the pairing succeeded. The cached record can lag behind
+        # that -- it already reported fAuthenticated=0 for a board that WAS
+        # bonded -- so treat the API's own success as authoritative and carry
+        # on to the HID service rather than refusing a pairing that worked.
+        log("[!] Device record still shows unbonded; trusting the API's "
+            "success and continuing.")
 
     svc = enable_hid_service(radio_handle, fresh)
     if svc != ERROR_SUCCESS:
@@ -823,16 +858,28 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
         f"{', '.join(r['address'] for r in radios)}")
 
     log("[i] Looking for a Wii Balance Board...")
-    # Try the cached device list FIRST. A live inquiry takes ~10s, and the
-    # board only answers for ~20s after SYNC -- so inquiring first can spend
-    # most of the window before authentication even begins, which then times
-    # out against a board that has already gone back to sleep.
-    boards = find_balance_boards(issue_inquiry=False)
     skip = {str(a).replace(":", "").upper() for a in (exclude_addresses or ())}
-    candidates = [b for b in boards if b["address"].upper() not in skip]
-    if not any(not b["authenticated"] for b in candidates):
-        log("[i] Nothing new in the cache — scanning (press SYNC now).")
+
+    # Windows' device cache answers instantly, but it also remembers boards it
+    # has not heard from in hours -- and authenticating a sleeping board is
+    # exactly the call that blocks. So only trust a cached entry the radio saw
+    # in the last few seconds; otherwise run a real inquiry.
+    boards = find_balance_boards(issue_inquiry=False)
+    fresh = [b for b in boards
+             if b["address"].upper() not in skip
+             and not b["authenticated"]
+             and b.get("age_sec", float("inf")) <= CACHE_FRESH_SEC]
+    if fresh:
+        log(f"[i] Board {fresh[0]['address']} was seen "
+            f"{fresh[0]['age_sec']:.0f}s ago — pairing without a new scan.")
+        boards = fresh
+    else:
+        log("[i] Scanning for a board — press the red SYNC button now.")
         boards = find_balance_boards(timeout_mult=discovery_timeout_mult)
+        for b in boards:
+            log(f"[i] Saw {b['name'] or 'board'} at {b['address']} "
+                f"(paired={b['authenticated']}, "
+                f"last seen {b.get('age_sec', float('inf')):.0f}s ago)")
     result["boards_seen"] = len(boards)
 
     # Drop boards the caller has already dealt with, so a second pass targets
