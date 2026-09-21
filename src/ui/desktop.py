@@ -259,9 +259,14 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
     def handle_mouse_press(self, event):
         x, y = event.x, event.y
 
-        # The board step-on prompt is a full-window takeover owned by the
-        # production class. The redesigned shell's hit rects are still live
-        # underneath it, so defer before testing any of them.
+        # Full-window takeovers owned by the production class. The redesigned
+        # shell's hit rects are still live underneath them, so a click on the
+        # modal's own button would otherwise be stolen by whatever design rect
+        # happens to sit at those coordinates -- the button looks dead, or the
+        # page behind it silently changes.
+        if getattr(self, "show_pairing_modal", False):
+            return studio.ShanktuaryApp.handle_mouse_press(self, event)
+
         if getattr(self, "show_board_assign_modal", False):
             return studio.ShanktuaryApp.handle_mouse_press(self, event)
 

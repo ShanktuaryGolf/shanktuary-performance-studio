@@ -803,6 +803,7 @@ class ShanktuaryApp:
         self.pairing_action_rect = None
         self.pairing_cancel_rect = None
         self._pairing_anim_id = None
+        self.pairing_pressed = None
         # Guided calibration flow: assign -> 50/50 -> stance width, run as one
         # pass because the user stands on the boards for all three.
         self.setup_flow_steps = []
@@ -3478,6 +3479,7 @@ class ShanktuaryApp:
 
             st = flow.status()
             if _phit(getattr(self, "pairing_cancel_rect", None)):
+                self._flash_pairing_button("cancel")
                 if st["phase"] == "done":
                     self._finish_pairing_flow()
                 else:
@@ -3488,6 +3490,10 @@ class ShanktuaryApp:
                 return
 
             if _phit(getattr(self, "pairing_action_rect", None)):
+                # Paint the pressed state immediately, before doing the work:
+                # confirming SYNC kicks off a ~10s inquiry, and without this
+                # the click produces no visible change at all.
+                self._flash_pairing_button("action")
                 phase = st["phase"]
                 if phase == "prompt":
                     flow.confirm_sync_pressed()
@@ -8894,6 +8900,35 @@ class ShanktuaryApp:
         self.show_pairing_modal = True
         self.draw_screen()
 
+    def _flash_pairing_button(self, which):
+        """Show a pressed state on a pairing-modal button.
+
+        Canvas rectangles are not widgets: they have no hover or press
+        feedback of their own. Confirming SYNC then starts a ~10s inquiry, so
+        without an immediate visual change the click looks ignored and the
+        user clicks again. Paint the pressed frame synchronously, then clear
+        it shortly after.
+        """
+        self.pairing_pressed = which
+        try:
+            w = self.canvas.winfo_width()
+            h = self.canvas.winfo_height()
+            if w > 1 and h > 1 and getattr(self, "show_pairing_modal", False):
+                self.draw_pairing_modal(w, h)
+            self.canvas.update_idletasks()
+        except Exception:
+            pass
+
+        def _release():
+            self.pairing_pressed = None
+            if getattr(self, "show_pairing_modal", False):
+                self.draw_screen()
+
+        try:
+            self.root.after(140, _release)
+        except Exception:
+            self.pairing_pressed = None
+
     def _stop_pairing_animation(self):
         """Cancel the modal's pending repaint, if any."""
         aid = getattr(self, "_pairing_anim_id", None)
@@ -9071,21 +9106,35 @@ class ShanktuaryApp:
         self.pairing_cancel_rect = None
 
         if st["phase"] == "searching":
-            # No action to offer: show that work is happening instead of an
-            # inert screen the user will click at.
+            # No action to offer during the inquiry. Show elapsed time as well
+            # as motion: a bare spinner for ~10s reads as "frozen", while a
+            # counter that is visibly climbing reads as "working".
             dots = "." * (int(time.time() * 2) % 4)
+            secs = int(st.get("elapsed", 0.0))
             self.canvas.create_text(cx, y + btn_h // 2,
-                                    text=f"Working{dots}",
+                                    text=f"Working{dots}  ({secs}s)",
                                     fill=theme.TEXT_3,
                                     font=(theme.ui_font(), f_sub),
                                     anchor="center")
+            self.canvas.create_text(
+                cx, y + btn_h + int(20 * s),
+                text="This takes up to 20 seconds. Keep the board's lights blinking.",
+                fill=theme.TEXT_3, font=(theme.ui_font(), f_label),
+                anchor="n")
         elif st["action_label"]:
             bw2 = int(min(w * 0.42, 420 * s))
             self.pairing_action_rect = (cx - bw2 // 2, y, cx + bw2 // 2, y + btn_h)
-            self.canvas.create_rectangle(*self.pairing_action_rect,
-                                         fill=theme.ACCENT_DEEP,
-                                         outline=theme.ACCENT_LINE)
-            self.canvas.create_text(cx, y + btn_h // 2, text=st["action_label"],
+            # Pressed state: a canvas "button" gives no feedback of its own, so
+            # without this the user cannot tell a click registered at all and
+            # clicks again -- which is exactly what was reported.
+            pressed = getattr(self, "pairing_pressed", None) == "action"
+            self.canvas.create_rectangle(
+                *self.pairing_action_rect,
+                fill=theme.ACCENT if pressed else theme.ACCENT_DEEP,
+                outline=theme.ACCENT_TEXT if pressed else theme.ACCENT_LINE,
+                width=2 if pressed else 1)
+            self.canvas.create_text(cx, y + btn_h // 2 + (1 if pressed else 0),
+                                    text=st["action_label"],
                                     fill=theme.ACCENT_TEXT,
                                     font=(theme.ui_font(), f_step, "bold"),
                                     anchor="center")
@@ -9096,9 +9145,11 @@ class ShanktuaryApp:
             cw = int(160 * s)
             self.pairing_cancel_rect = (cx - cw // 2, cy_, cx + cw // 2,
                                         cy_ + int(34 * s))
+            c_pressed = getattr(self, "pairing_pressed", None) == "cancel"
             self.canvas.create_text(cx, cy_ + int(17 * s), text=label,
-                                    fill=theme.TEXT_3,
-                                    font=(theme.ui_font(), f_label),
+                                    fill=theme.TEXT if c_pressed else theme.TEXT_3,
+                                    font=(theme.ui_font(), f_label,
+                                          "bold" if c_pressed else "normal"),
                                     anchor="center")
 
         # Keep the animation alive while the user is being asked to act.
@@ -9107,7 +9158,10 @@ class ShanktuaryApp:
         # repainting a modal that is no longer on screen.
         if st["phase"] in ("prompt", "searching"):
             try:
-                self._pairing_anim_id = self.root.after(400, self.draw_screen)
+                # Faster while searching: the elapsed counter has to visibly
+                # tick, or the screen looks frozen during the inquiry.
+                delay = 200 if st["phase"] == "searching" else 400
+                self._pairing_anim_id = self.root.after(delay, self.draw_screen)
             except Exception:
                 self._pairing_anim_id = None
 

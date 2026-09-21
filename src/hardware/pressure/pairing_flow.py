@@ -114,6 +114,8 @@ class PairingFlow:
             self._cancelled = False
             self._started_at = time.time()
 
+        self._log(f"[i] Pairing step {self.step} of {self.target_count}: "
+                  f"searching (user confirmed SYNC).")
         self._thread = threading.Thread(target=self._run_search, daemon=True)
         self._thread.start()
         return self.status()
@@ -158,6 +160,7 @@ class PairingFlow:
 
         with self._lock:
             if self._cancelled:
+                self._log("[i] Pairing cancelled; ignoring the result.")
                 return
             if result.get("success"):
                 self.paired.append({
@@ -165,6 +168,8 @@ class PairingFlow:
                     "method": result.get("method", ""),
                     "message": result.get("message", ""),
                 })
+                self._log(f"[+] Paired {result.get('address', '')} "
+                          f"({result.get('method', '')}).")
                 self.detail = ""
                 if len(self.paired) >= self.target_count:
                     self.phase = DONE
@@ -173,16 +178,23 @@ class PairingFlow:
             else:
                 self.phase = FAILED
                 self.error = result.get("message") or "Pairing failed."
+                self._log(f"[!] Pairing failed: {self.error}")
                 self.detail = ""
 
     def _log(self, line):
-        """Surface the library's progress as a live UI line.
+        """Mirror the library's progress into the UI, and keep the console.
 
-        The console narration is invisible in a --windowed build, so the one
-        piece of it the user actually needs -- what is happening right now --
-        is mirrored into the flow state.
+        Two audiences: the user needs a plain "what is happening now" line on
+        screen, because a --windowed build has no console; a developer
+        debugging a pairing failure needs the raw Win32 detail. Dropping
+        either one is how this became hard to diagnose -- so print first,
+        unconditionally, then map to friendly text.
         """
         text = str(line)
+        try:
+            print(text, flush=True)
+        except Exception:
+            pass
         for marker, friendly in (
             ("Scanning for", "Searching for the board..."),
             ("Found ", "Found the board — pairing..."),

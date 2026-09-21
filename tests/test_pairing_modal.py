@@ -219,7 +219,173 @@ class TestModalBehaviour:
         release.set()
 
 
+class TestClickFeedback:
+    """Reported: 'I can't tell that I actually clicked it.'
+
+    Canvas rectangles are not widgets -- no hover, no press state. Confirming
+    SYNC then starts a ~10s inquiry, so with no immediate visual change the
+    click reads as ignored.
+    """
+
+    def test_button_paints_a_pressed_state_on_click(self, app, monkeypatch):
+        import threading
+
+        from src.hardware.pressure.pairing_flow import PairingFlow
+
+        root, application, _ = app
+        release = threading.Event()
+        seen = {}
+
+        def _slow(**kw):
+            # Sample the pressed state from inside the click, before the
+            # 140ms release timer can clear it.
+            seen["pressed"] = getattr(application, "pairing_pressed", None)
+            release.wait(timeout=3)
+            return {"success": True, "address": BOARD_1, "message": "ok",
+                    "method": "callback"}
+
+        application.pairing_flow = PairingFlow(target_count=1, pair_fn=_slow)
+        application.pairing_flow.start()
+        application.show_pairing_modal = True
+        application.draw_screen()
+
+        rect = application.pairing_action_rect
+        ev = tk.Event()
+        ev.x, ev.y = int((rect[0] + rect[2]) // 2), int((rect[1] + rect[3]) // 2)
+        application.handle_mouse_press(ev)
+
+        _pump(root, application, lambda: "pressed" in seen, timeout=2)
+        assert seen.get("pressed") == "action", (
+            "no pressed state was painted; the click is invisible to the user"
+        )
+        release.set()
+
+    def test_pressed_state_clears_itself(self, app, monkeypatch):
+        """A button stuck in its pressed colour is its own bug."""
+        root, application, _ = app
+        _install_flow(application, 1, [BOARD_1], monkeypatch)
+
+        application._flash_pairing_button("action")
+        assert application.pairing_pressed == "action"
+
+        assert _pump(root, application,
+                     lambda: application.pairing_pressed is None, timeout=2), \
+            "pressed state never cleared"
+
+    def test_searching_screen_shows_elapsed_time(self, app, monkeypatch):
+        """'It felt like nothing was happening' -- a static screen for ~10s
+        reads as frozen, so show a counter that visibly climbs."""
+        import threading
+
+        from src.hardware.pressure.pairing_flow import PairingFlow
+
+        root, application, _ = app
+        release = threading.Event()
+
+        def _slow(**kw):
+            release.wait(timeout=3)
+            return {"success": True, "address": BOARD_1, "message": "ok",
+                    "method": "callback"}
+
+        application.pairing_flow = PairingFlow(target_count=1, pair_fn=_slow)
+        application.pairing_flow.start()
+        application.show_pairing_modal = True
+        application.draw_screen()
+
+        _click(root, application, application.pairing_action_rect)
+        _pump(root, application,
+              lambda: application.pairing_flow.status()["busy"], timeout=2)
+        application.draw_screen()
+
+        blob = " ".join(_texts(application))
+        assert "Working" in blob
+        assert "(0s)" in blob or "s)" in blob, (
+            f"no elapsed counter during the search; got {blob[:300]}"
+        )
+        assert "20 seconds" in blob, "user is not told how long this takes"
+        release.set()
+
+
+class TestConsoleOutput:
+    def test_pairing_progress_still_reaches_the_console(self, capfd):
+        """Reported: 'I looked at the console and saw nothing.'
+
+        The flow routes the library's log= into its own handler to build the
+        on-screen line. That handler swallowed every line, so a developer
+        debugging a real failure got total silence. Both audiences matter.
+        """
+        from src.hardware.pressure.pairing_flow import PairingFlow
+
+        def _pair(discovery_timeout_mult=8, exclude_addresses=None, log=print):
+            log("[i] Scanning for a Wii Balance Board")
+            log("[i] Found Nintendo RVL-WBC-01 at 001E35AAAAAA")
+            return {"success": True, "address": BOARD_1, "message": "ok",
+                    "method": "callback"}
+
+        flow = PairingFlow(target_count=1, pair_fn=_pair)
+        flow.start()
+        flow.confirm_sync_pressed()
+        for _ in range(200):
+            if flow.status()["phase"] == "done":
+                break
+            time.sleep(0.01)
+
+        out = capfd.readouterr().out
+        assert "Scanning for" in out, f"library output never printed: {out!r}"
+        assert "Found Nintendo" in out
+        assert "Paired" in out, "outcome was not logged"
+
+    def test_failure_reason_reaches_the_console(self, capfd):
+        from src.hardware.pressure.pairing_flow import PairingFlow
+
+        flow = PairingFlow(
+            target_count=1,
+            pair_fn=lambda **kw: {"success": False,
+                                  "message": "No balance board answered."})
+        flow.start()
+        flow.confirm_sync_pressed()
+        for _ in range(200):
+            if flow.status()["phase"] == "failed":
+                break
+            time.sleep(0.01)
+
+        out = capfd.readouterr().out
+        assert "No balance board answered" in out, (
+            f"failure reason never printed: {out!r}"
+        )
+
+
 class TestSetupEntryPoint:
+    def test_modal_click_is_not_stolen_by_the_redesigned_shell(self, app,
+                                                               monkeypatch):
+        """Guard: the shell must defer to the production handler while the
+        pairing modal is up.
+
+        ShanktuaryDesktopApp tests its OWN hit rects before delegating, and
+        the modal covers the whole window. Today the action button happens to
+        sit where no design rect lives, so the click falls through -- but any
+        new centred rect would silently swallow it. The board-assign modal
+        already delegates for this reason; pairing now does too.
+        """
+        root, application, _ = app
+        _install_flow(application, 1, [BOARD_1], monkeypatch)
+        flow = application.pairing_flow
+
+        rect = application.pairing_action_rect
+        assert rect, "no action button drawn"
+
+        # Go through the REAL bound handler, which is the redesigned shell's.
+        ev = tk.Event()
+        ev.x, ev.y = int((rect[0] + rect[2]) // 2), int((rect[1] + rect[3]) // 2)
+        application.handle_mouse_press(ev)
+        for _ in range(5):
+            root.update()
+
+        assert flow.status()["phase"] != "prompt", (
+            "the click never reached the pairing flow — still waiting at the "
+            "prompt, which is the reported 'nothing happens' symptom"
+        )
+
     def test_pair_button_opens_the_guided_flow(self, app, monkeypatch):
         root, application, _ = app
         import src.hardware.pressure as pressure
