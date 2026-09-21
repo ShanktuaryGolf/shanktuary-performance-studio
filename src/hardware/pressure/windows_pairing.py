@@ -74,6 +74,7 @@ BLUETOOTH_SERVICE_ENABLE = 0x01
 
 ERROR_SUCCESS = 0
 ERROR_INVALID_PARAMETER = 87
+ERROR_BUSY = 170
 ERROR_NOT_AUTHENTICATED = 1244
 ERROR_NO_MORE_ITEMS = 259
 WAIT_TIMEOUT = 258
@@ -87,6 +88,7 @@ BOARD_NAME_HINTS = ("rvl-wbc", "balance")
 _ERROR_TEXT = {
     ERROR_SUCCESS: "success",
     ERROR_INVALID_PARAMETER: "invalid parameter (87)",
+    ERROR_BUSY: "the board is already paired to this PC (170)",
     ERROR_NOT_AUTHENTICATED: "authentication failed / wrong PIN (1244)",
     ERROR_NO_MORE_ITEMS: "no more items (259)",
     WAIT_TIMEOUT: "timed out waiting for the board (258)",
@@ -595,6 +597,24 @@ def pair_via_callback(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
         rc = lib.BluetoothAuthenticateDeviceEx(
             None, radio_handle, byref(info), None, MITM_PROTECTION_NOT_REQUIRED)
         if rc != ERROR_SUCCESS:
+            # ERROR_BUSY means Windows already holds a bond for this device, so
+            # it never asks us for a PIN. Note the device record from an
+            # inquiry can still report fAuthenticated=0 while that bond exists
+            # (the reported case), so do not trust that flag here: try to get
+            # the HID service on, and if that fails drop the stale bond so the
+            # caller can pair cleanly.
+            if rc == ERROR_BUSY:
+                fresh = _device_info_for(device["address"], radio_handle) or info
+                svc = enable_hid_service(radio_handle, fresh)
+                if svc == ERROR_SUCCESS:
+                    return True, ("board was already paired; "
+                                  "HID service re-enabled")
+                log(f"[!] Board is bonded but HID enable failed: "
+                    f"{describe_error(svc)}; clearing the stale bond.")
+                rm = remove_device(device["address"])
+                log(f"[i] Removed stale bond -> {describe_error(rm)}")
+                return False, ("board held a stale Windows pairing, now "
+                               "cleared — press SYNC and pair again")
             detail = describe_error(rc)
             if not state["answered"]:
                 detail += " (Windows never asked us for the PIN)"
@@ -648,9 +668,14 @@ def pair_via_legacy(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
 
 
 def pair_balance_board(discovery_timeout_mult: int = 8,
-                       forget_existing: bool = True,
+                       forget_existing: bool = False,
                        log=print) -> dict:
     """Find a Wii Balance Board in SYNC mode and pair it end to end.
+
+    ``forget_existing`` defaults to False: a board that is already bonded
+    usually just needs its HID service re-enabled, and tearing down a working
+    bond on every click is destructive. Pass True (the CLI's ``--forget``) to
+    force a clean re-pair.
 
     The PIN is derived per radio from that radio's *live* address, so a stale
     registry value cannot poison it. Returns a result dict rather than raising
@@ -690,6 +715,24 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
     log(f"[i] Found {board['name'] or 'board'} at {board['address']} "
         f"via radio {board['radio_address']}")
 
+    # Already bonded? Then re-authenticating is the wrong move -- Windows
+    # answers ERROR_BUSY (170) and never asks for a PIN, which looks like a
+    # pairing failure but means the opposite. What such a board usually needs
+    # is its HID service turned back on so hidapi can see it again.
+    if board["authenticated"] and not forget_existing:
+        log("[i] Board is already paired — enabling its HID service.")
+        info = _device_info_for(board["address"], board["radio_handle"])
+        if info is not None:
+            svc = enable_hid_service(board["radio_handle"], info)
+            if svc == ERROR_SUCCESS:
+                result.update(
+                    success=True, method="already_paired",
+                    message="Board was already paired; HID service re-enabled.")
+                return result
+            log(f"[!] Enabling HID service failed: {describe_error(svc)}")
+        log("[i] Clearing the existing bond and pairing from scratch.")
+        forget_existing = True
+
     if forget_existing and (board["authenticated"] or board["remembered"]):
         rc = remove_device(board["address"])
         log(f"[i] Cleared previous bond -> {describe_error(rc)}")
@@ -711,6 +754,12 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
     result["method"] = "callback"
     if not ok:
         log(f"[!] Raw-PIN route failed: {message}")
+        # The legacy route drives the SAME BluetoothAuthenticateDevice stack,
+        # so retrying it after an already-bonded refusal just reproduces the
+        # error. Only fall back when the failure could plausibly differ.
+        if "already paired" in message or "stale Windows pairing" in message:
+            result["message"] = message
+            return result
         log("[i] Trying the legacy AuthenticateDevice route...")
         ok2, message2 = pair_via_legacy(board, pin, log=log)
         if ok2:

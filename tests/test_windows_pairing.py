@@ -142,8 +142,144 @@ class TestErrorText(unittest.TestCase):
         self.assertIn("1244", wp.describe_error(wp.ERROR_NOT_AUTHENTICATED))
         self.assertIn("timed out", wp.describe_error(wp.WAIT_TIMEOUT))
 
+    def test_busy_is_explained_as_already_paired(self):
+        """Reported from a real run: error 170 with 'Windows never asked us for
+        the PIN'. That reads like a failure but means the bond already exists."""
+        self.assertEqual(wp.ERROR_BUSY, 170)
+        self.assertIn("already paired", wp.describe_error(wp.ERROR_BUSY))
+
     def test_unknown_code_still_readable(self):
         self.assertEqual(wp.describe_error(999999), "Win32 error 999999")
+
+
+class TestAlreadyPairedBoard(unittest.TestCase):
+    """A board that is already bonded must not be re-authenticated. Windows
+    answers ERROR_BUSY and never asks for a PIN; what the board actually needs
+    is its HID service enabled so hidapi can see it."""
+
+    def _board(self, **over):
+        b = {"address": "CC9E004CE1F9", "name": "Nintendo RVL-WBC-01",
+             "authenticated": True, "remembered": True, "connected": False,
+             "radio_address": "38FC983BB4DC", "radio_handle": 1}
+        b.update(over)
+        return b
+
+    def test_already_paired_board_skips_authentication(self):
+        from unittest import mock
+        calls = {"hid": 0}
+
+        def _fake_enable(_h, _i):
+            calls["hid"] += 1
+            return wp.ERROR_SUCCESS
+
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards",
+                                  return_value=[self._board()]), \
+                mock.patch.object(wp, "_device_info_for",
+                                  return_value=wp.BLUETOOTH_DEVICE_INFO()), \
+                mock.patch.object(wp, "enable_hid_service", _fake_enable), \
+                mock.patch.object(wp, "pair_via_callback") as auth:
+            result = wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertTrue(result["success"], result["message"])
+        self.assertEqual(result["method"], "already_paired")
+        self.assertEqual(calls["hid"], 1, "HID service was not enabled")
+        auth.assert_not_called()
+
+    def test_unpaired_board_still_authenticates(self):
+        """The shortcut must not swallow the normal first-time pairing path."""
+        from unittest import mock
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards",
+                                  return_value=[self._board(authenticated=False,
+                                                            remembered=False)]), \
+                mock.patch.object(wp, "pair_via_callback",
+                                  return_value=(True, "paired")) as auth:
+            result = wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertTrue(result["success"])
+        auth.assert_called_once()
+
+    def test_already_paired_failure_does_not_retry_legacy_route(self):
+        """The legacy route drives the same stack, so retrying an 'already
+        paired' refusal just reproduces it and doubles the log noise."""
+        from unittest import mock
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards",
+                                  return_value=[self._board(authenticated=False)]), \
+                mock.patch.object(
+                    wp, "pair_via_callback",
+                    return_value=(False, "board is already paired but ...")), \
+                mock.patch.object(wp, "pair_via_legacy") as legacy:
+            result = wp.pair_balance_board(log=lambda *a: None)
+
+        self.assertFalse(result["success"])
+        legacy.assert_not_called()
+
+    def test_forget_existing_defaults_to_false(self):
+        """Tearing down a working bond on every button click is destructive,
+        and it also skipped the already-paired shortcut entirely."""
+        import inspect
+        sig = inspect.signature(wp.pair_balance_board)
+        self.assertIs(sig.parameters["forget_existing"].default, False)
+
+
+class TestBusyRecovery(unittest.TestCase):
+    """The reported failure: ERROR_BUSY (170) with 'Windows never asked us for
+    the PIN', on a board the inquiry reported as NOT authenticated. Windows was
+    holding a bond the device record did not admit to."""
+
+    def _setup(self, hid_result):
+        from unittest import mock
+        lib = mock.MagicMock()
+        lib.BluetoothRegisterForAuthenticationEx.return_value = wp.ERROR_SUCCESS
+        lib.BluetoothAuthenticateDeviceEx.return_value = wp.ERROR_BUSY
+        device = {"address": "CC9E004CE1F9", "radio_handle": 1,
+                  "radio_address": "38FC983BB4DC"}
+        info = wp.BLUETOOTH_DEVICE_INFO()
+        info.fAuthenticated = 0      # exactly what the reported run saw
+        return lib, device, info, hid_result
+
+    def test_busy_enables_hid_without_trusting_the_authenticated_flag(self):
+        from unittest import mock
+        lib, device, info, _ = self._setup(wp.ERROR_SUCCESS)
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for", return_value=info), \
+                mock.patch.object(wp, "enable_hid_service",
+                                  return_value=wp.ERROR_SUCCESS):
+            ok, msg = wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                           log=lambda *a: None)
+        self.assertTrue(ok, msg)
+        self.assertIn("already paired", msg)
+
+    def test_busy_with_failed_hid_enable_clears_the_stale_bond(self):
+        """Self-healing: leaving the user with an unusable bond and no way
+        forward is how this bug stayed stuck across restarts."""
+        from unittest import mock
+        lib, device, info, _ = self._setup(wp.ERROR_NOT_FOUND)
+        with mock.patch.object(wp, "_api", return_value=lib), \
+                mock.patch.object(wp, "_device_info_for", return_value=info), \
+                mock.patch.object(wp, "enable_hid_service",
+                                  return_value=wp.ERROR_NOT_FOUND), \
+                mock.patch.object(wp, "remove_device",
+                                  return_value=wp.ERROR_SUCCESS) as rm:
+            ok, msg = wp.pair_via_callback(device, b"\x01\x02\x03\x04\x05\x06",
+                                           log=lambda *a: None)
+        self.assertFalse(ok)
+        rm.assert_called_once_with("CC9E004CE1F9")
+        self.assertIn("press SYNC", msg)
 
 
 class TestPlatformGuards(unittest.TestCase):

@@ -207,3 +207,59 @@ def test_copy_pin_warns_instead_of_pasting_a_truncated_pin(app, monkeypatch):
     assert "cannot" in feedback.lower() or "Pair Board" in feedback, (
         f"Copy PIN silently pasted a truncated PIN; feedback was {feedback!r}"
     )
+
+
+def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
+    """Each click starts a ~10s Bluetooth inquiry on a worker thread. A real
+    run showed an impatient user stacking seven of them on one radio, which
+    produced interleaved, contradictory log output as they fought each other.
+    """
+    import threading
+    import time
+
+    root, application, _ = app
+    import src.hardware.pressure as pressure
+
+    started = []
+    release = threading.Event()
+
+    def _slow_pair(*args, **kwargs):
+        started.append(1)
+        release.wait(timeout=5)
+        return {"success": True, "message": "paired", "address": "001E35AABBCC",
+                "radio_address": "38FC983BB4DC", "method": "callback",
+                "boards_seen": 1}
+
+    monkeypatch.setattr(pressure, "native_pairing_available", lambda: True)
+    monkeypatch.setattr(pressure, "pair_balance_board", _slow_pair)
+
+    _open_setup(root, application)
+    rect = application.setup_pair_rect
+
+    for _ in range(5):
+        _click(root, application, rect)
+        time.sleep(0.02)
+
+    # Let the first worker get going before judging.
+    for _ in range(20):
+        if started:
+            break
+        time.sleep(0.05)
+        root.update()
+
+    assert len(started) == 1, (
+        f"{len(started)} concurrent pairing attempts were started"
+    )
+    assert "already in progress" in str(application.copy_feedback).lower()
+
+    release.set()
+    for _ in range(20):
+        if not getattr(application, "_pairing_in_progress", False):
+            break
+        time.sleep(0.05)
+        root.update()
+
+    # The guard must clear, or the button is dead for the rest of the session.
+    assert not getattr(application, "_pairing_in_progress", False), (
+        "pairing guard never cleared; the button would stay stuck"
+    )

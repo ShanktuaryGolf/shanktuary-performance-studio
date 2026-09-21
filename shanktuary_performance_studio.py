@@ -3839,6 +3839,16 @@ class ShanktuaryApp:
                 return
 
             if _h(self.setup_pair_rect):
+                # Each click spawns a worker that runs a ~10s Bluetooth
+                # inquiry. Without this guard an impatient user stacks
+                # concurrent inquiries on one radio, which fight each other
+                # and produce a wall of interleaved, contradictory log lines.
+                if getattr(self, "_pairing_in_progress", False):
+                    self.copy_feedback = "Pairing already in progress..."
+                    self.root.after(2000, self.clear_copy_feedback)
+                    self.draw_screen()
+                    return
+                self._pairing_in_progress = True
                 self.copy_feedback = "Press SYNC on the board now — pairing..."
                 self.draw_screen()
 
@@ -3866,6 +3876,7 @@ class ShanktuaryApp:
                                    "message": f"Pairing error: {e}"}
 
                     def _report():
+                        self._pairing_in_progress = False
                         try:
                             n = len(pm.enumerate_boards(max_age_sec=0.0)) if pm else 0
                         except Exception:
@@ -3888,7 +3899,7 @@ class ShanktuaryApp:
                     try:
                         self.root.after(0, _report)
                     except Exception:
-                        pass
+                        self._pairing_in_progress = False
 
                 threading.Thread(target=_do_pair, daemon=True).start()
                 self.draw_screen()
@@ -3950,8 +3961,8 @@ class ShanktuaryApp:
                         continue
                     if not pm:
                         return
-                    cur_l = str(getattr(pm, "assigned_left", "") or "")
-                    cur_r = str(getattr(pm, "assigned_right", "") or "")
+                    cur_l = obs_server.board_id_to_text(getattr(pm, "assigned_left", ""))
+                    cur_r = obs_server.board_id_to_text(getattr(pm, "assigned_right", ""))
                     others = [d for d in getattr(self, "setup_device_paths", [])
                               if d != dev_path]
                     if side == "left":
@@ -9668,9 +9679,9 @@ class ShanktuaryApp:
             devices = pm.enumerate_boards() if pm else []
         except Exception:
             devices = []
-        assigned_left = str(getattr(pm, "assigned_left", "") or "") if pm else ""
-        assigned_right = str(getattr(pm, "assigned_right", "") or "") if pm else ""
-        self.setup_device_paths = [str(p) for p in devices]
+        assigned_left = obs_server.board_id_to_text(getattr(pm, "assigned_left", "")) if pm else ""
+        assigned_right = obs_server.board_id_to_text(getattr(pm, "assigned_right", "")) if pm else ""
+        self.setup_device_paths = [obs_server.board_id_to_text(p) for p in devices]
 
         by = py + 40
         self.canvas.create_text(rx0 + 18, by, text="DETECTED", fill=theme.TEXT_3,

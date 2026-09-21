@@ -527,6 +527,49 @@ def _is_placeholder_board_id(value) -> bool:
         return True
     return value in _PLACEHOLDER_BOARD_IDS
 
+
+def board_id_to_text(value) -> str:
+    """Board id -> a string that can round-trip back to the original bytes.
+
+    hidapi hands out device paths as BYTES on Windows. Calling str() on them
+    embeds the repr -- b'\\\\?\\HID#...' becomes the literal 7 characters
+    "b'\\\\?\\H..." -- and re-encoding that produces a path no device has. The
+    board then "could not be opened" forever while sitting there paired and
+    healthy, because the saved calibration had been corrupted on write.
+
+    Decode instead of repr. Windows HID paths are ASCII; latin-1 is used so
+    any byte value survives rather than raising.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("latin-1")
+    return str(value)
+
+
+def board_id_to_bytes(value):
+    """Board id -> the bytes hidapi's open_path() expects.
+
+    Also repairs ids already corrupted by the old str(bytes) write, so users
+    who ran an affected build are not stuck with an unusable calibration file
+    they'd have to delete by hand.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    text = str(value)
+    # Undo a Python bytes repr that was written to disk as text.
+    if len(text) >= 3 and text[:2] in ("b'", 'b"') and text[-1] == text[1]:
+        try:
+            import ast
+            recovered = ast.literal_eval(text)
+            if isinstance(recovered, bytes):
+                return recovered
+        except (ValueError, SyntaxError):
+            pass
+    return text.encode("latin-1", errors="replace")
+
 # --- Biomechanical Pressure Subsystem Manager ---
 class PressureManager:
     """Manages Wii Balance Board hardware, simulator, and 60Hz telemetry broadcasting."""
@@ -738,8 +781,8 @@ class PressureManager:
             os.makedirs(os.path.dirname(fp), exist_ok=True)
             data = {
                 "board_mode": self.board_mode,
-                "assigned_left": str(self.assigned_left) if self.assigned_left else None,
-                "assigned_right": str(self.assigned_right) if self.assigned_right else None,
+                "assigned_left": board_id_to_text(self.assigned_left) if self.assigned_left else None,
+                "assigned_right": board_id_to_text(self.assigned_right) if self.assigned_right else None,
                 "balance_multiplier": self.balance_multiplier,
                 "stance_width_mm": self.stance_width_mm,
             }
@@ -918,7 +961,7 @@ class PressureManager:
         if sys.platform == "win32":
             try:
                 from src.hardware.pressure.hid_backend import HidBackend
-                path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
+                path = board_id_to_bytes(device_path)
                 b = HidBackend(device_path=path)
                 b.open()
                 self._backend_error_logged = False
@@ -939,7 +982,7 @@ class PressureManager:
             except Exception:
                 try:
                     from src.hardware.pressure.hid_backend import HidBackend
-                    path = device_path.encode("utf-8") if isinstance(device_path, str) else device_path
+                    path = board_id_to_bytes(device_path)
                     b = HidBackend(device_path=path)
                     b.open()
                     self._backend_error_logged = False
@@ -1037,13 +1080,13 @@ class PressureManager:
         with self.lock:
             if _is_placeholder_board_id(left_path) or _is_placeholder_board_id(right_path):
                 return {"status": "error", "message": "Both boards must be real devices."}
-            if str(left_path) == str(right_path):
+            if board_id_to_text(left_path) == board_id_to_text(right_path):
                 return {"status": "error",
                         "message": "Left and right must be different boards."}
 
-            available = {str(p) for p in self.enumerate_boards()}
+            available = {board_id_to_text(p) for p in self.enumerate_boards()}
             for label, path in (("left", left_path), ("right", right_path)):
-                if available and str(path) not in available:
+                if available and board_id_to_text(path) not in available:
                     return {"status": "error",
                             "message": f"The {label} board is no longer connected."}
 
@@ -1056,8 +1099,8 @@ class PressureManager:
             self._save_calibration()
             return {
                 "status": "ok",
-                "assigned_left": str(left_path),
-                "assigned_right": str(right_path),
+                "assigned_left": board_id_to_text(left_path),
+                "assigned_right": board_id_to_text(right_path),
                 "connected": bool(self.backend and self.backend.is_open),
             }
 
@@ -1212,9 +1255,9 @@ class PressureManager:
                 "mode": "simulator" if self.is_simulator else "hardware",
                 "board_mode": self.board_mode,
                 "is_dual": self.board_mode == "dual",
-                "assigned_left": self.assigned_left,
-                "assigned_right": self.assigned_right,
-                "devices": [str(p) for p in devices],
+                "assigned_left": board_id_to_text(self.assigned_left) if self.assigned_left else None,
+                "assigned_right": board_id_to_text(self.assigned_right) if self.assigned_right else None,
+                "devices": [board_id_to_text(p) for p in devices],
                 "device_count": len(devices),
                 "dual_ready": bool(
                     self.board_mode == "dual"
@@ -1536,7 +1579,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 elif action == "devices":
                     devs = pressure_manager.enumerate_boards(max_age_sec=0.0)
                     status = {"status": "ok",
-                              "devices": [str(p) for p in devs],
+                              "devices": [board_id_to_text(p) for p in devs],
                               "device_count": len(devs)}
                 else:
                     status = {"status": "error", "message": f"Unknown action {action}"}
