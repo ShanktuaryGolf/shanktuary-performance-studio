@@ -912,8 +912,9 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
     # has not heard from in hours -- and authenticating a sleeping board is
     # exactly the call that blocks. So only trust a cached entry the radio saw
     # in the last few seconds; otherwise run a real inquiry.
-    boards = find_balance_boards(issue_inquiry=False)
-    fresh = [b for b in boards
+    before = find_balance_boards(issue_inquiry=False)
+    before_seen = {b["address"]: b.get("last_seen", 0.0) for b in before}
+    fresh = [b for b in before
              if b["address"].upper() not in skip
              and not b["authenticated"]
              and b.get("age_sec", float("inf")) <= CACHE_FRESH_SEC]
@@ -921,13 +922,24 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
         log(f"[i] Board {fresh[0]['address']} was seen "
             f"{fresh[0]['age_sec']:.0f}s ago — pairing without a new scan.")
         boards = fresh
+        for b in boards:
+            b["responded"] = True
     else:
         log("[i] Scanning for a board — press the red SYNC button now.")
         boards = find_balance_boards(timeout_mult=discovery_timeout_mult)
+        # The decisive signal for "this board is in SYNC mode right now" is
+        # that its last-seen stamp ADVANCED during this inquiry. Windows also
+        # returns stale cache entries with old stamps, and the reported case
+        # was exactly that: two boards listed, the app picked the first, and
+        # the user was pressing SYNC on the other one -- so every attempt
+        # authenticated a board that was not listening.
         for b in boards:
+            prev = before_seen.get(b["address"], 0.0)
+            b["responded"] = bool(b.get("last_seen", 0.0) > prev)
             log(f"[i] Saw {b['name'] or 'board'} at {b['address']} "
                 f"(paired={b['authenticated']}, "
-                f"last seen {b.get('age_sec', float('inf')):.0f}s ago)")
+                f"last seen {b.get('age_sec', float('inf')):.0f}s ago, "
+                f"{'answered this scan' if b['responded'] else 'cached only'})")
     result["boards_seen"] = len(boards)
 
     # Drop boards the caller has already dealt with, so a second pass targets
@@ -945,10 +957,36 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
                                  "the battery compartment and retry within ~20s.")
         return result
 
-    # Prefer a board that is not yet bonded: that is almost always the one the
-    # user just pressed SYNC on, and it avoids disturbing a working pairing.
+    # Pick the board that is actually in SYNC mode. Priority:
+    #   1. answered this scan AND not yet bonded  (the one the user pressed)
+    #   2. answered this scan                     (re-pair of a known board)
+    #   3. not bonded                             (no freshness info at all)
+    # Two boards both answering is ambiguous -- the user pressed SYNC on both,
+    # or one is still blinking from a previous try. Say so rather than guess,
+    # because guessing wrong costs a full round of timeouts.
+    responded = [b for b in boards if b.get("responded")]
+    responded_unpaired = [b for b in responded if not b["authenticated"]]
     unpaired = [b for b in boards if not b["authenticated"]]
-    board = unpaired[0] if unpaired else boards[0]
+
+    if len(responded_unpaired) > 1:
+        names = ", ".join(b["address"] for b in responded_unpaired)
+        result["message"] = (
+            f"{len(responded_unpaired)} boards are in SYNC mode at once "
+            f"({names}). Wait for the other board's lights to stop "
+            f"blinking, then press SYNC on just one and try again.")
+        log(f"[!] Ambiguous: several boards answered — {names}")
+        return result
+
+    if responded_unpaired:
+        board = responded_unpaired[0]
+    elif responded:
+        board = responded[0]
+    elif unpaired:
+        board = unpaired[0]
+        log("[!] No board answered this scan; trying the first unpaired one. "
+            "If this hangs, the board you pressed SYNC on may be asleep.")
+    else:
+        board = boards[0]
     result["address"] = board["address"]
     result["radio_address"] = board["radio_address"]
     log(f"[i] Found {board['name'] or 'board'} at {board['address']} "

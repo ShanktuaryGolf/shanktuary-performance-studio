@@ -1276,6 +1276,34 @@ class ShanktuaryApp:
     def launch_3d_range(self, event=None):
         webbrowser.open("http://localhost:9321/range")
 
+    def open_log_folder(self, event=None):
+        """Open ~/.shanktuary/logs in the OS file browser.
+
+        A user reporting a problem has to be able to reach the log without
+        instructions about hidden dot-folders; one menu item that opens the
+        folder is the whole difference between getting a log and not.
+        """
+        from src.session_log import LOG_DIR, log_path
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(LOG_DIR)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", LOG_DIR])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", LOG_DIR])
+            self.copy_feedback = f"Log: {log_path()}"
+        except Exception as e:
+            # Fall back to the one thing that always works: put the path on
+            # the clipboard so it can be pasted into a file dialog.
+            print(f"[!] Could not open log folder: {e}")
+            self.copy_to_clipboard(log_path())
+            self.copy_feedback = "Log path copied to clipboard"
+        self.root.after(5000, self.clear_copy_feedback)
+        self.draw_screen()
+
     def resolve_handed(self, val, default: Any = 0.0) -> Any:
         """Resolve a Nova/OGC field that may be a plain scalar or a dict keyed
         by right_handed/left_handed. Honors self.is_left_handed; scalar values
@@ -3726,6 +3754,8 @@ class ShanktuaryApp:
                         webbrowser.open(f"http://localhost:{obs_server.OBS_PORT}/tiles")
                     elif action == "open_range":
                         self.launch_3d_range()
+                    elif action == "open_log_folder":
+                        self.open_log_folder()
                     elif action == "set_mode_2" or action == "set_mode_0":
                         self.set_mode(0)
                     elif action == "open_setup":
@@ -5053,6 +5083,9 @@ class ShanktuaryApp:
                 ("copy_tiles_url", "Copy Metric Tiles URL", f"http://localhost:{port}/tiles", False),
                 ("open_tiles", "Open Metric Tiles", "opens /tiles in your browser", False),
                 ("set_mode_2", "Switch to Divot Mode", "fullscreen floor projector", False),
+            ]),
+            ("SUPPORT", [
+                ("open_log_folder", "Open Log Folder", "send shanktuary.log when reporting a problem", False),
             ]),
         ]
 
@@ -10278,6 +10311,12 @@ class ShanktuaryApp:
                                 anchor="ne")
 
 def main():
+    # Mirror the console into ~/.shanktuary/logs/ before anything prints.
+    from src.session_log import install as install_session_log
+    log_file = install_session_log()
+    if log_file:
+        print(f"[+] Logging to {log_file}")
+
     t_ws = threading.Thread(target=websocket_worker, daemon=True)
     t_ws.start()
 

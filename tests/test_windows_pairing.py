@@ -599,6 +599,96 @@ class TestStrategyOrder(unittest.TestCase):
         self.assertEqual(calls, ["legacy"])
 
 
+class TestBoardSelection(unittest.TestCase):
+    """The two-board failure, as it actually happened.
+
+    Both boards were in Windows' cache, so both appeared in the scan. The app
+    took the first one -- but the user was pressing SYNC on the OTHER one. So
+    every attempt authenticated a board that was not listening, and the
+    callback was never invoked. Pressing SYNC on the board the app happened
+    to pick made it pair immediately.
+
+    The reliable signal for "in SYNC mode right now" is that a board's
+    last-seen stamp ADVANCED during this inquiry.
+    """
+
+    def _board(self, addr, last_seen, authenticated=False):
+        return {"address": addr, "name": "Nintendo RVL-WBC-01",
+                "authenticated": authenticated, "remembered": False,
+                "connected": False, "last_seen": last_seen, "age_sec": 0.0,
+                "radio_address": "38FC983BB4DC", "radio_handle": 1}
+
+    def _run(self, cached, scanned, pair_results=None):
+        from unittest import mock
+        calls = iter([cached, scanned])
+        targeted = []
+
+        def _find(timeout_mult=4, include_known=True, issue_inquiry=True):
+            return [dict(b) for b in next(calls)]
+
+        def _legacy(board, pin, log=print, auth_timeout=9.0):
+            targeted.append(board["address"])
+            return True, "paired"
+
+        with mock.patch.object(wp, "is_available", return_value=True), \
+                mock.patch.object(wp, "list_radios",
+                                  return_value=[{"handle": 1,
+                                                 "address": "38FC983BB4DC",
+                                                 "name": "r"}]), \
+                mock.patch.object(wp, "find_balance_boards", _find), \
+                mock.patch.object(wp, "pair_via_legacy", _legacy), \
+                mock.patch.object(wp, "pair_via_callback",
+                                  return_value=(False, "no")):
+            result = wp.pair_balance_board(log=lambda *a: None)
+        return result, targeted
+
+    def test_targets_the_board_whose_stamp_advanced(self):
+        """The reported case. Board A is first in the list but stale; board B
+        is the one the user pressed SYNC on."""
+        cached = [self._board("0024446AEBFC", last_seen=1000.0),
+                  self._board("CC9E004CE1F9", last_seen=1000.0)]
+        # After the inquiry, only B's stamp moved.
+        scanned = [self._board("0024446AEBFC", last_seen=1000.0),
+                   self._board("CC9E004CE1F9", last_seen=2000.0)]
+        cached[0]["age_sec"] = cached[1]["age_sec"] = 9999.0
+
+        result, targeted = self._run(cached, scanned)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(targeted, ["CC9E004CE1F9"],
+                         "authenticated the board that was NOT in SYNC mode")
+
+    def test_two_boards_both_answering_is_reported_not_guessed(self):
+        """Guessing wrong costs a full round of timeouts; say so instead."""
+        cached = [self._board("0024446AEBFC", last_seen=1000.0),
+                  self._board("CC9E004CE1F9", last_seen=1000.0)]
+        for b in cached:
+            b["age_sec"] = 9999.0
+        scanned = [self._board("0024446AEBFC", last_seen=2000.0),
+                   self._board("CC9E004CE1F9", last_seen=2000.0)]
+
+        result, targeted = self._run(cached, scanned)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(targeted, [], "should not have picked either board")
+        self.assertIn("SYNC mode at once", result["message"])
+        self.assertIn("just one", result["message"])
+
+    def test_already_paired_board_that_answers_is_not_preferred_over_new(self):
+        """A bonded board still blinking from earlier must not outrank the
+        unbonded one the user just pressed."""
+        cached = [self._board("0024446AEBFC", 1000.0, authenticated=True),
+                  self._board("CC9E004CE1F9", 1000.0)]
+        for b in cached:
+            b["age_sec"] = 9999.0
+        scanned = [self._board("0024446AEBFC", 2000.0, authenticated=True),
+                   self._board("CC9E004CE1F9", 2000.0)]
+
+        result, targeted = self._run(cached, scanned)
+        self.assertTrue(result["success"])
+        self.assertEqual(targeted, ["CC9E004CE1F9"])
+
+
 class TestPlatformGuards(unittest.TestCase):
     def test_non_windows_degrades_cleanly(self):
         """Every entry point must be safe to call on Linux/macOS -- the module

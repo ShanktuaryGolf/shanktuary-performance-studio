@@ -35,6 +35,14 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
 
+    # First, before anything prints: mirror the console into a log file. In a
+    # --windowed build there is no console, so this file is the only record
+    # of what happened when a user reports a problem.
+    from src.session_log import install as install_session_log
+    log_file = install_session_log()
+    if log_file:
+        print(f"[+] Logging to {log_file}")
+
     # Keep the production connectivity lifecycle exactly aligned with the
     # original entry point: Nova worker + local OBS/browser server + Tk UI.
     t_ws = threading.Thread(target=studio.websocket_worker, daemon=True)
