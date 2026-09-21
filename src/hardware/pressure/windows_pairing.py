@@ -481,6 +481,10 @@ def find_balance_boards(timeout_mult: int = 4,
                 addr_hex = address_to_hex(info.Address)
                 if looks_like_balance_board(info.szName, addr_hex):
                     seen_at = _systemtime_to_epoch(info.stLastSeen)
+                    # Clamp at 0: stLastSeen comes from the radio's clock and
+                    # can read slightly ahead of ours, which surfaced as a
+                    # nonsensical "last seen -10s ago".
+                    age = max(0.0, now - seen_at) if seen_at else float("inf")
                     found.setdefault(addr_hex, {
                         "address": addr_hex,
                         "name": info.szName,
@@ -490,7 +494,7 @@ def find_balance_boards(timeout_mult: int = 4,
                         "last_seen": seen_at,
                         # Large when Windows has not heard from the board
                         # recently -- i.e. it is almost certainly asleep.
-                        "age_sec": (now - seen_at) if seen_at else float("inf"),
+                        "age_sec": age,
                         "radio_address": radio["address"],
                         "radio_handle": radio["handle"],
                     })
@@ -733,14 +737,18 @@ def pair_via_callback(device: dict, pin: bytes, log=print,
     return True, "paired and HID service enabled"
 
 
-def pair_via_legacy(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
-    """Fallback: ``BluetoothAuthenticateDevice`` with a WCHAR passkey buffer.
+def pair_via_legacy(device: dict, pin: bytes, log=print,
+                    auth_timeout: float = 22.0) -> tuple[bool, str]:
+    """``BluetoothAuthenticateDevice`` with a WCHAR passkey buffer.
 
-    This is what 32feet.NET and WiiBalanceWalker use. Windows narrows the
-    WCHARs to PIN bytes itself, and that conversion is not guaranteed to be
-    byte-identity for 0x80-0x9F, so it is only tried after the callback route.
+    This is what 32feet.NET and WiiBalanceWalker use, and it asks for a
+    LEGACY PIN directly instead of negotiating Secure Simple Pairing -- which
+    the board does not support -- so it is the primary route despite Windows
+    narrowing the WCHARs to bytes itself.
+
     A fixed-size buffer (not c_wchar_p) is used deliberately: the length is
     passed explicitly, so embedded NULs are not treated as a terminator.
+    Bounded like the Ex route, because this call blocks too.
     """
     lib = _api()
     if lib is None:
@@ -754,8 +762,28 @@ def pair_via_legacy(device: dict, pin: bytes, log=print) -> tuple[bool, str]:
     buf = (c_wchar * (BTH_MAX_PIN_SIZE + 1))()
     for i, b in enumerate(pin):
         buf[i] = chr(b)
-    rc = lib.BluetoothAuthenticateDevice(None, radio_handle, byref(info),
-                                         buf, len(pin))
+
+    outcome = {}
+
+    def _authenticate():
+        try:
+            outcome["rc"] = int(lib.BluetoothAuthenticateDevice(
+                None, radio_handle, byref(info), buf, len(pin)))
+        except Exception as e:
+            outcome["error"] = str(e)
+
+    worker = threading.Thread(target=_authenticate, daemon=True)
+    worker.start()
+    worker.join(timeout=auth_timeout)
+    if worker.is_alive():
+        _ORPHANED_AUTH.append((None, buf, worker))
+        return False, (f"Windows did not answer within {auth_timeout:.0f}s "
+                       f"— press SYNC again and retry")
+    if "error" in outcome:
+        return False, f"legacy pairing call failed: {outcome['error']}"
+
+    rc = outcome.get("rc", WAIT_TIMEOUT)
+    log(f"[i] Legacy authenticate returned: {describe_error(rc)}")
     if rc != ERROR_SUCCESS:
         return False, f"legacy pairing failed: {describe_error(rc)}"
 
@@ -814,6 +842,26 @@ def list_paired_boards() -> list[dict]:
         finally:
             lib.BluetoothFindDeviceClose(finder)
     return list(out.values())
+
+
+def pin_candidates_for(host_mac_hex: str, board_mac_hex: str) -> list:
+    """PIN byte-strings to try, best first, as (label, bytes).
+
+    The board is a legacy-PIN device and WiiBrew documents two conventions:
+    pressing SYNC (bonding) expects the HOST address reversed, while the
+    1+2 / temporary-pairing path expects the DEVICE's own address reversed.
+    Balance boards in the wild have been reported both ways and an attempt is
+    cheap, so try host first and fall back to the board's own address rather
+    than failing on a coin flip.
+    """
+    out = []
+    host = pin_bytes_for_host(host_mac_hex)
+    if len(host) == 6:
+        out.append(("host address", host))
+    board = pin_bytes_for_host(board_mac_hex)
+    if len(board) == 6 and board != host:
+        out.append(("board address", board))
+    return out
 
 
 def pair_balance_board(discovery_timeout_mult: int = 8,
@@ -936,28 +984,44 @@ def pair_balance_board(discovery_timeout_mult: int = 8,
             return result
         board = match[0]
 
-    pin = pin_bytes_for_host(board["radio_address"])
-    if len(pin) != 6:
+    candidates = pin_candidates_for(board["radio_address"], board["address"])
+    if not candidates:
         result["message"] = f"Could not derive a PIN from radio {board['radio_address']}"
         return result
 
-    ok, message = pair_via_callback(board, pin, log=log)
-    result["method"] = "callback"
-    if not ok:
-        log(f"[!] Raw-PIN route failed: {message}")
-        # The legacy route drives the SAME BluetoothAuthenticateDevice stack,
-        # so retrying it after an already-bonded refusal just reproduces the
-        # error. Only fall back when the failure could plausibly differ.
+    # Strategy order matters. BluetoothAuthenticateDeviceEx negotiates Secure
+    # Simple Pairing, which the board does NOT support (WiiBrew is explicit
+    # about this) -- observed as 25s of "no PIN request yet" because the auth
+    # callback is never invoked at all. The older BluetoothAuthenticateDevice
+    # asks for a legacy PIN directly, so it goes first.
+    #
+    # Timeouts are deliberately tight: the board sleeps ~20s after SYNC, so a
+    # long first attempt guarantees the later ones face a dead board.
+    attempts = []
+    for label, pin in candidates:
+        attempts.append((f"legacy PIN / {label}", pair_via_legacy, pin,
+                         "legacy", 9.0))
+    for label, pin in candidates:
+        attempts.append((f"raw PIN / {label}", pair_via_callback, pin,
+                         "callback", 12.0))
+
+    failures = []
+    for label, fn, pin, method, tmo in attempts:
+        log(f"[i] Trying {label} ({' '.join(f'{b:02X}' for b in pin)})...")
+        ok, message = fn(board, pin, log=log, auth_timeout=tmo)
+        if ok:
+            result.update(success=True, method=method, message=message)
+            return result
+        log(f"[!] {label} failed: {message}")
+        failures.append(f"{label}: {message}")
+        # An existing bond is not a PIN problem; more PIN guesses cannot help.
         if "already paired" in message or "stale Windows pairing" in message:
             result["message"] = message
             return result
-        log("[i] Trying the legacy AuthenticateDevice route...")
-        ok2, message2 = pair_via_legacy(board, pin, log=log)
-        if ok2:
-            result.update(success=True, method="legacy", message=message2)
-            return result
-        result["message"] = f"{message}; legacy route also failed: {message2}"
-        return result
 
-    result.update(success=True, message=message)
+    result["message"] = (
+        "Could not pair the board. Windows never asked for a PIN, which "
+        "usually means it tried Secure Simple Pairing — press SYNC and try "
+        "again, or pair it once from Windows Bluetooth settings.")
+    log(f"[!] All {len(attempts)} pairing attempts failed: {failures}")
     return result

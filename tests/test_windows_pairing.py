@@ -209,9 +209,9 @@ class TestAlreadyPairedBoard(unittest.TestCase):
         self.assertTrue(result["success"])
         auth.assert_called_once()
 
-    def test_already_paired_failure_does_not_retry_legacy_route(self):
-        """The legacy route drives the same stack, so retrying an 'already
-        paired' refusal just reproduces it and doubles the log noise."""
+    def test_already_paired_failure_stops_the_attempt_chain(self):
+        """An existing bond is not a PIN problem, so the remaining PIN/route
+        combinations must not be tried -- they only reproduce the error."""
         from unittest import mock
         with mock.patch.object(wp, "is_available", return_value=True), \
                 mock.patch.object(wp, "list_radios",
@@ -221,13 +221,15 @@ class TestAlreadyPairedBoard(unittest.TestCase):
                 mock.patch.object(wp, "find_balance_boards",
                                   return_value=[self._board(authenticated=False)]), \
                 mock.patch.object(
-                    wp, "pair_via_callback",
-                    return_value=(False, "board is already paired but ...")), \
-                mock.patch.object(wp, "pair_via_legacy") as legacy:
+                    wp, "pair_via_legacy",
+                    return_value=(False, "board is already paired but ...")) as legacy, \
+                mock.patch.object(wp, "pair_via_callback") as cb:
             result = wp.pair_balance_board(log=lambda *a: None)
 
         self.assertFalse(result["success"])
-        legacy.assert_not_called()
+        self.assertEqual(legacy.call_count, 1,
+                         "kept guessing PINs after an existing bond was found")
+        cb.assert_not_called()
 
     def test_forget_existing_defaults_to_false(self):
         """Tearing down a working bond on every button click is destructive,
@@ -468,6 +470,133 @@ class TestDiscoveryOrder(unittest.TestCase):
 
         self.assertEqual(calls, [False, True])
         self.assertTrue(result["success"])
+
+
+class TestPinCandidates(unittest.TestCase):
+    """WiiBrew documents two PIN conventions: SYNC-button bonding uses the
+    HOST address reversed, 1+2 temporary pairing uses the DEVICE's own
+    address reversed. Boards are reported both ways, and an attempt is cheap.
+    """
+
+    def test_host_address_is_tried_first(self):
+        cands = wp.pin_candidates_for("38FC983BB4DC", "0024446AEBFC")
+        self.assertEqual(cands[0][0], "host address")
+        self.assertEqual(cands[0][1],
+                         bytes([0xDC, 0xB4, 0x3B, 0x98, 0xFC, 0x38]))
+
+    def test_board_address_is_offered_as_a_fallback(self):
+        cands = wp.pin_candidates_for("38FC983BB4DC", "0024446AEBFC")
+        self.assertEqual(len(cands), 2)
+        self.assertEqual(cands[1][1],
+                         bytes([0xFC, 0xEB, 0x6A, 0x44, 0x24, 0x00]))
+
+    def test_identical_addresses_are_not_duplicated(self):
+        cands = wp.pin_candidates_for("38FC983BB4DC", "38FC983BB4DC")
+        self.assertEqual(len(cands), 1)
+
+    def test_bad_input_yields_nothing(self):
+        self.assertEqual(wp.pin_candidates_for("junk", "junk"), [])
+
+
+class TestStrategyOrder(unittest.TestCase):
+    """Observed on real hardware: BluetoothAuthenticateDeviceEx sat for 25s
+    with 'no PIN request yet' -- the auth callback was never invoked, because
+    it negotiates Secure Simple Pairing and the board does not support SSP.
+    The legacy call asks for a PIN directly, so it must be tried first."""
+
+    def _patches(self, legacy, callback):
+        from unittest import mock
+        return (
+            mock.patch.object(wp, "is_available", return_value=True),
+            mock.patch.object(wp, "list_radios",
+                              return_value=[{"handle": 1,
+                                             "address": "38FC983BB4DC",
+                                             "name": "r"}]),
+            mock.patch.object(
+                wp, "find_balance_boards",
+                return_value=[{"address": "0024446AEBFC", "name": "b",
+                               "authenticated": False, "remembered": False,
+                               "connected": False, "age_sec": 2.0,
+                               "last_seen": 1.0,
+                               "radio_address": "38FC983BB4DC",
+                               "radio_handle": 1}]),
+            mock.patch.object(wp, "pair_via_legacy", legacy),
+            mock.patch.object(wp, "pair_via_callback", callback),
+        )
+
+    def test_legacy_route_is_attempted_before_the_ssp_route(self):
+        order = []
+
+        def _legacy(board, pin, log=print, auth_timeout=9.0):
+            order.append("legacy")
+            return True, "paired"
+
+        def _cb(board, pin, log=print, auth_timeout=12.0):
+            order.append("callback")
+            return True, "paired"
+
+        p = self._patches(_legacy, _cb)
+        for x in p:
+            x.start()
+        try:
+            result = wp.pair_balance_board(log=lambda *a: None)
+        finally:
+            for x in p:
+                x.stop()
+
+        self.assertEqual(order, ["legacy"],
+                         "SSP route ran before the legacy PIN route")
+        self.assertEqual(result["method"], "legacy")
+
+    def test_all_pin_candidates_are_tried_before_giving_up(self):
+        tried = []
+
+        def _legacy(board, pin, log=print, auth_timeout=9.0):
+            tried.append(("legacy", bytes(pin)))
+            return False, "legacy pairing failed: timed out"
+
+        def _cb(board, pin, log=print, auth_timeout=12.0):
+            tried.append(("callback", bytes(pin)))
+            return False, "pairing failed: timed out"
+
+        p = self._patches(_legacy, _cb)
+        for x in p:
+            x.start()
+        try:
+            result = wp.pair_balance_board(log=lambda *a: None)
+        finally:
+            for x in p:
+                x.stop()
+
+        self.assertEqual(len(tried), 4,
+                         f"expected 2 PINs x 2 routes, got {tried}")
+        self.assertEqual([t[0] for t in tried],
+                         ["legacy", "legacy", "callback", "callback"])
+        self.assertFalse(result["success"])
+        self.assertIn("Secure Simple Pairing", result["message"])
+
+    def test_existing_bond_stops_further_pin_guesses(self):
+        """More PIN attempts cannot fix a bond that already exists."""
+        calls = []
+
+        def _legacy(board, pin, log=print, auth_timeout=9.0):
+            calls.append("legacy")
+            return False, "board is already paired but ..."
+
+        def _cb(board, pin, log=print, auth_timeout=12.0):
+            calls.append("callback")
+            return False, "nope"
+
+        p = self._patches(_legacy, _cb)
+        for x in p:
+            x.start()
+        try:
+            wp.pair_balance_board(log=lambda *a: None)
+        finally:
+            for x in p:
+                x.stop()
+
+        self.assertEqual(calls, ["legacy"])
 
 
 class TestPlatformGuards(unittest.TestCase):
