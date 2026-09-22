@@ -69,7 +69,7 @@ def app(tmp_path):
 
 
 def _go_live(obs_server):
-    obs_server.pressure_manager.latest_frame = {"timestamp": time.time(),
+    obs_server.pressure_manager.latest_frame = {"timestamp": time.monotonic(),
                                                 "total_kg": 80.0}
 
 
@@ -97,7 +97,7 @@ def test_selecting_an_older_shot_replays_that_shot(app):
 def test_stale_board_frames_do_not_count_as_live(app):
     """latest_frame lingers after the boards stop; presence != liveness."""
     a, obs, _older, _newer = app
-    obs.pressure_manager.latest_frame = {"timestamp": time.time() - 30.0}
+    obs.pressure_manager.latest_frame = {"timestamp": time.monotonic() - 30.0}
 
     trail, is_stored = a.pressure_display_trail()
     assert is_stored, "a 30s-old frame must not be treated as live"
@@ -143,12 +143,51 @@ def test_board_liveness_thresholds(app):
     obs.pressure_manager.latest_frame = None
     assert not a.board_is_streaming()
 
-    obs.pressure_manager.latest_frame = {"timestamp": time.time()}
+    obs.pressure_manager.latest_frame = {"timestamp": time.monotonic()}
     assert a.board_is_streaming()
 
-    obs.pressure_manager.latest_frame = {"timestamp": time.time() - 5.0}
+    obs.pressure_manager.latest_frame = {"timestamp": time.monotonic() - 5.0}
     assert not a.board_is_streaming()
 
     # A frame with no timestamp is trusted rather than discarded.
     obs.pressure_manager.latest_frame = {"total_kg": 80.0}
     assert a.board_is_streaming()
+
+
+def test_loaded_board_frames_count_as_live(app):
+    """Regression: frames carry the MONOTONIC sensor clock (SensorReading
+    convention). Liveness was judged against time.time(), so the moment a
+    golfer stood on the boards every frame looked decades stale and the Lab
+    swapped the live trail for the last stored shot mid-swing."""
+    a, obs, _older, _newer = app
+    obs.pressure_manager.latest_frame = {"timestamp": time.monotonic(),
+                                         "total_kg": 80.0}
+    assert a.board_is_streaming()
+    trail, is_stored = a.pressure_display_trail()
+    assert not is_stored, "loaded boards fell back to the stored trace"
+    assert trail[0]["cop_x"] == 9.0
+
+    obs.pressure_manager.latest_frame = {"timestamp": time.monotonic() - 5.0}
+    assert not a.board_is_streaming()
+
+
+def test_manager_frames_all_use_the_monotonic_clock():
+    """The empty-board and tare frames were stamped with time.time() while
+    loaded frames used time.monotonic(), so one ring buffer held two clocks."""
+    import threading
+
+    import obs_server
+    from src.hardware.pressure import SensorReading, TareOffsets
+    from src.processing.pressure import ShotSynchronizedPressureBuffer
+
+    pm = obs_server.PressureManager.__new__(obs_server.PressureManager)
+    pm.lock = threading.RLock()
+    pm.buffer = ShotSynchronizedPressureBuffer(capacity=10)
+    pm.tare_offsets = TareOffsets()
+    pm._latest_raw_reading = SensorReading(1.0, 1.0, 1.0, 1.0,
+                                           timestamp=time.monotonic())
+    pm.latest_frame = None
+    pm.tare()
+    assert pm.latest_frame is not None
+    ts = pm.latest_frame["timestamp"]
+    assert abs(ts - time.monotonic()) < 5.0, "tare frame is not on the monotonic clock"

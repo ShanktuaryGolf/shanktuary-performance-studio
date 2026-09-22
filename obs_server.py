@@ -734,7 +734,9 @@ class PressureManager:
                                 pct_right=50.0,
                                 pct_front=50.0,
                                 pct_back=50.0,
-                                timestamp=time.time(),
+                                # Sensor clock, like every loaded frame --
+                                # never wall clock (see board_is_streaming).
+                                timestamp=tared.timestamp,
                                 raw=tared,
                                 left_kg=0.0,
                                 right_kg=0.0,
@@ -899,7 +901,8 @@ class PressureManager:
                 self.tare_offsets = TareOffsets(0.0, 0.0, 0.0, 0.0)
 
             # Immediately produce a zeroed resting frame at (0,0)
-            zero_reading = SensorReading(0.0, 0.0, 0.0, 0.0, timestamp=time.time())
+            now_mono = time.monotonic()
+            zero_reading = SensorReading(0.0, 0.0, 0.0, 0.0, timestamp=now_mono)
             zero_cop = CoPSample(
                 cop_x=0.0,
                 cop_y=0.0,
@@ -908,7 +911,7 @@ class PressureManager:
                 pct_right=50.0,
                 pct_front=50.0,
                 pct_back=50.0,
-                timestamp=time.time(),
+                timestamp=now_mono,
                 raw=zero_reading,
                 left_kg=0.0,
                 right_kg=0.0,

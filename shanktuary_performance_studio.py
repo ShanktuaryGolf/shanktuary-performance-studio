@@ -3167,6 +3167,12 @@ class ShanktuaryApp:
 
         `latest_frame` lingers after the hardware stops, so presence alone is
         not liveness -- check that the newest frame is actually recent.
+
+        Frame timestamps are the MONOTONIC sensor clock (SensorReading
+        convention), so age must be measured against time.monotonic().
+        Comparing to time.time() made every loaded-board frame look decades
+        old, so the Lab dropped the live trail for the last stored shot the
+        moment someone stood on the boards.
         """
         pm = getattr(obs_server, "pressure_manager", None)
         frame = getattr(pm, "latest_frame", None) if pm else None
@@ -3177,7 +3183,7 @@ class ShanktuaryApp:
             # No timestamp to judge by: trust that a frame exists.
             return True
         try:
-            return (time.time() - float(ts)) <= max_age_s
+            return (time.monotonic() - float(ts)) <= max_age_s
         except (TypeError, ValueError):
             return True
 
