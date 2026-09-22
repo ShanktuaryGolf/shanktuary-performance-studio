@@ -684,8 +684,16 @@ class PressureManager:
                     if wiz_a and wiz_b:
                         w_a = wiz.board_a_weight
                         w_b = wiz.board_b_weight
-                        rd_a = wiz_a.read()
-                        rd_b = wiz_b.read()
+                        # Read under the lock, and only if the handles are
+                        # still current: a UI-thread close mid-read is a
+                        # native hidapi use-after-free (see stream read).
+                        with self.lock:
+                            if (self._wiz_backend_a is wiz_a
+                                    and self._wiz_backend_b is wiz_b):
+                                rd_a = wiz_a.read()
+                                rd_b = wiz_b.read()
+                            else:
+                                rd_a = rd_b = None
                         if rd_a:
                             w_a = rd_a.total_weight
                         if rd_b:
@@ -695,7 +703,18 @@ class PressureManager:
 
                 # 2. Standard stream loop
                 if backend and backend.is_open:
-                    reading = backend.read()
+                    # The read MUST happen under the lock. The UI thread
+                    # (start_assignment_wizard, set_board_mode, reopen...)
+                    # closes self.backend under this lock; hidapi's native
+                    # read runs without the GIL, so closing the handle while
+                    # we are inside read() is a use-after-free that kills the
+                    # whole process with no traceback. Reads are non-blocking,
+                    # so holding the lock here costs microseconds.
+                    with self.lock:
+                        if self.backend is backend and backend.is_open:
+                            reading = backend.read()
+                        else:
+                            reading = None
                     if reading:
                         self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading

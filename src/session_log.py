@@ -126,5 +126,13 @@ def install() -> str | None:
 
     sys.stdout = _Tee(sys.stdout, f, lock)
     sys.stderr = _Tee(sys.stderr, f, lock)
+    # A native crash (e.g. a hidapi handle closed mid-read) kills the process
+    # without a Python traceback, leaving the log silent about why. Dump every
+    # thread's stack to the log on SIGSEGV / access violation instead.
+    try:
+        import faulthandler
+        faulthandler.enable(file=f, all_threads=True)
+    except Exception:
+        pass
     _installed = True
     return log_path()
