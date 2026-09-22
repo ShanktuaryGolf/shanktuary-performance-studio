@@ -10,6 +10,7 @@ This replicates the approach used by WiimoteLib / WiiBalanceWalker.
 """
 
 import struct
+import sys
 import time
 from dataclasses import dataclass
 
@@ -23,6 +24,36 @@ from .base import BoardBackend, SensorReading
 # Nintendo Wii Balance Board USB HID identifiers
 WBB_VID = 0x057E
 WBB_PID = 0x0306
+
+# Handles whose outstanding read never completed. Freeing one would let
+# Windows finish the read into freed memory, so they are deliberately kept
+# alive for the life of the process instead.
+_UNSETTLED_HANDLES: list = []
+
+
+def _settle_pending_read(dev, attempts: int = 20, timeout_ms: int = 100) -> bool:
+    """Complete hidapi's outstanding overlapped read before the handle closes.
+
+    On Windows a non-blocking hid_read() that finds no data returns 0 but
+    LEAVES its ReadFile pending (the normal state between polls). hid_close()
+    then calls CancelIo(), which only cancels I/O issued by the CALLING
+    thread -- the read was issued by the pressure worker, the close comes
+    from the UI thread -- and immediately frees the read buffer and
+    OVERLAPPED. Windows later completes the read into freed memory: heap
+    corruption, reported as fatal exception 0xc0000374 at some unrelated
+    allocation (the Setup -> step-on wizard crash).
+
+    A timed read waits on that same pending request, so a read that returns
+    data (or errors) means nothing is outstanding. The board streams
+    continuously, so this normally returns on the first call.
+    """
+    for _ in range(attempts):
+        try:
+            if dev.read(64, timeout_ms):
+                return True
+        except Exception:
+            return True   # read failed -> hidapi cleared the pending flag
+    return False
 
 # Set once if HID enumeration itself fails, so the 2s reconnect loop doesn't
 # reprint the same error forever.
@@ -239,12 +270,21 @@ class HidBackend(BoardBackend):
         self.close()
 
     def close(self) -> None:
-        if self._device:
-            try:
-                self._device.close()
-            except Exception:
-                pass
-            self._device = None
+        dev = self._device
+        if dev is None:
+            return
+        self._device = None
+        if sys.platform == "win32" and not _settle_pending_read(dev):
+            # Still pending after ~2s: closing now would corrupt the heap.
+            # Leak the handle rather than crash the app.
+            _UNSETTLED_HANDLES.append(dev)
+            print("[!] Balance board read did not finish; handle left open "
+                  "to avoid a crash")
+            return
+        try:
+            dev.close()
+        except Exception:
+            pass
 
     @property
     def is_open(self) -> bool:
