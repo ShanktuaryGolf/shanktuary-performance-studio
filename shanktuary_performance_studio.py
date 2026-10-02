@@ -9447,17 +9447,9 @@ class ShanktuaryApp:
             rail_gap = int(26 * s)
             labels = [self.FLOW_TITLES.get(k, k) for k in steps]
             widths = []
+            entries = []
+            idx = getattr(self, "setup_flow_index", 0)
             for i, lbl in enumerate(labels):
-                tid = self.canvas.create_text(-4000, -4000,
-                                              text=f"{i + 1}. {lbl}",
-                                              font=(theme.ui_font(), f_label))
-                bb = self.canvas.bbox(tid)
-                widths.append((bb[2] - bb[0]) if bb else int(120 * s))
-                self.canvas.delete(tid)
-            total = sum(widths) + rail_gap * (len(labels) - 1)
-            rx = cx - total // 2
-            for i, lbl in enumerate(labels):
-                idx = getattr(self, "setup_flow_index", 0)
                 if flow_done or i < idx:
                     col = theme.ACCENT
                     txt = f"✓ {lbl}"
@@ -9467,12 +9459,23 @@ class ShanktuaryApp:
                 else:
                     col = theme.TEXT_3
                     txt = f"{i + 1}. {lbl}"
+                font = (theme.ui_font(), f_label,
+                        "bold" if i == idx and not flow_done else "normal")
+                # Measure exactly what will be painted. Active bold text and
+                # completed checkmarks can be wider than regular numbered
+                # labels, especially under different system fonts/Tk scaling.
+                tid = self.canvas.create_text(-4000, -4000, text=txt,
+                                              font=font, anchor="nw")
+                bb = self.canvas.bbox(tid)
+                widths.append((bb[2] - bb[0]) if bb else int(120 * s))
+                self.canvas.delete(tid)
+                entries.append((txt, col, font))
+            total = sum(widths) + rail_gap * (len(labels) - 1)
+            rx = cx - total // 2
+            for width, (txt, col, font) in zip(widths, entries):
                 self.canvas.create_text(rx, y, text=txt, fill=col,
-                                        font=(theme.ui_font(), f_label,
-                                              "bold" if i == idx and not flow_done
-                                              else "normal"),
-                                        anchor="nw")
-                rx += widths[i] + rail_gap
+                                        font=font, anchor="nw")
+                rx += width + rail_gap
             y += h_rail
             rule_half = max(int(220 * s), total // 2 + int(16 * s))
             self.canvas.create_line(cx - rule_half, y, cx + rule_half, y,
