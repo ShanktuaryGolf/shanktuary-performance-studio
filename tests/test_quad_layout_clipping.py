@@ -15,56 +15,23 @@ size that no longer matched the text it was meant to hold:
 """
 
 import os
-import shutil
 import sys
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-tk = pytest.importorskip("tkinter")
+@pytest.fixture(params=[None, {"lateral_offset_mm": -6.0, "vertical_offset_mm": 3.5}],
+                ids=["unavailable", "reported"])
+def quad(tmp_path, monkeypatch, request):
+    """Both credibility states use the same deterministic native-style shot."""
+    from test_quad_impact_panel import _quad_app
 
-REAL_HISTORY = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "shanktuary_session_history.json",
-)
-
-
-@pytest.fixture
-def quad(tmp_path, monkeypatch):
-    """Quad view rendered from a COPY of the real history (never the original)."""
-    import shanktuary_performance_studio as studio
-
-    monkeypatch.setenv("SPS_SHOT_SOURCE_FILE", str(tmp_path / "s.json"))
-    monkeypatch.setenv("SPS_SKIP_SPLASH", "1")
-    hist = tmp_path / "history.json"
-    if os.path.exists(REAL_HISTORY):
-        shutil.copy2(REAL_HISTORY, hist)
-    monkeypatch.setattr(studio, "SESSION_LOG_PATH", str(hist))
-
-    from src.ui import ShanktuaryDesktopApp
-
+    root, app = _quad_app(tmp_path, monkeypatch, "1915x1111", request.param)
     try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display available")
-    root.geometry("1915x1111")
-    app = ShanktuaryDesktopApp(root)
-
-    shots = app.session_shots
-    if not shots:
-        pytest.skip("no shots available to render the quad view")
-    app.selected_shot_index = len(shots) - 1
-    app.current_shot = shots[-1]
-    app.view_mode = 1
-    app.draw_screen()
-    root.update()
-
-    yield root, app
-    try:
+        yield root, app
+    finally:
         root.destroy()
-    except tk.TclError:
-        pass
 
 
 def _text_item(canvas, wanted, contains=False):
@@ -77,7 +44,7 @@ def _text_item(canvas, wanted, contains=False):
     return None, None, None
 
 
-def test_impact_caption_and_estimate_chip_do_not_touch(quad):
+def test_impact_caption_and_credibility_badge_do_not_touch(quad):
     _root, app = quad
     c = app.canvas
 
@@ -89,7 +56,7 @@ def test_impact_caption_and_estimate_chip_do_not_touch(quad):
         if c.type(item) != "text":
             continue
         text = c.itemcget(item, "text")
-        if "ESTIMATE" in text and text != "IMPACT LOCATION":
+        if text in ("UNAVAILABLE", "REPORTED"):
             chip = (item, c.bbox(item), text)
     assert chip, "no state chip was drawn"
 
@@ -99,39 +66,52 @@ def test_impact_caption_and_estimate_chip_do_not_touch(quad):
     )
 
 
-def test_the_estimate_chip_box_contains_its_own_label(quad):
-    """The badge must wrap the text, not be overflowed by it."""
+def test_the_credibility_badge_fits_inside_the_panel(quad):
+    """The current plain-text badge must stay within its quadrant bounds.
+
+    The old estimate chip background no longer exists. Keep the clipping
+    regression meaningful by testing the current badge's actual geometry.
+    """
     _root, app = quad
     c = app.canvas
+    expected = "REPORTED" if "face_impact" in app.current_shot else "UNAVAILABLE"
+    _item, badge, _label = _text_item(c, expected)
+    _item, caption, _label = _text_item(c, "IMPACT LOCATION")
+    assert badge and caption, "contact header or credibility state missing"
+    assert badge[0] >= caption[2] + 8
+    assert badge[2] <= c.winfo_width() - 8
+    assert abs(badge[1] - caption[1]) <= 2
 
-    chip = None
-    for item in c.find_all():
-        if c.type(item) != "text":
-            continue
-        text = c.itemcget(item, "text")
-        if "ESTIMATE" in text and text != "IMPACT LOCATION":
-            chip = (item, c.bbox(item), text)
-    assert chip, "no state chip"
-    _item, (tx1, ty1, tx2, ty2), label = chip
 
-    # Find the chip's own background rect (the one straddling the label).
-    best = None
-    for item in c.find_all():
-        if c.type(item) != "rectangle":
-            continue
-        co = c.coords(item)
-        if len(co) != 4:
-            continue
-        rx1, ry1, rx2, ry2 = co
-        if rx1 <= tx1 + 4 and rx2 >= tx2 - 4 and ry1 <= ty1 + 6 and ry2 >= ty2 - 6:
-            width = rx2 - rx1
-            if best is None or width < best[0]:
-                best = (width, co)
+def _polyline_intersects_rect(coords, rect, stroke_width=0):
+    """Check painted segments, not the empty corners of the arc's bbox."""
+    pad = stroke_width / 2
+    left, top, right, bottom = rect
+    bounds = ((left - pad, right + pad), (top - pad, bottom + pad))
+    points = list(zip(coords[::2], coords[1::2]))
+    for start, end in zip(points, points[1:]):
+        lo, hi = 0.0, 1.0
+        for origin, target, (minimum, maximum) in zip(start, end, bounds):
+            delta = target - origin
+            if delta == 0:
+                if not minimum <= origin <= maximum:
+                    break
+                continue
+            enter, leave = sorted(((minimum - origin) / delta,
+                                   (maximum - origin) / delta))
+            lo, hi = max(lo, enter), min(hi, leave)
+            if lo > hi:
+                break
+        else:
+            return True
+    return False
 
-    assert best, (
-        f"the {label!r} chip has no background box wide enough to hold it "
-        f"(text spans {tx1}..{tx2})"
-    )
+
+def test_arc_intersection_ignores_empty_bbox_corners():
+    arc = [0, 10, 5, 0, 10, 10]
+    assert not _polyline_intersects_rect(arc, (8, 0, 10, 2))
+    assert _polyline_intersects_rect(arc, (4, 0, 6, 2))
+    assert _polyline_intersects_rect([0, 0, 10, 0], (4, 1, 6, 2), 3)
 
 
 def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
@@ -152,10 +132,11 @@ def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
             if min(ys) > 600:
                 traj = item
                 break
-    if traj is None:
-        pytest.skip("no trajectory arc in this render")
+    assert traj is not None, "fixture must render the trajectory arc"
 
     tb = c.bbox(traj)
+    trajectory = c.coords(traj)
+    stroke_width = float(c.itemcget(traj, "width"))
     idx = order.index(traj)
     covering = []
     for item in order[idx + 1:]:
@@ -164,7 +145,7 @@ def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
         bb = c.bbox(item)
         if not bb:
             continue
-        if bb[0] < tb[2] and bb[2] > tb[0] and bb[1] < tb[3] and bb[3] > tb[1]:
+        if c.itemcget(item, "fill") and _polyline_intersects_rect(trajectory, bb, stroke_width):
             covering.append((bb, c.itemcget(item, "fill")))
 
     assert not covering, (
@@ -183,12 +164,10 @@ def test_selected_card_is_tall_enough_for_its_last_row(quad):
     c = app.canvas
 
     cards = getattr(app, "design_shot_card_rects", [])
-    if not cards:
-        pytest.skip("no shot cards rendered")
+    assert cards, "fixture must render its shot card"
     sel_idx = app.selected_shot_index
     card = next((r for r in cards if r[4] == sel_idx), None)
-    if card is None:
-        pytest.skip("selected card not on screen")
+    assert card is not None, "selected fixture card must be on screen"
 
     # The visible card body: the widest filled rect spanning this card.
     body_bottom = None
@@ -201,8 +180,7 @@ def test_selected_card_is_tall_enough_for_its_last_row(quad):
         x1, y1, x2, y2 = co
         if x1 < 320 and (x2 - x1) > 150 and y1 >= card[1] - 6 and y2 <= card[3] + 8:
             body_bottom = max(body_bottom or 0, y2)
-    if body_bottom is None:
-        pytest.skip("could not locate the card body")
+    assert body_bottom is not None, "selected card body not found"
 
     # Every label/value belonging to this card must end above that edge.
     for item in c.find_all():
@@ -226,9 +204,10 @@ def test_selected_card_is_tall_enough_for_its_last_row(quad):
 
 def test_both_card_layers_agree_on_the_selected_height(quad):
     """v4 and v8 both paint this card; a height mismatch shows as a seam."""
+    import inspect
+
     import shell_redesign_v4 as v4
     import shell_redesign_v8 as v8
-    import inspect
 
     def selected_height(module):
         src = inspect.getsource(module.paint_sidebar)
@@ -251,8 +230,7 @@ def test_shot_card_values_clear_the_card_edge(quad):
     c = app.canvas
 
     cards = getattr(app, "design_shot_card_rects", [])
-    if not cards:
-        pytest.skip("no shot cards rendered")
+    assert cards, "fixture must render its shot card"
     card_right = cards[0][2]
 
     checked = 0
@@ -277,5 +255,4 @@ def test_shot_card_values_clear_the_card_edge(quad):
         assert margin >= 22, (
             f"{text!r} sits {margin}px from the card edge — reads as clipped"
         )
-    if not checked:
-        pytest.skip("no right-aligned time value on screen")
+    assert checked, "fixture must render its right-aligned time value"

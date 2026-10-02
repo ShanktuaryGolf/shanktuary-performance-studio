@@ -5,7 +5,7 @@ a = Analysis(
     ['shanktuary_performance_studio.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')],
+    datas=[('assets', 'assets'), ('src/analytics/data', 'src/analytics/data')],
     hiddenimports=[
         'PIL',
         'PIL.Image',

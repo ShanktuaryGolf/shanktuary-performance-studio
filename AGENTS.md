@@ -45,8 +45,8 @@ through pytest. Lint: `ruff check .` (config in `ruff.toml`; ruff is not in
 ## Build (release)
 
 ```bash
-pyinstaller --noconfirm --onedir --windowed --add-data "assets:assets" shanktuary_performance_studio.py  # Linux/macOS
-pyinstaller --noconfirm --onedir --windowed --add-data "assets;assets" shanktuary_performance_studio.py  # Windows
+pyinstaller --noconfirm --onedir --windowed --add-data "assets:assets" --add-data "src/analytics/data:src/analytics/data" shanktuary_app.py  # Linux/macOS
+pyinstaller --noconfirm --onedir --windowed --add-data "assets;assets" --add-data "src/analytics/data;src/analytics/data" shanktuary_app.py  # Windows
 ```
 
 ## Conventions
@@ -90,8 +90,12 @@ pyinstaller --noconfirm --onedir --windowed --add-data "assets;assets" shanktuar
 ## Pitfalls
 
 - Runtime state is user data, not repo content: layouts at
-  `~/.config/shanktuary/overlay_layout.json`, shot history beside the
-  executable/source dir. Never commit machine-specific state.
+  `~/.config/shanktuary/overlay_layout.json`; history/My Bag and pressure
+  traces use `user_data.get_data_dir()` (Linux: `$XDG_DATA_HOME/shanktuary`
+  or `~/.local/share/shanktuary`; Windows: `%LOCALAPPDATA%/shanktuary`;
+  macOS: `~/Library/Application Support/shanktuary`). Startup copies legacy
+  executable/source-adjacent history and traces without replacing current
+  data or deleting originals. Never commit machine-specific state.
 - `build/`, `dist/`, `AppDir/`, and packaged archives are generated output —
   edit source in the Python modules, `src/`, or `assets/` instead.
 - `.gitignore` excludes all `*.json`, `scratch/`, and `.agents/` — double
