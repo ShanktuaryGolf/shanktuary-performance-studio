@@ -234,41 +234,46 @@ def test_one_board_refusal_surfaces_instead_of_a_dead_prompt(app_and_pm):
 def test_modal_renders_every_step_without_overlapping_text(app_and_pm, tk_scaling):
     """The room-readable prompt must stay legible on all three steps."""
     app, pm, studio = app_and_pm
-    app.root.tk.call("tk", "scaling", tk_scaling)
-    app.start_guided_setup()
-    w, h = 1600, 900
+    original_scaling = app.root.tk.call("tk", "scaling")
+    try:
+        app.root.tk.call("tk", "scaling", tk_scaling)
+        app.start_guided_setup()
+        w, h = 1600, 900
 
-    for expected in ("assign", "align", "width"):
-        assert app._flow_step() == expected
-        app.canvas.delete("all")
-        studio.ShanktuaryApp.draw_board_assign_modal(app, w, h)
-        app.root.update_idletasks()
+        for expected in ("assign", "align", "width"):
+            assert app._flow_step() == expected
+            app.canvas.delete("all")
+            studio.ShanktuaryApp.draw_board_assign_modal(app, w, h)
+            app.root.update_idletasks()
 
-        texts = []
-        for item in app.canvas.find_all():
-            if app.canvas.type(item) != "text":
-                continue
-            bb = app.canvas.bbox(item)
-            if bb:
-                texts.append((app.canvas.itemcget(item, "text"), bb))
+            texts = []
+            for item in app.canvas.find_all():
+                if app.canvas.type(item) != "text":
+                    continue
+                bb = app.canvas.bbox(item)
+                if bb:
+                    texts.append((app.canvas.itemcget(item, "text"), bb))
 
-        for i in range(len(texts)):
-            for j in range(i + 1, len(texts)):
-                (t1, a), (t2, b) = texts[i], texts[j]
-                overlap = (a[0] < b[2] and b[0] < a[2]
-                           and a[1] < b[3] and b[1] < a[3])
-                assert not overlap, f"{expected}: {t1!r} overlaps {t2!r}"
+            for i in range(len(texts)):
+                for j in range(i + 1, len(texts)):
+                    (t1, a), (t2, b) = texts[i], texts[j]
+                    overlap = (a[0] < b[2] and b[0] < a[2]
+                               and a[1] < b[3] and b[1] < a[3])
+                    assert not overlap, f"{expected}: {t1!r} overlaps {t2!r}"
 
-        for text, bb in texts:
-            assert bb[1] >= 0 and bb[3] <= h, f"{expected}: {text!r} off-screen"
+            for text, bb in texts:
+                assert bb[1] >= 0 and bb[3] <= h, f"{expected}: {text!r} off-screen"
 
-        # Advance to the next step the way the hardware would.
-        if expected == "assign":
-            pm.assignment_wizard.complete()
-        elif expected == "align":
-            pm.finish_align()
-        else:
-            pm.finish_width()
-        app.tick_setup_flow()
+            # Advance to the next step the way the hardware would.
+            if expected == "assign":
+                pm.assignment_wizard.complete()
+            elif expected == "align":
+                pm.finish_align()
+            else:
+                pm.finish_width()
+            app.tick_setup_flow()
 
-    assert app.setup_flow_done
+        assert app.setup_flow_done
+    finally:
+        # Tk scaling is display-wide on some builds, not interpreter-local.
+        app.root.tk.call("tk", "scaling", original_scaling)
