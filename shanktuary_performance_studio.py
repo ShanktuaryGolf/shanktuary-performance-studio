@@ -554,8 +554,8 @@ def load_image_asset(path, target_h=210, mirror=False, pad_square=True):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.6.1"
-BUILD_NUMBER = "2026.09.22.1"
+APP_VERSION = "v1.6.2"
+BUILD_NUMBER = "2026.10.02.1"
 
 class ShanktuaryApp:
     # Bound on img_cache. Rotated overhead sprites measure ~0.5 MB each as PIL
