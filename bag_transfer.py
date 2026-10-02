@@ -20,8 +20,8 @@ A timestamped backup of the history file is written before any change.
 
 Use --dry-run with import to preview without writing.
 
-The history file is located next to the app (the executable when frozen,
-the source directory otherwise). Pass --file to point at it explicitly:
+The history file is in the app's per-user data directory (run the updated
+app once to migrate an older installation). Pass --file to override it:
 
     python3 bag_transfer.py import my_bag.json --file "C:\\path\\to\\shanktuary_session_history.json"
 """
@@ -32,16 +32,13 @@ import shutil
 import sys
 from datetime import datetime
 
-HISTORY_NAME = "shanktuary_session_history.json"
+from user_data import HISTORY_NAME, get_data_dir
+
 BAG_KEYS = ("bag", "custom_clubs", "is_left_handed")
 
 
 def default_history_path():
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, HISTORY_NAME)
+    return str(get_data_dir() / HISTORY_NAME)
 
 
 def load_json(path):

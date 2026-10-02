@@ -69,7 +69,7 @@ def test_incoming_shot_is_stamped_with_the_current_ball(app, monkeypatch):
 
 def test_poll_queue_uses_the_stamp(monkeypatch):
     src = open(studio.__file__).read()
-    body = src[src.index("    def poll_queue(self):"):src.index("    def apply_range_club(")]
+    body = src[src.index("    def _process_queued_shot(self,"):src.index("    def apply_range_club(")]
     assert "_stamp_equipment" in body
 
 

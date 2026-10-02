@@ -40,6 +40,7 @@ from src.processing.pressure.stance import (
 from src.processing.pressure.stance import (
     StanceCalibrator,
 )
+from user_data import HISTORY_NAME, get_data_dir
 
 APP_VERSION = "v1.6.1"
 BUILD_NUMBER = "2026.09.22.1"
@@ -88,14 +89,9 @@ LAYOUT_FILE = CONFIG_DIR / "overlay_layout.json"
 # tests can point it somewhere harmless.
 AIM_FILE = _DEFAULT_AIM_FILE
 
-# Shot history / My Bag live beside the executable (source dir when running from
-# source), matching DATA_DIR in shanktuary_performance_studio.py. The desktop
-# app owns this file; the server only ever reads it.
-if getattr(sys, "frozen", False):
-    DATA_DIR = Path(sys.executable).parent
-else:
-    DATA_DIR = SCRIPT_DIR
-SESSION_LOG_PATH = DATA_DIR / "shanktuary_session_history.json"
+# Shared with the desktop app; only the desktop migrates/writes history.
+DATA_DIR = get_data_dir()
+SESSION_LOG_PATH = DATA_DIR / HISTORY_NAME
 
 # Default positions, sizes, visibility, and physical divot calibration (1920x1080 canvas)
 DEFAULT_LAYOUT = {
@@ -1320,6 +1316,12 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
+        length = self.request_body_length()
+        if length is None:
+            return
+        if length:
+            self.reject_request("GET request bodies are not supported", code=400)
+            return
         parsed_path = self.path.split("?")[0].rstrip("/")
         if not parsed_path:
             parsed_path = "/"
@@ -1442,18 +1444,44 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     MAX_POST_BODY = 1024 * 1024  # 1 MB — nothing this API accepts is larger
 
-    def read_post_body(self):
-        """Read the POST body with validation. Returns str, or None after an
-        error response has already been sent (malformed/oversized length)."""
+    def reject_request(self, message, code=400):
+        # Never parse unread body bytes as another request on this connection.
+        self.close_connection = True
+        self.send_json({"status": "error", "message": message}, code=code)
+
+    def request_body_length(self):
+        """Validate the one supported framing: a single decimal Content-Length."""
+        if self.headers.get_all("Transfer-Encoding"):
+            self.reject_request("Transfer-Encoding is not supported")
+            return None
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) > 1:
+            self.reject_request("multiple Content-Length headers")
+            return None
+        raw_length = lengths[0].strip() if lengths else "0"
+        if not raw_length or any(c not in "0123456789" for c in raw_length):
+            self.reject_request("bad Content-Length")
+            return None
         try:
-            length = int(self.headers.get("Content-Length", 0))
+            length = int(raw_length)
         except ValueError:
-            self.send_json({"status": "error", "message": "bad Content-Length"}, code=400)
+            self.reject_request("bad Content-Length")
             return None
-        if length < 0 or length > self.MAX_POST_BODY:
-            self.send_json({"status": "error", "message": "body too large"}, code=413)
+        if length > self.MAX_POST_BODY:
+            self.reject_request("body too large", code=413)
             return None
-        return self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else "{}"
+        return length
+
+    def read_post_body(self):
+        """Read a complete, bounded body, closing on invalid request framing."""
+        length = self.request_body_length()
+        if length is None:
+            return None
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self.reject_request("incomplete request body")
+            return None
+        return body.decode("utf-8", errors="replace") if length else "{}"
 
     def is_cross_origin(self):
         if self.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
@@ -1485,14 +1513,17 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.is_cross_origin():
-            self.send_json({"status": "error", "message": "cross-origin request rejected"}, code=403)
+            self.reject_request("cross-origin request rejected", code=403)
+            return
+
+        # Even bodyless actions must consume the framed body before allowing
+        # another request on this HTTP/1.1 connection.
+        body = self.read_post_body()
+        if body is None:
             return
 
         parsed_path = self.path.split("?")[0].rstrip("/")
         if parsed_path == "/api/layout":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 layout_data = json.loads(body)
                 if not isinstance(layout_data, dict):
@@ -1502,9 +1533,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/club":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 data = json.loads(body)
             except Exception:
@@ -1519,9 +1547,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             payload, code = obs_state.set_selected_club(data.get("club"))
             self.send_json(payload, code=code)
         elif parsed_path == "/api/combine":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 data = json.loads(body)
             except Exception:
@@ -1536,9 +1561,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             ok = pressure_manager.tare()
             self.send_json({"status": "ok" if ok else "error"})
         elif parsed_path == "/api/pressure/align_stance":
-            body = self.read_post_body()
-            if body is None:
-                return
             dur = 4.0
             try:
                 data = json.loads(body)
@@ -1548,9 +1570,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             res = pressure_manager.start_stance_alignment(duration_sec=dur)
             self.send_json(res)
         elif parsed_path == "/api/pressure/stance":
-            body = self.read_post_body()
-            if body is None:
-                return
             action = "start"
             try:
                 action = str(json.loads(body).get("action", "start"))
@@ -1561,9 +1580,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self.send_json(pressure_manager.start_stance_width_calibration())
         elif parsed_path == "/api/pressure/simulator":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 data = json.loads(body)
                 enabled = data.get("enabled", True)
@@ -1581,9 +1597,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=500)
         elif parsed_path == "/api/pressure/mode":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 data = json.loads(body)
                 mode = data.get("mode", "single")
@@ -1592,9 +1605,6 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/pressure/assign":
-            body = self.read_post_body()
-            if body is None:
-                return
             try:
                 data = json.loads(body)
                 action = data.get("action", "start")
@@ -1645,6 +1655,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:

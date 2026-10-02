@@ -32,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest numpy opencv-python-headless
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk xvfb xauth
 
       - name: Run tests
         env:
@@ -42,7 +42,11 @@ jobs:
           # Upstream's real-session-history regression test intentionally reads
           # a non-versioned local user-data file. Run every repository-backed
           # test in CI while leaving that local-only diagnostic test untouched.
-          python -m pytest -q -k "not test_the_gate_on_the_real_session_history"
+          xvfb-run -a -s "-screen 0 1920x1080x24" sh -c '
+            python -c "import tkinter as tk; root = tk.Tk(); root.update(); root.destroy()" &&
+            python -m pytest -q -ra -k "not test_the_gate_on_the_real_session_history"
+          '
+
 
   build:
     name: Build on ${{ matrix.os }}
@@ -84,12 +88,13 @@ jobs:
             --icon assets/shanktuary_shield.png \
             --paths src/ui/_legacy \
             --add-data "assets:assets" \
+            --add-data "src/analytics/data:src/analytics/data" \
             shanktuary_app.py
 
       - name: Build Executable with PyInstaller (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --noconfirm --onedir --windowed --name shanktuary_performance_studio --icon assets/shanktuary_shield.png --paths src/ui/_legacy --add-data "assets;assets" shanktuary_app.py
+          pyinstaller --noconfirm --onedir --windowed --name shanktuary_performance_studio --icon assets/shanktuary_shield.png --paths src/ui/_legacy --add-data "assets;assets" --add-data "src/analytics/data;src/analytics/data" shanktuary_app.py
 
       - name: Package Linux Tarball & AppImage
         if: runner.os == 'Linux'

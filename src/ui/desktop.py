@@ -133,8 +133,8 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
 
     def _toggle_design_sidebar(self):
         self.sidebar_collapsed = not bool(getattr(self, "sidebar_collapsed", False))
-        self.show_session_menu = False
-        self.show_filter_menu = False
+        self.show_session_dropdown = False
+        self.show_filter_dropdown = False
         self.show_club_menu = False
         self.show_tools_menu = False
         self.sidebar_width = 300

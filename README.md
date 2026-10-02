@@ -142,3 +142,32 @@ The WebGPU 3D Driving Range ships the following models under
 * **"Wooden Sign With Roof"** — [KenVeel](https://sketchfab.com/KenVeel) · [source](https://sketchfab.com/3d-models/wooden-sign-with-roof-d3c14c892ce54564b7fde91c73896ca3)
 
 Rendering uses [three.js](https://threejs.org) (MIT).
+
+
+## Saved data and upgrades
+
+Shot history, My Bag, and captured pressure traces are stored in a writable,
+per-user directory, independent of the installation or AppImage mount:
+
+- Linux: `$XDG_DATA_HOME/shanktuary`, or `~/.local/share/shanktuary`
+- Windows: `%LOCALAPPDATA%\shanktuary`
+- macOS: `~/Library/Application Support/shanktuary`
+
+History and bag settings are in `shanktuary_session_history.json`; pressure
+traces are in the adjacent `pressure_traces/` directory. The desktop app and
+browser APIs use the same history file. Overlay layout settings retain their
+existing location at `~/.config/shanktuary/overlay_layout.json`.
+
+On first launch after upgrading, the app copies legacy history and traces from
+beside the source/executable (or AppImage file) when no current history exists.
+Missing Index/Combine history and pressure-trace files are also copied on
+later launches, allowing interrupted upgrades to resume. It leaves originals
+untouched and never overwrites existing destination files.
+Launch the updated app once before using `bag_transfer.py`, which now defaults
+to this same user-data directory; `--file` still selects an explicit file.
+
+A migration or history-save failure appears in a dialog and persistent status
+banner. Fix storage permissions or free space and retry; restart after a
+migration/load error. History saves are blocked when necessary to protect
+unreadable or unmigrated data. Back up the entire data directory before moving
+it to another machine.

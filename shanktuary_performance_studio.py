@@ -58,6 +58,12 @@ from src.processing.pressure import (
     derive_pressure_metrics,
     shot_trace_id,
 )
+from user_data import (
+    atomic_write_json,
+    get_data_dir,
+    legacy_data_dirs,
+    prepare_data_dir,
+)
 
 # Configuration & Logging
 FALLBACK_NOVA_HOST = "192.168.40.249"
@@ -77,11 +83,10 @@ if sys.platform == "win32":
 
 if getattr(sys, "frozen", False):
     BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-    DATA_DIR = os.path.dirname(sys.executable)
 else:
     BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_DIR = BUNDLE_DIR
 
+DATA_DIR = str(get_data_dir())
 SCRIPT_DIR = BUNDLE_DIR
 SESSION_LOG_PATH = os.path.join(DATA_DIR, "shanktuary_session_history.json")
 
@@ -435,8 +440,17 @@ def load_bag_specs_for_splash():
     get_bag_club(). Returns {} on any problem — the splash then shows plain
     club names rather than failing or inventing gear.
     """
+    history_path = SESSION_LOG_PATH
+    if not os.path.exists(history_path):
+        # Preview legacy bag specs read-only; the desktop performs migration
+        # later and reports any failures without the splash hiding them.
+        for directory in legacy_data_dirs():
+            candidate = directory / "shanktuary_session_history.json"
+            if candidate.is_file():
+                history_path = str(candidate)
+                break
     try:
-        with open(SESSION_LOG_PATH, "r", encoding="utf-8") as f:
+        with open(history_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return {}
@@ -842,6 +856,13 @@ class ShanktuaryApp:
         self.root.after(33, self.poll_pressure_stream)
 
         self.current_shot = None
+        self._history_save_blocked = False
+        try:
+            prepare_data_dir(get_data_dir(), legacy_data_dirs())
+        except Exception as exc:
+            self._history_save_blocked = True
+            self._report_persistence_error(f"Could not migrate saved history: {exc}. "
+                                           "Original files are unchanged. Restart after fixing the problem.")
         self.load_session_history()
         # Select the most recent shot on launch. Without this the app starts
         # with nothing selected, so Overview -- the landing view -- renders its
@@ -917,9 +938,19 @@ class ShanktuaryApp:
         payload must be preserved when forwarding, and shots recorded before a
         user calibrated have to be corrected too.
         """
-        if not shot or not self.aim_offset_deg:
-            return shot
-        return apply_aim(shot, self.aim_offset_deg)
+        # Normalize optional objects only in this read-time copy. Old history
+        # and native events can contain null/malformed nested objects.
+        if not isinstance(shot, dict):
+            return {}
+        view = dict(shot)
+        ogc = shot.get("open_golf_coach")
+        ogc = dict(ogc) if isinstance(ogc, dict) else {}
+        us = ogc.get("us_customary_units")
+        ogc["us_customary_units"] = dict(us) if isinstance(us, dict) else {}
+        view["open_golf_coach"] = ogc
+        if not self.aim_offset_deg:
+            return view
+        return apply_aim(view, self.aim_offset_deg)
 
     def get_active_session(self):
         if not self.sessions:
@@ -1385,12 +1416,14 @@ class ShanktuaryApp:
             # Preserve the unreadable file for recovery — the next save would
             # otherwise silently overwrite possibly-recoverable data.
             try:
-                backup = f"{SESSION_LOG_PATH}.corrupt-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                backup = f"{SESSION_LOG_PATH}.corrupt-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
                 os.replace(SESSION_LOG_PATH, backup)
                 print(f"[!] Unreadable history preserved at: {backup}")
                 self.copy_feedback = "⚠ History file unreadable — backup saved"
-            except OSError:
-                pass
+            except OSError as backup_error:
+                self._history_save_blocked = True
+                self._report_persistence_error(f"Unreadable history could not be backed up: {backup_error}. "
+                                               "Saving is blocked to protect the original file.")
             if not self.bag:
                 self.init_default_bag()
 
@@ -1405,16 +1438,32 @@ class ShanktuaryApp:
                 "balls": list(getattr(self, "balls", []) or []),
                 "current_ball": getattr(self, "current_ball", None),
             }
-            # Atomic write: serialize to a temp file, then swap into place so
-            # a crash mid-write can never truncate the whole history.
-            tmp_path = SESSION_LOG_PATH + ".tmp"
-            with open(tmp_path, "w") as f:
-                json.dump(payload, f, indent=2)
-            os.replace(tmp_path, SESSION_LOG_PATH)
+            if getattr(self, "_history_save_blocked", False):
+                raise OSError("History saving is blocked to protect existing data; restart after fixing the load/migration error")
+            atomic_write_json(SESSION_LOG_PATH, payload)
+            self.persistence_error = None
+            if getattr(self, "copy_feedback", "") == "⚠ Data not saved — check storage permissions/free space":
+                self.copy_feedback = None
+            self._last_persistence_dialog = None
         except Exception as e:
-            print(f"[!] Error saving session: {e}")
+            self._report_persistence_error(f"History was not saved: {e}. Destination: {SESSION_LOG_PATH}")
+            return False
         self._record_index_snapshot()
         self._record_combine_run()
+        return True
+
+    def _report_persistence_error(self, message):
+        """Keep failures visible even in windowed builds with no terminal."""
+        self.persistence_error = message
+        self.copy_feedback = "⚠ Data not saved — check storage permissions/free space"
+        print(f"[!] {message}")
+        if getattr(self, "_last_persistence_dialog", None) == message:
+            return
+        self._last_persistence_dialog = message
+        root = getattr(self, "root", None)
+        if root is not None:
+            from tkinter import messagebox
+            root.after(0, lambda: messagebox.showerror("Saved data needs attention", message, parent=root))
 
     def _record_index_snapshot(self):
         """Append today's Index to the progress series after every save.
@@ -2979,7 +3028,11 @@ class ShanktuaryApp:
             if not isinstance(msg, dict):
                 return msg
             ogc = msg.get("open_golf_coach", {})
-            ogc = ogc if isinstance(ogc, dict) else {}
+            if not isinstance(ogc, dict):
+                issues.append("open_golf_coach is not an object")
+                ogc = {}
+            if not isinstance(ogc.get("us_customary_units", {}), dict):
+                issues.append("us_customary_units is not an object")
 
             total_spin = msg.get("total_spin_rpm", ogc.get("total_spin_rpm"))
             if total_spin is not None and float(total_spin) < 0.0:
@@ -3000,93 +3053,98 @@ class ShanktuaryApp:
             return msg
         return msg
 
+    def _process_queued_shot(self, msg):
+        if not isinstance(msg, dict):
+            raise ValueError("shot payload must be an object")
+        if msg.get("_source") == "gspro":
+            # GSPro reports its own club string (from ITS bag config,
+            # e.g. "7i"). Trust it when it matches a real SPS bag
+            # entry; otherwise fall back to the current selection —
+            # never invent a phantom club name.
+            gspro = msg.get("_gspro")
+            raw_club = gspro.get("club") if isinstance(gspro, dict) else None
+            matched = None
+            if raw_club:
+                bag_names = [c.get("name", "") for c in self.bag]
+                matched = match_gspro_club(raw_club, bag_names)
+            club_name = matched or self.current_club
+        else:
+            # Nova doesn't report the club — SPS's selection is truth.
+            club_name = self.current_club
+        msg["club"] = club_name
+        msg["club_color"] = self.get_club_color(club_name)
+        self._stamp_equipment(msg)
+        msg["timestamp"] = datetime.now().strftime("%I:%M %p")
+        self.nova_connected = True
+        self.validate_shot_payload(msg)
+        self.verify_ogc_model_sync(msg)
+
+        sess = self.get_active_session()
+        sess["shots"].append(msg)
+        self.selected_shot_index = len(sess["shots"]) - 1
+        self.current_shot = msg
+        self.save_session_to_file()
+
+        # Aim calibration collects raw start lines. The shot is stored
+        # uncorrected either way -- calibration reads the device's own
+        # frame, which is exactly the bias being measured.
+        if self.aim_calibrating:
+            self.aim_calib_shots.append(msg)
+            if len(self.aim_calib_shots) >= MIN_CALIBRATION_SHOTS:
+                self.finish_aim_calibration()
+
+
+        # Push a COPY to the OBS server: its pressure-capture callback
+        # mutates the pushed dict from another thread (adds
+        # pressure_trace), which would race with json.dump of the
+        # session file and pollute stored history.
+        try:
+            obs_server.obs_state.push_shot(dict(msg))
+        except Exception as e:
+            print(f"[!] OBS push note: {e}")
+
+        self.draw_screen()
+
     def poll_queue(self):
+        # One malformed event or failing renderer must not disable acquisition
+        # or prevent later shots/control messages from being handled.
         try:
-            while True:
-                msg = shot_queue.get_nowait()
-                if msg.get("_source") == "gspro":
-                    # GSPro reports its own club string (from ITS bag config,
-                    # e.g. "7i"). Trust it when it matches a real SPS bag
-                    # entry; otherwise fall back to the current selection —
-                    # never invent a phantom club name.
-                    raw_club = (msg.get("_gspro") or {}).get("club")
-                    matched = None
-                    if raw_club:
-                        bag_names = [c.get("name", "") for c in self.bag]
-                        matched = match_gspro_club(raw_club, bag_names)
-                    club_name = matched or self.current_club
-                else:
-                    # Nova doesn't report the club — SPS's selection is truth.
-                    club_name = self.current_club
-                msg["club"] = club_name
-                msg["club_color"] = self.get_club_color(club_name)
-                self._stamp_equipment(msg)
-                msg["timestamp"] = datetime.now().strftime("%I:%M %p")
-                self.nova_connected = True
-                self.validate_shot_payload(msg)
-                self.verify_ogc_model_sync(msg)
-                
-                sess = self.get_active_session()
-                sess["shots"].append(msg)
-                self.selected_shot_index = len(sess["shots"]) - 1
-                self.current_shot = msg
-                self.save_session_to_file()
+            for pending, handler in (
+                (shot_queue, self._process_queued_shot),
+                (club_select_queue, self.apply_range_club),
+                (combine_queue, self.apply_range_combine),
+            ):
+                while True:
+                    try:
+                        msg = pending.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        handler(msg)
+                    except Exception as exc:
+                        print(f"[!] Queued event could not be processed: {exc}")
+            # Repaint when hardware connection state changes, not only when a
+            # shot lands. The worker threads update nova_status/gspro_status from
+            # the background, and Nova typically connects ~0.5s AFTER the first
+            # paint — so without this the UI kept showing "disconnected" forever
+            # even though shots would have arrived fine. Cheap: a tuple compare
+            # every 100ms, and draw_screen() only when it actually differs.
+            try:
+                status_now = (
+                    nova_status.get("connected", False),
+                    nova_status.get("host", ""),
+                    gspro_status.get("enabled", False),
+                    gspro_status.get("connected", False),
+                    gspro_status.get("db_found", False),
+                )
+                if status_now != getattr(self, "_last_conn_status", None):
+                    self._last_conn_status = status_now
+                    self.draw_screen()
+            except Exception:
+                pass
 
-                # Aim calibration collects raw start lines. The shot is stored
-                # uncorrected either way -- calibration reads the device's own
-                # frame, which is exactly the bias being measured.
-                if self.aim_calibrating:
-                    self.aim_calib_shots.append(msg)
-                    if len(self.aim_calib_shots) >= MIN_CALIBRATION_SHOTS:
-                        self.finish_aim_calibration()
-
-
-                # Push a COPY to the OBS server: its pressure-capture callback
-                # mutates the pushed dict from another thread (adds
-                # pressure_trace), which would race with json.dump of the
-                # session file and pollute stored history.
-                try:
-                    obs_server.obs_state.push_shot(dict(msg))
-                except Exception as e:
-                    print(f"[!] OBS push note: {e}")
-
-                self.draw_screen()
-        except queue.Empty:
-            pass
-
-        try:
-            while True:
-                self.apply_range_club(club_select_queue.get_nowait())
-        except queue.Empty:
-            pass
-
-        try:
-            while True:
-                self.apply_range_combine(combine_queue.get_nowait())
-        except queue.Empty:
-            pass
-
-        # Repaint when hardware connection state changes, not only when a
-        # shot lands. The worker threads update nova_status/gspro_status from
-        # the background, and Nova typically connects ~0.5s AFTER the first
-        # paint — so without this the UI kept showing "disconnected" forever
-        # even though shots would have arrived fine. Cheap: a tuple compare
-        # every 100ms, and draw_screen() only when it actually differs.
-        try:
-            status_now = (
-                nova_status.get("connected", False),
-                nova_status.get("host", ""),
-                gspro_status.get("enabled", False),
-                gspro_status.get("connected", False),
-                gspro_status.get("db_found", False),
-            )
-            if status_now != getattr(self, "_last_conn_status", None):
-                self._last_conn_status = status_now
-                self.draw_screen()
-        except Exception:
-            pass
-
-        self.root.after(100, self.poll_queue)
+        finally:
+            self.root.after(100, self.poll_queue)
 
     def apply_range_club(self, club):
         """Apply a club selected on the range. Tk thread only.
@@ -3130,7 +3188,9 @@ class ShanktuaryApp:
                     # Shot may have been cleared, or the session switched
                     # during the 3s capture. Keep the trace anyway; it is
                     # still valid data and costs nothing to leave on disk.
-                    self.trace_store.save(shot_id, frames)
+                    if not self.trace_store.save(shot_id, frames):
+                        self._report_persistence_error(
+                            "Pressure trace was not saved; check storage permissions/free space")
                     continue
 
                 metrics = derive_pressure_metrics(frames)
@@ -3147,6 +3207,9 @@ class ShanktuaryApp:
                     self.save_session_to_file()
                     if self.current_shot is shot:
                         self.draw_screen()
+                if not path:
+                    self._report_persistence_error(
+                        "Pressure trace was not saved; check storage permissions/free space")
         except queue.Empty:
             pass
         self.root.after(250, self.poll_pressure_traces)
@@ -3571,7 +3634,7 @@ class ShanktuaryApp:
 
         # 0a'. Click-to-mark on the Shot/Quad clubface (training labels).
         if self.view_mode in (9, 1) and not (self.show_club_menu or self.show_tools_menu
-                                             or self.show_session_menu or self.show_filter_menu):
+                                             or self.show_session_dropdown or self.show_filter_dropdown):
             from src.ui.contact_panel import handle_face_click
             if handle_face_click(self, event.x, event.y):
                 return
@@ -5445,6 +5508,11 @@ class ShanktuaryApp:
             ty2 = ty1 + 38
             self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill=theme.ACCENT_DEEP, outline="")
             self.canvas.create_text((tx1 + tx2) // 2, (ty1 + ty2) // 2, text=msg, fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 9), anchor="center")
+
+        if getattr(self, "persistence_error", None):
+            self.canvas.create_rectangle(0, h - 32, w, h, fill=theme.ACCENT_DEEP, outline="")
+            self.canvas.create_text(12, h - 16, anchor="w", fill=theme.ACCENT_TEXT,
+                                    text=self.persistence_error, font=(theme.ui_font(), 10))
 
     def draw_3d_range_viewport(self, avail_w, h, carry_yds, total_yds, ball_speed, club_speed, apex_yds, offline_yds, total_spin, vert_launch, horiz_launch, offset_x=0):
         self.range_launch_web_rect = None
@@ -9215,6 +9283,9 @@ class ShanktuaryApp:
         # Tracked so it can be cancelled: an uncancelled repeat fires into a
         # destroyed window ("invalid command name ...draw_screen") and keeps
         # repainting a modal that is no longer on screen.
+        # A click/resize/pressure repaint can arrive before the pending tick.
+        # Replace that tick instead of multiplying perpetual repaint chains.
+        self._stop_pairing_animation()
         if st["phase"] in ("prompt", "searching"):
             try:
                 # Faster while searching: the elapsed counter has to visibly

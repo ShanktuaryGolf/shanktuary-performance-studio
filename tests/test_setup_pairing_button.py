@@ -40,7 +40,7 @@ def app(tmp_path, monkeypatch):
     root.geometry("1915x1111")
 
     application = ShanktuaryDesktopApp(root)
-    root.update()
+    _pump_events(root)
 
     yield root, application, studio
 
@@ -55,19 +55,26 @@ def _texts(application):
     return [c.itemcget(i, "text") for i in c.find_all() if c.type(i) == "text"]
 
 
+def _pump_events(root):
+    # Process a bounded batch: a live repaint loop can keep update() draining
+    # events forever on a slow display while the mock waits for this test.
+    import _tkinter
+    for _ in range(20):
+        if not root.tk.dooneevent(_tkinter.DONT_WAIT):
+            break
+
+
 def _open_setup(root, application):
     application.view_mode = 10
     application.draw_screen()
-    for _ in range(5):
-        root.update()
+    _pump_events(root)
 
 
 def _click(root, application, rect):
     ev = tk.Event()
     ev.x, ev.y = int((rect[0] + rect[2]) // 2), int((rect[1] + rect[3]) // 2)
     application.handle_mouse_press(ev)
-    for _ in range(5):
-        root.update()
+    _pump_events(root)
 
 
 def test_setup_page_has_a_pairing_button(app):
@@ -193,7 +200,7 @@ def test_copy_pin_warns_instead_of_pasting_a_truncated_pin(app, monkeypatch):
     )
 
 
-def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
+def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch, request):
     """Each confirm starts a ~10s Bluetooth inquiry on a worker thread. A real
     run showed an impatient user stacking seven of them on one radio, which
     produced interleaved, contradictory log output as they fought each other.
@@ -210,10 +217,11 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
 
     started = []
     release = threading.Event()
+    request.addfinalizer(release.set)
 
     def _slow_pair(**kwargs):
         started.append(1)
-        release.wait(timeout=5)
+        release.wait()
         return {"success": True, "message": "paired", "address": "001E35AABBCC",
                 "radio_address": "38FC983BB4DC", "method": "callback",
                 "boards_seen": 1}
@@ -229,19 +237,26 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
     _click(root, application, application.setup_pair_rect)
     assert application.show_pairing_modal
 
+    # Retain the flow: successful UI completion may clear its app reference.
+    flow = application.pairing_flow
     # Hammer the action button: the first click confirms SYNC, the rest must
     # not launch more searches.
     rect = application.pairing_action_rect
     assert rect
     for _ in range(5):
-        _click(root, application, rect)
+        event = tk.Event()
+        event.x = int((rect[0] + rect[2]) // 2)
+        event.y = int((rect[1] + rect[3]) // 2)
+        # The click handler paints synchronously. Do not drain the live
+        # animation timers while this mock is deliberately held in flight.
+        application.handle_mouse_press(event)
+        assert application.pairing_action_rect is None
         time.sleep(0.02)
 
     for _ in range(20):
         if started:
             break
         time.sleep(0.05)
-        root.update()
 
     assert len(started) == 1, (
         f"{len(started)} concurrent pairing attempts were started"
@@ -249,11 +264,13 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch):
 
     release.set()
     for _ in range(40):
-        if application.pairing_flow.status()["phase"] == "done":
+        if flow.status()["phase"] == "done":
             break
         time.sleep(0.05)
-        root.update()
 
-    assert application.pairing_flow.status()["phase"] == "done", (
+    assert flow.status()["phase"] == "done", (
         "flow never completed; the prompt would be stuck"
     )
+    application.draw_screen()
+    assert application.pairing_action_rect is not None
+    assert len(started) == 1

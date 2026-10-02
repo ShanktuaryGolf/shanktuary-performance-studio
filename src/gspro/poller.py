@@ -28,6 +28,8 @@ Nova WebSocket worker does.
 import os
 import sqlite3
 import time
+from contextlib import ExitStack, closing, contextmanager
+from tempfile import TemporaryDirectory
 
 from .locate import locate_gspro_database_path
 from .mapper import is_complete, map_gspro_range_shot_to_sps_payload, parse_shot_row
@@ -65,38 +67,29 @@ def _copy_with_wal(db_path, tmp_dir):
     return copied[0]
 
 
+@contextmanager
 def _connect_readonly(db_path):
-    """Open GSPro.db read-only without touching the live file.
+    """Yield a read-only connection, then close it and remove any temp copy.
 
-    Uses a URI so SQLite never creates -wal/-shm side effects on our end.
-    If that open fails (e.g. the file is mid-checkpoint), fall back to
+    If the live open fails (e.g. the file is mid-checkpoint), fall back to
     copying db+wal+shm into a temp dir and reading the copy — SimRead's
-    approach, which also sees uncheckpointed WAL rows.
+    approach, which also sees uncheckpointed WAL rows. The temporary
+    directory is removed even if copying, opening, or querying fails.
     """
     uri = "file:" + db_path.replace(" ", "%20") + "?mode=ro"
-    try:
-        return sqlite3.connect(uri, uri=True, timeout=1.0)
-    except sqlite3.Error:
-        import tempfile
-
-        tmp_dir = tempfile.mkdtemp(prefix="sps_gspro_")
-        copy_path = _copy_with_wal(db_path, tmp_dir)
-        conn = sqlite3.connect(
-            "file:" + copy_path.replace(" ", "%20") + "?mode=ro", uri=True, timeout=1.0
-        )
-        # Close the temp dir once this connection closes (best effort).
-        original_close = conn.close
-
-        def close_and_cleanup():
-            try:
-                original_close()
-            finally:
-                import shutil
-
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-
-        conn.close = close_and_cleanup  # type: ignore[method-assign]
-        return conn
+    with ExitStack() as stack:
+        try:
+            conn = sqlite3.connect(uri, uri=True, timeout=1.0)
+        except sqlite3.Error:
+            tmp_dir = stack.enter_context(TemporaryDirectory(prefix="sps_gspro_"))
+            copy_path = _copy_with_wal(db_path, tmp_dir)
+            conn = sqlite3.connect(
+                "file:" + copy_path.replace(" ", "%20") + "?mode=ro", uri=True, timeout=1.0
+            )
+        # Register after the directory so SQLite releases its files first
+        # (required on Windows). Never replace Connection.close: it is read-only.
+        stack.enter_context(closing(conn))
+        yield conn
 
 
 def read_latest(db_path=None, limit=1):
@@ -110,8 +103,7 @@ def read_latest(db_path=None, limit=1):
     if not os.path.isfile(db_path):
         raise FileNotFoundError(f"GSPro.db not found at {db_path}")
 
-    conn = _connect_readonly(db_path)
-    try:
+    with _connect_readonly(db_path) as conn:
         cur = conn.execute(
             "SELECT ID, DateCreated, ShotData FROM DrivingRangeShot ORDER BY ID DESC LIMIT ?",
             (limit,),
@@ -124,8 +116,6 @@ def read_latest(db_path=None, limit=1):
                 raise ValueError("DrivingRangeShot.ShotData was not text JSON")
             rows.append({"id": row_id, "date_created": date_created, "shot_data": shot_data})
         return rows
-    finally:
-        conn.close()
 
 
 class GsproPoller:

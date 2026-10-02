@@ -444,3 +444,16 @@ class TestSetupEntryPoint:
         assert captured.get("n") == 2, (
             "dual-plate setup should walk the user through both boards"
         )
+
+
+def test_repeated_modal_redraws_keep_one_animation_timer(app, monkeypatch):
+    root, application, _ = app
+    before = set(root.tk.call("after", "info"))
+    _install_flow(application, 1, [BOARD_1], monkeypatch)
+    for _ in range(5):
+        application.draw_pairing_modal(1600, 950)
+        pending = set(root.tk.call("after", "info")) - before
+        assert pending == {application._pairing_anim_id}
+    application._stop_pairing_animation()
+    assert set(root.tk.call("after", "info")) == before
+    assert application._pairing_anim_id is None
