@@ -111,8 +111,8 @@ class FakePM:
 
 @pytest.fixture
 def app_and_pm():
-    import shanktuary_performance_studio as studio
     import obs_server
+    import shanktuary_performance_studio as studio
 
     try:
         root = tk.Tk()
@@ -230,9 +230,11 @@ def test_one_board_refusal_surfaces_instead_of_a_dead_prompt(app_and_pm):
     assert "2 boards" in app.setup_flow_error
 
 
-def test_modal_renders_every_step_without_overlapping_text(app_and_pm):
+@pytest.mark.parametrize("tk_scaling", [1.0, 4 / 3, 2.0])
+def test_modal_renders_every_step_without_overlapping_text(app_and_pm, tk_scaling):
     """The room-readable prompt must stay legible on all three steps."""
     app, pm, studio = app_and_pm
+    app.root.tk.call("tk", "scaling", tk_scaling)
     app.start_guided_setup()
     w, h = 1600, 900
 
