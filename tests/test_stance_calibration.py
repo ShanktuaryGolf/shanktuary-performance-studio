@@ -13,6 +13,11 @@ class TestStanceCalibration(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.cal_file = os.path.join(self.tmp_dir.name, "wbb_calibration.json")
+        # A finished alignment calls _save_calibration() with no path, which
+        # wrote this test's multipliers over the user's real calibration.
+        p = patch("obs_server.CALIBRATION_FILE", self.cal_file)
+        p.start()
+        self.addCleanup(p.stop)
 
     def tearDown(self):
         self.tmp_dir.cleanup()

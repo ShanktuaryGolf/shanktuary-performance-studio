@@ -12,7 +12,15 @@ TEST_PORT = 9334
 class TestDualPressureIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # The mode/wizard/assign routes persist via _save_calibration(), which
+        # defaults to the user's real ~/.shanktuary/wbb_calibration.json.
+        # Running the suite used to rewrite it.
+        import tempfile
+        cls._cal_dir = tempfile.TemporaryDirectory()
+        cls._real_cal = obs_server.CALIBRATION_FILE
+        obs_server.CALIBRATION_FILE = f"{cls._cal_dir.name}/wbb_calibration.json"
         cls.server_thread = obs_server.launch_obs_server_thread(port=TEST_PORT)
+        cls.addClassCleanup(cls._restore_calibration_path)
         for _ in range(30):
             try:
                 res = urllib.request.urlopen(f"http://127.0.0.1:{TEST_PORT}/api/pressure/status", timeout=1)
@@ -20,6 +28,11 @@ class TestDualPressureIntegration(unittest.TestCase):
                     break
             except Exception:
                 time.sleep(0.1)
+
+    @classmethod
+    def _restore_calibration_path(cls):
+        obs_server.CALIBRATION_FILE = cls._real_cal
+        cls._cal_dir.cleanup()
 
     def test_mode_get_and_post(self):
         # GET mode
