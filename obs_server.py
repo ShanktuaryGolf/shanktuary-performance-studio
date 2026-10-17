@@ -457,6 +457,7 @@ class OBSState:
                         print(f"[!] Pressure trace listener error: {e}")
 
             pm.buffer.trigger_shot_impact(callback=on_pressure_captured)
+            pm.notify_shot()
 
         # latest_shot above stays native; only the outbound copy is corrected.
         self.broadcast({"type": "shot", "data": self.aim_corrected(shot_data)})
@@ -570,6 +571,14 @@ def board_id_to_bytes(value):
 class PressureManager:
     """Manages Wii Balance Board hardware, simulator, and 60Hz telemetry broadcasting."""
 
+    # Class-level defaults so a manager built without __init__ (tests do
+    # this) or one whose init failed part-way still behaves as Wii-boards-only.
+    pressure_source = "wbb"
+    openfp_url = None
+    _env_source_override = False
+    _saved_source = "wbb"
+    _saved_openfp_url = None
+
     def __init__(self):
         self.backend = None
         self.cop_calc = None
@@ -579,6 +588,16 @@ class PressureManager:
         self.tare_offsets = None
         self.is_simulator = False
         self.board_mode = "single"  # "single" or "dual"
+        # Which hardware feeds the pipeline: "wbb" (Wii Balance Boards, set up
+        # by board_mode/assignment) or "openfp" (open-fp plates on the LAN,
+        # always two plates, nothing to pair or assign).
+        self.pressure_source = "wbb"
+        self.openfp_url = None
+        # 50/50 multipliers and stance width describe the HARDWARE they were
+        # measured on: Wii boards' uneven split must not be applied to
+        # calibrated open-fp plates. Kept per source; the live attributes
+        # (balance_multiplier, stance_width_mm) hold the active source's.
+        self._per_source_cal = {}
         self.assigned_left = None
         self.assigned_right = None
         self.assignment_wizard = None
@@ -604,6 +623,15 @@ class PressureManager:
         # the calling thread outright on those paths.
         self.lock = threading.RLock()
         self._load_calibration()
+        # SPS_OPENFP_URL selects open-fp for this run without touching the
+        # saved setting (handy for pointing at open-fp's desktop simulator).
+        env_url = os.environ.get("SPS_OPENFP_URL", "").strip()
+        self._env_source_override = bool(env_url)
+        self._saved_source = self.pressure_source
+        self._saved_openfp_url = self.openfp_url
+        if env_url:
+            self.openfp_url = env_url
+            self._activate_source_cal("openfp")
         self._init_subsystem()
 
     def _init_subsystem(self):
@@ -656,7 +684,15 @@ class PressureManager:
 
                 # 0. Hardware auto-reconnect if not in simulator mode, no backend open, and wizard not active
                 is_wiz_active = bool(wiz and wiz.phase in ("waiting_left", "waiting_right"))
-                if not self.is_simulator and not is_wiz_active and (not backend or not backend.is_open):
+                # A backend that reconnects on its own thread (open-fp) is
+                # left alone while that thread runs: rebuilding it every 2 s
+                # would abort each connection attempt before it could land.
+                self_managed = bool(
+                    backend is not None
+                    and getattr(type(backend), "SELF_RECONNECTS", False)
+                    and getattr(backend, "is_running", False))
+                if (not self.is_simulator and not is_wiz_active and not self_managed
+                        and (not backend or not backend.is_open)):
                     now = time.time()
                     if now - self._last_reconnect_attempt >= 2.0:
                         self._last_reconnect_attempt = now
@@ -708,10 +744,19 @@ class PressureManager:
                     # so holding the lock here costs microseconds.
                     with self.lock:
                         if self.backend is backend and backend.is_open:
-                            reading = backend.read()
+                            # Batched sources (open-fp delivers ~3 samples per
+                            # 33 ms push) hand over everything queued; one
+                            # read() per pass would cut them to the push rate.
+                            # Looked up on the CLASS so a Mock test double
+                            # (which grows any attribute) keeps using read().
+                            drain = getattr(type(backend), "read_all", None)
+                            readings = (drain(backend) if drain
+                                        else [backend.read()])
                         else:
-                            reading = None
-                    if reading:
+                            readings = []
+                    for reading in readings:
+                        if not reading:
+                            continue
                         self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
 
@@ -802,6 +847,20 @@ class PressureManager:
                 "assigned_right": board_id_to_text(self.assigned_right) if self.assigned_right else None,
                 "balance_multiplier": self.balance_multiplier,
                 "stance_width_mm": self.stance_width_mm,
+                # An SPS_OPENFP_URL run must not rewrite the saved choice.
+                "pressure_source": (self._saved_source
+                                    if getattr(self, "_env_source_override", False)
+                                    else self.pressure_source),
+                "openfp_url": (self._saved_openfp_url
+                               if getattr(self, "_env_source_override", False)
+                               else self.openfp_url),
+                "calibration_by_source": {
+                    **getattr(self, "_per_source_cal", {}),
+                    self.pressure_source: {
+                        "balance_multiplier": self.balance_multiplier,
+                        "stance_width_mm": self.stance_width_mm,
+                    },
+                },
             }
             with open(fp, "w") as f:
                 json.dump(data, f, indent=2)
@@ -821,6 +880,29 @@ class PressureManager:
                     self.stance_width_mm = float(data["stance_width_mm"])
                 if "board_mode" in data:
                     self.board_mode = data["board_mode"]
+                if data.get("openfp_url"):
+                    self.openfp_url = str(data["openfp_url"])
+                # Files written before open-fp support hold only top-level
+                # values, which were measured on Wii boards.
+                by_source = data.get("calibration_by_source")
+                if not isinstance(by_source, dict):
+                    by_source = {"wbb": {"balance_multiplier": self.balance_multiplier,
+                                         "stance_width_mm": self.stance_width_mm}}
+                self._per_source_cal = {
+                    k: dict(v) for k, v in by_source.items()
+                    if k in ("wbb", "openfp") and isinstance(v, dict)}
+                src_saved = data.get("pressure_source")
+                if src_saved not in ("wbb", "openfp"):
+                    src_saved = "wbb"
+                active = self._per_source_cal.get(src_saved, {})
+                bm = active.get("balance_multiplier")
+                if isinstance(bm, list) and len(bm) == 2:
+                    self.balance_multiplier = [float(bm[0]), float(bm[1])]
+                else:
+                    self.balance_multiplier = [1.0, 1.0]
+                sw = active.get("stance_width_mm")
+                self.stance_width_mm = float(sw) if sw is not None else None
+                self.pressure_source = src_saved
                 # Restore the physical left/right binding. _save_calibration
                 # has always written these, but nothing read them back, so a
                 # dual setup silently reverted to unassigned on every launch
@@ -1012,6 +1094,83 @@ class PressureManager:
                               f"Retrying quietly in the background; further errors suppressed.")
                     return None
 
+    def _create_openfp_backend(self):
+        """open-fp plates over the LAN.
+
+        open() returns at once (we hold self.lock here); the backend connects
+        and reconnects on its own thread. Only a malformed URL fails.
+        """
+        try:
+            from src.hardware.pressure.openfp_backend import OpenFpBackend
+            b = OpenFpBackend(self.openfp_url)
+            b.open()
+            print(f"[+] open-fp: streaming from {b.host}:{b.port} once reachable")
+            return b
+        except Exception as e:
+            print(f"[!] open-fp backend not started ({e}).")
+            return None
+
+    def _activate_source_cal(self, source: str) -> None:
+        """Park the current source's calibration and load `source`'s."""
+        store = getattr(self, "_per_source_cal", None)
+        if store is None:
+            store = self._per_source_cal = {}
+        cur = getattr(self, "pressure_source", "wbb")
+        store[cur] = {"balance_multiplier": list(self.balance_multiplier),
+                      "stance_width_mm": self.stance_width_mm}
+        nxt = store.get(source) or {}
+        self.balance_multiplier = list(nxt.get("balance_multiplier") or [1.0, 1.0])
+        self.stance_width_mm = nxt.get("stance_width_mm")
+        self.pressure_source = source
+
+    def set_pressure_source(self, source: str, url: str | None = None):
+        """Switch between Wii Balance Boards and open-fp plates; persists."""
+        if source not in ("wbb", "openfp"):
+            raise ValueError(f"unknown pressure source {source!r}")
+        if url is not None:
+            from src.hardware.pressure.openfp_backend import parse_url
+            parse_url(url)  # reject garbage before saving it
+        with self.lock:
+            self._env_source_override = False  # an explicit choice wins
+            if source != self.pressure_source:
+                self._activate_source_cal(source)
+            if url is not None:
+                self.openfp_url = url.strip() or None
+            self._set_simulator_unlocked(self.is_simulator)
+            self._save_calibration()
+            return self.get_source_status()
+
+    def get_source_status(self):
+        with self.lock:
+            b = self.backend
+            is_openfp = b is not None and b.__class__.__name__ == "OpenFpBackend"
+            return {
+                "source": self.pressure_source,
+                "openfp_url": self.openfp_url,
+                "connected": bool(b and b.is_open),
+                "openfp": {
+                    "host": f"{b.host}:{b.port}",
+                    "messages": b.messages,
+                    "connects": b.connects,
+                    "protocol_errors": b.protocol_errors,
+                    "clock_offset_s": b.clock.offset,
+                    "last_error": b.last_error,
+                    "board_status": b.board_status,
+                } if is_openfp else None,
+            }
+
+    def notify_shot(self):
+        """Forward a launch-monitor shot to hardware that wants it (open-fp
+        labels impact in its own swing capture). Never raises."""
+        b = self.backend
+        hook = getattr(type(b), "notify_shot", None) if b is not None else None
+        if hook is None:
+            return
+        try:
+            hook(b, time.time() * 1000.0)
+        except Exception as e:
+            print(f"[!] Shot forward to pressure hardware failed: {e}")
+
     def _set_simulator_unlocked(self, enabled: bool):
         """Inner logic — caller MUST already hold self.lock."""
         self.is_simulator = enabled
@@ -1023,6 +1182,8 @@ class PressureManager:
             self.backend = SimulatorBackend()
             try: self.backend.open()
             except Exception: pass
+        elif self.pressure_source == "openfp":
+            self.backend = self._create_openfp_backend()
         else:
             try:
                 if self.board_mode == "dual" and self.assigned_left and self.assigned_right:
@@ -1285,6 +1446,7 @@ class PressureManager:
             return {
                 "connected": self.backend.is_open if self.backend else False,
                 "mode": "simulator" if self.is_simulator else "hardware",
+                "source": self.pressure_source,
                 "board_mode": self.board_mode,
                 "is_dual": self.board_mode == "dual",
                 "assigned_left": board_id_to_text(self.assigned_left) if self.assigned_left else None,
@@ -1405,6 +1567,8 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"status": "error", "message": str(e)}, code=500)
         elif parsed_path == "/api/pressure/mode":
             self.send_json({"board_mode": pressure_manager.board_mode, "is_dual": pressure_manager.board_mode == "dual"})
+        elif parsed_path == "/api/pressure/source":
+            self.send_json(pressure_manager.get_source_status())
         elif parsed_path == "/api/pressure/assign":
             wizard_status = pressure_manager.assignment_wizard.get_status() if pressure_manager.assignment_wizard else {"phase": "idle", "message": ""}
             self.send_json(wizard_status)
@@ -1602,6 +1766,18 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 mode = data.get("mode", "single")
                 new_mode = pressure_manager.set_board_mode(mode)
                 self.send_json({"status": "ok", "board_mode": new_mode})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, code=400)
+        elif parsed_path == "/api/pressure/source":
+            # {"source": "wbb"|"openfp", "url": "http://open-fp.local:7000"}
+            body = self.read_post_body()
+            if body is None:
+                return
+            try:
+                data = json.loads(body)
+                result = pressure_manager.set_pressure_source(
+                    data.get("source", "wbb"), data.get("url"))
+                self.send_json({"status": "ok", **result})
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/pressure/assign":
