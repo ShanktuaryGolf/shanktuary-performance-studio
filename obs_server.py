@@ -42,8 +42,8 @@ from src.processing.pressure.stance import (
 )
 from user_data import HISTORY_NAME, get_data_dir
 
-APP_VERSION = "v1.6.2"
-BUILD_NUMBER = "2026.10.02.1"
+APP_VERSION = "v1.7.0"
+BUILD_NUMBER = "2026.10.17.1"
 OBS_PORT = 9321
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
