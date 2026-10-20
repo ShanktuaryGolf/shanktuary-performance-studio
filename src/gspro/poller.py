@@ -173,6 +173,12 @@ class GsproPoller:
             self._status(f"[gspro] skipping malformed row {row['id']}: {exc}")
             return False
         meta["source"] = "gspro"
+        # GSPro rows carry no shot identity, and shot_trace_id() keys pressure
+        # traces on shotId/timestamp_ns. Without this every GSPro shot's trace
+        # saved as "None.json.gz", each overwriting the last, and no shot could
+        # find its trace for review. Stamped here, not in the mapper, so the
+        # mapper stays a pure function of the row.
+        payload.setdefault("timestamp_ns", time.time_ns())
         try:
             self.on_shot(payload, meta)
             return True
