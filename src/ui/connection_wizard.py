@@ -966,6 +966,9 @@ class ConnectionWizard(SplashScreen):
         self._discovering = True
         self._discovery_generation += 1
         generation = self._discovery_generation
+        # A discovery worker must never own the wizard/Tk objects: closing
+        # during discovery could otherwise finalize them on the worker thread.
+        results = self._discovery_results
 
         def find():
             try:
@@ -974,7 +977,7 @@ class ConnectionWizard(SplashScreen):
                 devices, error = list(discover(timeout=3)), ""
             except Exception as exc:
                 devices, error = [], f"Discovery failed: {exc}"
-            self._discovery_results.put((generation, devices, error))
+            results.put((generation, devices, error))
 
         threading.Thread(target=find, daemon=True).start()
 

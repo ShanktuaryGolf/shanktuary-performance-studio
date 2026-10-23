@@ -272,3 +272,26 @@ def test_network_listening_is_visible():
     w._status = {"state": "listening"}
     w._update_status()
     assert "network listening" in w.status_var.set.call_args.args[0]
+
+
+def test_discovery_worker_does_not_retain_tk_wizard(monkeypatch):
+    import inspect
+    import queue
+
+    targets = []
+    class Thread:
+        def __init__(self, target, daemon):
+            targets.append(target)
+        def start(self):
+            pass
+
+    monkeypatch.setattr("src.ui.connection_wizard.threading.Thread", Thread)
+    w = wizard()
+    w._discovering = False
+    w._discovery_generation = 0
+    w._discovery_results = queue.Queue()
+    w._start_discovery()
+    owned = inspect.getclosurevars(targets[0]).nonlocals
+    assert "self" not in owned
+    assert all(value is not w for value in owned.values())
+    assert owned["results"] is w._discovery_results

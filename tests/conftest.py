@@ -1,4 +1,6 @@
 """GUI tests own every Tk interpreter they create, including setup skips/errors."""
+import gc
+
 import pytest
 
 
@@ -32,3 +34,11 @@ def cleanup_tk_roots(monkeypatch):
         except tk.TclError:
             # Tests are encouraged to destroy their roots themselves too.
             pass
+
+    # Destroyed widgets/images can remain in cycles. Collect them on the Tk
+    # owner thread before the next test starts network workers; otherwise a
+    # worker allocation may finalize a Tcl interpreter on the wrong thread.
+    if roots:
+        del root
+        roots.clear()
+        gc.collect()
