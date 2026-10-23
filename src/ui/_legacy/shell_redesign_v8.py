@@ -7,6 +7,7 @@ import shell_redesign_v4 as v4
 import shell_redesign_v7 as v7
 
 import theme
+from src.connections.presentation import metric_status, metric_value
 
 BLUE = v7.BLUE
 BLUE_LINE = v7.BLUE_LINE
@@ -84,8 +85,22 @@ def paint_sidebar(app, w, h):
         ogc = shot.get("open_golf_coach", {}) or {}
         us = ogc.get("us_customary_units", {}) or {}
         club = str(shot.get("club") or "—")
-        carry = float(us.get("carry_distance_yards") or 0.0)
-        ball = float(us.get("ball_speed_mph") or 0.0)
+        external = shot.get("_source") in ("gspro", "cgp", "open_connect")
+        if external:
+            def metric_text(key, unit):
+                value = metric_value(shot, key)
+                if value is None:
+                    return "--"
+                status = metric_status(shot, key)
+                marker = "~" if status in ("MODELLED", "ESTIMATED") else ""
+                return f"{value:.1f}{marker} {unit}"
+            carry_text = metric_text("carry", "yds")
+            ball_text = metric_text("ball_speed", "mph")
+        else:
+            carry = float(us.get("carry_distance_yards") or 0.0)
+            ball = float(us.get("ball_speed_mph") or 0.0)
+            carry_text = f"{carry:.1f} yds"
+            ball_text = f"{ball:.1f} mph"
         shape = _base._shot_shape(ogc, app) or "—"
         ts = str(shot.get("timestamp") or "—")
 
@@ -103,7 +118,7 @@ def paint_sidebar(app, w, h):
                       font=(v4._font(), 11, "bold"), anchor="w")
         # Carry text is nudged in from the card's right edge to leave the
         # delete ✕ its own hitbox in the corner, rather than overlapping it.
-        c.create_text(x1 - 38, top_cy, text=f"{carry:.1f} yds",
+        c.create_text(x1 - 38, top_cy, text=carry_text,
                       fill=theme.TEXT if selected else theme.TEXT_2,
                       font=(v4._font(), 11, "bold"), anchor="e")
 
@@ -118,7 +133,7 @@ def paint_sidebar(app, w, h):
             # Labels need to be labels, not ghost metadata. Values remain a
             # touch brighter but both sides have comparable weight.
             rows = [
-                ("Ball Speed", f"{ball:.1f} mph"),
+                ("Ball Speed", ball_text),
                 ("Shape", shape),
                 ("Time", ts),
             ]

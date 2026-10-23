@@ -76,3 +76,43 @@ def test_end_to_end_poll_stamps_identity(tmp_path):
     assert got, "poller did not emit the new row"
     assert isinstance(got[0].get("timestamp_ns"), int)
     assert shot_trace_id(got[0]) == str(got[0]["timestamp_ns"])
+
+
+def test_guided_gspro_connection_preserves_trace_identity(tmp_path):
+    """The guided source gate must retain PR4 IDs through pressure persistence."""
+    from queue import Queue
+    from types import SimpleNamespace
+
+    from src.connections.controller import SourceConnections, StudioConnectionSetup
+
+    values = {"source": "gspro", "source_locked": False}
+    def save(**kwargs):
+        values.update(kwargs)
+        return dict(values)
+    settings = SimpleNamespace(load_settings=lambda: dict(values), save_settings=save)
+    shots = Queue()
+    connections = SourceConnections(shots)
+    status = {}
+    setup = StudioConnectionSetup(connections, settings, legacy_status=lambda _: status)
+    setup.start("gspro", {"db_path": str(tmp_path / "GSPro.db")})
+    status["connected"] = True
+    sink = connections.input_queue("gspro")
+    poller = GsproPoller(on_shot=lambda payload, meta: sink.put(payload), db_path="unused.db")
+    try:
+        assert poller._emit(_row(1, 150.0))
+        assert poller._emit(_row(2, 152.0))
+        a, b = shots.get_nowait(), shots.get_nowait()
+        assert connections.accepts(a) and connections.accepts(b)
+        assert setup.snapshot()["shot_received"]
+        ids = [shot_trace_id(a), shot_trace_id(b)]
+        assert ids[0] and ids[1] and ids[0] != ids[1]
+        store = PressureTraceStore(str(tmp_path))
+        for trace_id, value in zip(ids, [1.0, 2.0]):
+            store.save(trace_id, [{"cop_x": value}])
+        reopened = PressureTraceStore(str(tmp_path))
+        assert [reopened.load(i)[0]["cop_x"] for i in ids] == [1.0, 2.0]
+        setup.stop()
+        assert not setup.snapshot()["shot_received"]
+        assert not connections.accepts(a)
+    finally:
+        setup.stop()

@@ -83,7 +83,7 @@ jobs:
       - name: Build Executable with PyInstaller (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          pyinstaller --noconfirm --onedir --windowed \
+          pyinstaller --additional-hooks-dir hooks --noconfirm --onedir --windowed \
             --name shanktuary_performance_studio \
             --icon assets/shanktuary_shield.png \
             --paths src/ui/_legacy \
@@ -94,7 +94,7 @@ jobs:
       - name: Build Executable with PyInstaller (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --noconfirm --onedir --windowed --name shanktuary_performance_studio --icon assets/shanktuary_shield.png --paths src/ui/_legacy --add-data "assets;assets" --add-data "src/analytics/data;src/analytics/data" shanktuary_app.py
+          pyinstaller --additional-hooks-dir hooks --noconfirm --onedir --windowed --name shanktuary_performance_studio --icon assets/shanktuary_shield.png --paths src/ui/_legacy --add-data "assets;assets" --add-data "src/analytics/data;src/analytics/data" shanktuary_app.py
 
       - name: Package Linux Tarball & AppImage
         if: runner.os == 'Linux'

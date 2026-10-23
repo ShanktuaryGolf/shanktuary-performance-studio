@@ -1,16 +1,24 @@
 # Shanktuary Performance Studio
 
-> **Ultimate Launch Monitor & Performance Suite for OpenLaunch Nova & OpenGolfCoach**  
+> **Launch Monitor & Performance Suite for Nova and Compatible Shot Connectors**
 > *Featuring Live 4-Quadrant Visual Telemetry, High-Contrast Quad Studio Views, Floor Divot Projection, Session Dispersion Analysis, and Built-in OBS Stream Overlays.*
 
 ---
 
+## v1.8.0 connection setup
+
+Choose Nova, GSPro, or Another launch monitor in the built-in guided setup. Another launch monitor starts listening when selected; open your usual compatible connector and select its GSPro / Open Connect output if offered. No address entry or extra Start button is needed for the normal local setup. Advanced settings retain explicit network and port choices. A connection alone is not a verified shot; Start Session unlocks only after an accepted test shot.
+
+This version also includes the merged GSPro shot-identity fix, preserving independent pressure traces for new GSPro shots. It does not reconstruct previously overwritten traces. Optional OpenGolfCoach estimates remain off by default, with speculative club estimates separately controlled. Intel macOS does not include the optional OGC engine.
+
+Physical connector compatibility has not been validated in this preparation. See [connection behavior and limitations](docs/CONNECTIONS.md), including experimental CGP support.
+
 ## 🌟 Complete Feature Overview
 
-Shanktuary Performance Studio is a comprehensive launch monitor visualization, performance analysis, and streaming overlay system designed specifically for **OpenLaunch Nova** and **OpenGolfCoach** compatible launch monitors.
+Shanktuary Performance Studio is a comprehensive launch monitor visualization, performance analysis, and streaming overlay system supporting **OpenLaunch Nova**, a local **GSPro database**, and compatible **Open Connect** connectors. **Common Golf Protocol (CGP)** support is experimental. OpenGolfCoach is optional local metric estimation, not a launch-monitor compatibility guarantee.
 
 ### 📡 1. Zero-Config mDNS Auto-Discovery
-- **Automatic Connection:** Connects automatically to your Nova hardware over Wi-Fi/LAN via mDNS (`_openlaunch-ws._tcp.local.`) without typing IP addresses or port numbers.
+- **Guided Connection:** After you explicitly start the Nova connection, discovers your Nova hardware over Wi-Fi/LAN via mDNS (`_openlaunch-ws._tcp.local.`) without typing IP addresses or port numbers.
 
 ---
 

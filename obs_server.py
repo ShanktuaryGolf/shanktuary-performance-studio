@@ -42,7 +42,7 @@ from src.processing.pressure.stance import (
 )
 from user_data import HISTORY_NAME, get_data_dir
 
-APP_VERSION = "v1.7.0"
+APP_VERSION = "v1.8.0"
 BUILD_NUMBER = "2026.10.17.1"
 OBS_PORT = 9321
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -653,6 +653,9 @@ class PressureManager:
             self._wiz_backend_b = None
             self._latest_raw_reading = None
             self._last_reconnect_attempt = 0.0
+            if os.environ.get("SPS_UI_PREVIEW") == "1":
+                print("[preview] Pressure hardware disabled; no readings simulated")
+                return
             try:
                 # Honour a restored dual assignment. Calling
                 # _create_hardware_backend() bare would open a single board

@@ -174,7 +174,8 @@ class TestStartupCapture:
         assert "MARKER-AFTER-IMPORT" in body
         # The pressure subsystem announces itself during import; that line
         # is exactly what was missing from the reported log.
-        assert "Pressure Subsystem initialized" in body, (
+        assert ("Pressure Subsystem initialized" in body or
+                "[preview] Pressure hardware disabled; no readings simulated" in body), (
             f"startup lines were not captured:\n{body}"
         )
 

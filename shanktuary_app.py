@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import os
 import threading
 
 # Mirror the console into ~/.shanktuary/logs/ BEFORE the studio import.
@@ -19,7 +20,7 @@ from src.session_log import install as _install_session_log
 _LOG_FILE = _install_session_log()
 
 import shanktuary_performance_studio as studio  # noqa: E402
-from src.ui import ShanktuaryDesktopApp, SplashScreen, should_show_splash  # noqa: E402
+from src.ui import ShanktuaryDesktopApp, should_show_splash  # noqa: E402
 
 
 def parse_args(argv=None):
@@ -46,6 +47,8 @@ def main(argv=None):
     if _LOG_FILE:
         print(f"[+] Logging to {_LOG_FILE}")
 
+    show_setup = args.splash or (should_show_splash() and not args.no_splash)
+
     # Keep the production connectivity lifecycle exactly aligned with the
     # original entry point: Nova worker + local OBS/browser server + Tk UI.
     t_ws = threading.Thread(target=studio.websocket_worker, daemon=True)
@@ -57,7 +60,10 @@ def main(argv=None):
     t_gspro = threading.Thread(target=studio.gspro_worker, daemon=True)
     t_gspro.start()
 
-    studio.obs_server.launch_obs_server_thread()
+    if os.environ.get("SPS_UI_PREVIEW") != "1":
+        studio.obs_server.launch_obs_server_thread()
+    else:
+        print("[preview] OBS server disabled; connection readiness remains real")
 
     root = studio.tk.Tk()
     default_w, default_h = 1920, 1080
@@ -84,13 +90,14 @@ def main(argv=None):
     # launch), but an explicit deiconify maps it regardless. See
     # tests/test_splash_visibility.py, which locks both halves of this in.
     splash_choice = None
-    if args.splash or (should_show_splash() and not args.no_splash):
+    if show_setup:
         root.withdraw()
         try:
             bag_specs = studio.load_bag_specs_for_splash()
             clubs = list(bag_specs) or list(studio.DEFAULT_CLUBS)
-            splash_choice = SplashScreen(
-                root, clubs=clubs, club_specs=bag_specs
+            from src.ui.connection_wizard import ConnectionWizard
+            splash_choice = ConnectionWizard(
+                root, controller=studio.connection_setup_controller(), clubs=clubs, club_specs=bag_specs
             ).run()
         except Exception as exc:
             # A splash failure must never block the app the user paid for.
@@ -99,6 +106,7 @@ def main(argv=None):
         # Wake the supervisor so a GSPro choice starts polling immediately.
         studio.gspro_reconfigure.set()
 
+    root.bind("<Destroy>", lambda event: studio.source_connections.stop() if event.widget is root else None, add="+")
     app = ShanktuaryDesktopApp(root)  # noqa: F841 - Tk callbacks retain it
     if splash_choice and splash_choice.get("club") in getattr(app, "clubs", []):
         app.current_club = splash_choice["club"]

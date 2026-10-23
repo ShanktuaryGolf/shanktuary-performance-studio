@@ -17,11 +17,14 @@ export class GolfPhysicsEngine {
   }
 
   calculateTrajectory(shot) {
-    const ballSpeedMPH = parseFloat(shot.ballSpeed || shot.ball_speed_mph || 110);
-    const vlaDeg = parseFloat(shot.verticalLaunchAngle || shot.vertical_launch_angle_degrees || 18.0);
-    const hlaDeg = parseFloat(shot.horizontalLaunchAngle || shot.horizontal_launch_angle_degrees || 0.0);
-    const initialSpinRPM = parseFloat(shot.total_spin || shot.total_spin_rpm || shot.spinSpeed || 5000);
-    const spinAxisDeg = parseFloat(shot.spin_axis || shot.spin_axis_degrees || 0.0);
+    const numeric = (v) => typeof v === 'number' && Number.isFinite(v) ? v : NaN;
+    const ballSpeedMPH = numeric(shot.ballSpeed ?? shot.ball_speed_mph ?? NaN);
+    const vlaDeg = numeric(shot.verticalLaunchAngle ?? shot.vertical_launch_angle_degrees ?? NaN);
+    const hlaDeg = numeric(shot.horizontalLaunchAngle ?? shot.horizontal_launch_angle_degrees ?? NaN);
+    const initialSpinRPM = numeric(shot.total_spin ?? shot.total_spin_rpm ?? shot.spinSpeed ?? NaN);
+    const spinAxisDeg = numeric(shot.spin_axis ?? shot.spin_axis_degrees ?? NaN);
+    if (![ballSpeedMPH, vlaDeg, hlaDeg, initialSpinRPM, spinAxisDeg].every(Number.isFinite)
+        || ballSpeedMPH <= 0 || initialSpinRPM < 0) return [];
 
     const speedMS = ballSpeedMPH * 0.44704;
     const vlaRad = (vlaDeg * Math.PI) / 180.0;
