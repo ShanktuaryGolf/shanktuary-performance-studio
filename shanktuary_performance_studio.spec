@@ -2,8 +2,8 @@
 
 
 a = Analysis(
-    ['shanktuary_performance_studio.py'],
-    pathex=[],
+    ['shanktuary_app.py'],
+    pathex=['src/ui/_legacy'],
     binaries=[],
     datas=[('assets', 'assets'), ('src/analytics/data', 'src/analytics/data')],
     hiddenimports=[
@@ -21,7 +21,7 @@ a = Analysis(
         'json',
         'threading'
     ],
-    hookspath=[],
+    hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],

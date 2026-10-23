@@ -29,8 +29,9 @@ import threading
 #:   gspro -- poll GSPro.db only; Nova shots are dropped so a launch monitor
 #:            feeding GSPro never double-ingests one physical shot
 #:   both  -- ingest from both (only correct for genuinely separate bays)
-VALID_SOURCES = ("nova", "gspro", "both")
+VALID_SOURCES = ("nova", "gspro", "both", "open_connect", "cgp")
 DEFAULT_SOURCE = "nova"
+DEFAULT_OPEN_CONNECT_PORT = 921
 
 SETTINGS_FILENAME = "shanktuary_shot_source.json"
 
@@ -84,6 +85,10 @@ def _normalise_source(value):
     return v if v in VALID_SOURCES else None
 
 
+def _valid_port(value):
+    return type(value) is int and 1 <= value <= 65535
+
+
 def _read_file():
     path = _settings_path()
     try:
@@ -122,6 +127,13 @@ def load_settings(refresh=False):
       source_locked   -- True when SPS_SHOT_SOURCE forces the source
       db_path_locked  -- True when SPS_GSPRO_DB forces the database path
       onboarded       -- True once the user has completed the source picker
+      open_connect_port -- receiver port, integer 1..65535 (default 921)
+      open_connect_lan -- explicit LAN opt-in (default False)
+      cgp_device      -- discovered service name, or ""
+      ogc_enrichment  -- opt-in local model calculations (default False)
+      ogc_club_estimates -- independent speculative club opt-in (default False)
+
+    Only preferences persist, never a running listener or connection state.
     """
     global _cache
     with _lock:
@@ -133,6 +145,12 @@ def load_settings(refresh=False):
         db_path = stored.get("db_path") if isinstance(stored.get("db_path"), str) else ""
         onboarded = bool(stored.get("onboarded", False))
         always_show = bool(stored.get("always_show_splash", False))
+        port = stored.get("open_connect_port")
+        if not _valid_port(port):
+            port = DEFAULT_OPEN_CONNECT_PORT
+        cgp_device = stored.get("cgp_device")
+        if not isinstance(cgp_device, str):
+            cgp_device = ""
 
         env_source = _normalise_source(os.environ.get("SPS_SHOT_SOURCE"))
         source_locked = env_source is not None
@@ -151,12 +169,19 @@ def load_settings(refresh=False):
             "db_path_locked": db_path_locked,
             "onboarded": onboarded,
             "always_show_splash": always_show,
+            "open_connect_port": port,
+            "open_connect_lan": stored.get("open_connect_lan") is True,
+            "cgp_device": cgp_device,
+            "ogc_enrichment": stored.get("ogc_enrichment") is True,
+            "ogc_club_estimates": stored.get("ogc_club_estimates") is True,
         }
         return dict(_cache)
 
 
 def save_settings(source=None, db_path=None, onboarded=None,
-                  always_show_splash=None):
+                  always_show_splash=None, open_connect_port=None,
+                  open_connect_lan=None, cgp_device=None, ogc_enrichment=None,
+                  ogc_club_estimates=None):
     """Persist user choices and refresh the cache.
 
     Environment overrides are never written to disk — the stored value keeps
@@ -176,6 +201,22 @@ def save_settings(source=None, db_path=None, onboarded=None,
         stored["onboarded"] = bool(onboarded)
     if always_show_splash is not None:
         stored["always_show_splash"] = bool(always_show_splash)
+
+    if open_connect_port is not None:
+        if not _valid_port(open_connect_port):
+            raise ValueError("Open Connect port must be an integer from 1 to 65535")
+        stored["open_connect_port"] = open_connect_port
+    if cgp_device is not None:
+        if not isinstance(cgp_device, str):
+            raise ValueError("CGP device must be a discovered service name string")
+        stored["cgp_device"] = cgp_device
+    for key, value in (("open_connect_lan", open_connect_lan),
+                       ("ogc_enrichment", ogc_enrichment),
+                       ("ogc_club_estimates", ogc_club_estimates)):
+        if value is not None:
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
+            stored[key] = value
 
     path = _settings_path()
     if not _write_json(path, stored):

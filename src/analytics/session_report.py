@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import re
 import statistics
@@ -32,7 +33,38 @@ COLUMNS = [
     "club_path_deg", "face_to_path_deg", "face_to_target_deg",
     "ball", "marked_contact_h_mm", "marked_contact_v_mm",
     "flag", "timestamp_ns",
+    "source", "estimated_fields", "metric_provenance", "enrichment_status",
 ]
+
+
+
+def _estimated_paths(shot):
+    """Include converted aliases of estimates, with cycle-safe provenance."""
+    provenance = shot.get('_metric_provenance') or {}
+    explicit = set((shot.get('_cgp') or {}).get('estimated_fields') or [])
+    def estimated(path, seen):
+        if path in seen:
+            return False
+        meta = provenance.get(path) or {}
+        return (path in explicit or meta.get('kind') in {'source_estimated', 'estimated', 'modelled', 'modeled', 'speculative'}
+                or any(estimated(p, seen | {path}) for p in meta.get('inputs') or []))
+    return sorted(p for p in set(provenance) | explicit if estimated(p, set()))
+
+
+_EXPORT_PATHS = {
+    'ball_speed_mph': ['open_golf_coach.us_customary_units.ball_speed_mph', 'ball_speed_meters_per_second'],
+    'club_speed_mph': ['open_golf_coach.us_customary_units.club_speed_mph', 'open_golf_coach.club_speed_meters_per_second'],
+    'smash': ['open_golf_coach.smash_factor'], 'launch_deg': ['vertical_launch_angle_degrees'],
+    'hla_deg': ['horizontal_launch_angle_degrees'], 'spin_rpm': ['total_spin_rpm'],
+    'spin_axis_deg': ['spin_axis_degrees'],
+    'carry_yds': ['open_golf_coach.us_customary_units.carry_distance_yards', 'open_golf_coach.carry_distance_meters'],
+    'total_yds': ['open_golf_coach.us_customary_units.total_distance_yards', 'open_golf_coach.total_distance_meters'],
+    'offline_yds': ['open_golf_coach.us_customary_units.offline_distance_yards', 'open_golf_coach.offline_distance_meters'],
+    'apex_ft': ['open_golf_coach.us_customary_units.apex_height_feet', 'open_golf_coach.us_customary_units.peak_height_yards', 'open_golf_coach.peak_height_meters'],
+    'club_path_deg': ['open_golf_coach.club_path_degrees'],
+    'face_to_path_deg': ['open_golf_coach.club_face_to_path_degrees'],
+    'face_to_target_deg': ['open_golf_coach.club_face_to_target_degrees'],
+}
 
 
 def _num(value) -> float | None:
@@ -106,6 +138,10 @@ def shot_rows(session: dict[str, Any], is_left_handed: bool = False) -> list[dic
             "marked_contact_v_mm": _blank(_num((s.get("marked_contact") or {}).get("vertical_mm")) if isinstance(s.get("marked_contact"), dict) else None),
             "flag": flag,
             "timestamp_ns": s.get("timestamp_ns") or "",
+            "source": s.get("_source") or "nova",
+            "estimated_fields": json.dumps(_estimated_paths(s), separators=(",", ":")),
+            "metric_provenance": json.dumps(s.get("_metric_provenance") or {}, sort_keys=True, separators=(",", ":")),
+            "enrichment_status": (s.get("_enrichment") or {}).get("status", "disabled"),
         })
     return rows
 
@@ -339,7 +375,9 @@ def render_summary_page(session, index_result=None, index_trend=None, is_left_ha
     else:
         p.text(left, top + 20, "No plottable shots", 18, _TEXT_3)
 
-    p.text(_MARGIN, PAGE_H - 60, "Nova measures ball flight, not face contact. Club speed and smash are model-derived.", 16, _TEXT_3)
+    p.text(_MARGIN, PAGE_H - 100, "Reported values can include source estimates. Modelled values are not measurements.", 16, _TEXT_3)
+    p.text(_MARGIN, PAGE_H - 80, "Summaries may mix reported and modelled data; CSV preserves per-field provenance.", 16, _TEXT_3)
+    p.text(_MARGIN, PAGE_H - 60, "Nova measures ball flight, not face contact.", 16, _TEXT_3)
     p.text(PAGE_W - _MARGIN, PAGE_H - 60, datetime.now().strftime("Generated %Y-%m-%d %H:%M"), 16, _TEXT_3, anchor="ra")
     return p
 
@@ -367,6 +405,10 @@ def render_shot_pages(session, is_left_handed=False) -> list[_Page]:
             for _, key, dx in cols:
                 v = r[key]
                 s = "" if v == "" else str(v)
+                if s and key in _EXPORT_PATHS:
+                    estimated = set(json.loads(r["estimated_fields"]))
+                    if any(path in estimated for path in _EXPORT_PATHS[key]):
+                        s += "*"
                 if key == "shot_name":
                     s = s[:18]
                 if key == "flag" and s:
@@ -377,6 +419,7 @@ def render_shot_pages(session, is_left_handed=False) -> list[_Page]:
                         s = s[:-1]
                 p.text(_MARGIN + dx, y, s, 16, _TEXT_2 if key != "flag" else _GOLD)
             y += 30
+        p.text(_MARGIN, PAGE_H - 60, "* Estimated/modelled, not measured. CSV includes source and per-field provenance.", 16, _TEXT_3)
         pages.append(p)
     return pages
 

@@ -2,3 +2,7 @@ Pillow>=9.0.0
 zeroconf>=0.38.0
 hidapi>=0.14.0
 
+
+aioquic==1.2.0
+# Native OGC wheels are unavailable for Intel macOS; enrichment stays optional.
+opengolfcoach==0.3.0; platform_system != "Darwin" or platform_machine == "arm64"

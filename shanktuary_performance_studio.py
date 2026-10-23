@@ -178,6 +178,15 @@ FACE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_face.png")
 SIDE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_side.png")
 
 shot_queue = queue.Queue()
+from src.connections.controller import SourceConnections, StudioConnectionSetup
+source_connections = SourceConnections(shot_queue)
+
+
+def connection_setup_controller():
+    return StudioConnectionSetup(
+        source_connections, gspro_settings, wake=gspro_reconfigure.set,
+        legacy_status=lambda source: gspro_status if source == "gspro" else nova_status)
+
 
 # Completed pressure captures, posted from the pressure thread as
 # (shot_id, trace_frames). A capture finishes ~3s after impact -- long after
@@ -349,6 +358,7 @@ def apply_shot_source(source=None, db_path=None, onboarded=None):
     settings = gspro_settings.save_settings(
         source=source, db_path=db_path, onboarded=onboarded
     )
+    source_connections.select_source(settings["source"])
     gspro_reconfigure.set()
     return settings
 
@@ -375,11 +385,12 @@ def gspro_worker():
     """
     poller = None
     poller_thread = None
+    sink = None
 
-    def on_shot(payload, meta):
+    def on_shot(payload, meta, target):
         # poll_queue() stamps club/timestamp and validates like any Nova shot.
         gspro_status["shots"] = gspro_status.get("shots", 0) + 1
-        shot_queue.put(payload)
+        target.put(payload)
 
     def on_status(message):
         gspro_status["last_message"] = message
@@ -400,7 +411,7 @@ def gspro_worker():
         gspro_status["connected"] = False
 
     while True:
-        enabled = gspro_settings.gspro_enabled()
+        enabled = gspro_settings.gspro_enabled() and source_connections.active_for("gspro")
         db_path = gspro_settings.effective_db_path() if enabled else ""
         gspro_status["enabled"] = enabled
         gspro_status["db_path"] = db_path
@@ -409,7 +420,7 @@ def gspro_worker():
         running = poller_thread is not None and poller_thread.is_alive()
         wanted = enabled
 
-        if running and (not wanted or poller.db_path != db_path):
+        if running and (not wanted or poller.db_path != db_path or sink.generation != source_connections._generation):
             # Disabled, or the user pointed us at a different database.
             stop_poller()
             running = False
@@ -419,7 +430,8 @@ def gspro_worker():
                 gspro_status["last_message"] = (
                     f"GSPro database not found at {db_path}"
                 )
-            poller = GsproPoller(on_shot=on_shot, db_path=db_path, on_status=on_status)
+            sink = source_connections.input_queue("gspro")
+            poller = GsproPoller(on_shot=lambda payload, meta, target=sink: on_shot(payload, meta, target), db_path=db_path, on_status=on_status)
             poller_thread = threading.Thread(target=poller.run, daemon=True)
             poller_thread.start()
         elif not wanted:
@@ -467,9 +479,18 @@ def websocket_worker():
     while True:
         s = None
         try:
+            if not source_connections.active_for("nova"):
+                time.sleep(0.25)
+                continue
+            sink = source_connections.input_queue("nova")
             nova_ip, nova_port = discover_nova_device()
+            if not source_connections.active_for("nova") or source_connections._generation != sink.generation:
+                continue
             print(f"[*] Connecting to OpenLaunch Nova at ws://{nova_ip}:{nova_port}...")
             s = socket.create_connection((nova_ip, nova_port), timeout=5)
+            if not source_connections.active_for("nova") or source_connections._generation != sink.generation:
+                s.close()
+                continue
             key = base64.b64encode(os.urandom(16)).decode()
             req = (
                 f"GET / HTTP/1.1\r\n"
@@ -497,7 +518,7 @@ def websocket_worker():
             s.settimeout(1.0)
             # Carry any frame bytes that arrived with the handshake tail
             reader = _SockBuf(s, residual)
-            while True:
+            while source_connections.active_for("nova") and source_connections._generation == sink.generation:
                 try:
                     opcode, data = read_ws_frame(reader)
                 except socket.timeout:
@@ -520,9 +541,11 @@ def websocket_worker():
                             # shots (the monitor feeds GSPro) — dropping them
                             # here prevents double ingestion.
                             if gspro_settings.nova_enabled():
-                                shot_queue.put(msg)
+                                sink.put(msg)
                     except json.JSONDecodeError:
                         pass
+            s.close()
+            nova_status["connected"] = False
         except Exception as e:
             nova_status["connected"] = False
             print(f"[!] WebSocket error: {e}. Reconnecting in 3s...")
@@ -554,7 +577,7 @@ def load_image_asset(path, target_h=210, mirror=False, pad_square=True):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.7.0"
+APP_VERSION = "v1.8.0"
 BUILD_NUMBER = "2026.10.17.1"
 
 class ShanktuaryApp:
@@ -1208,7 +1231,7 @@ class ShanktuaryApp:
         here would be circular.
         """
         try:
-            from src.ui.splash import SplashScreen
+            from src.ui.connection_wizard import ConnectionWizard
         except Exception as exc:
             print(f"[splash] unavailable: {exc}")
             return
@@ -1219,8 +1242,8 @@ class ShanktuaryApp:
                 club = self.get_bag_club(name)
                 if isinstance(club, dict):
                     specs[name] = club
-            choice = SplashScreen(
-                self.root, clubs=list(self.clubs), current_club=self.current_club,
+            choice = ConnectionWizard(
+                self.root, controller=connection_setup_controller(), clubs=list(self.clubs), current_club=self.current_club,
                 club_specs=specs,
             ).run()
         except Exception as exc:
@@ -3038,11 +3061,11 @@ class ShanktuaryApp:
                 issues.append("us_customary_units is not an object")
 
             total_spin = msg.get("total_spin_rpm", ogc.get("total_spin_rpm"))
-            if total_spin is not None and float(total_spin) < 0.0:
+            if msg.get("_source") not in ("cgp", "open_connect") and total_spin is not None and float(total_spin) < 0.0:
                 issues.append(f"negative total_spin_rpm ({float(total_spin):.0f})")
 
             backspin = ogc.get("backspin_rpm")
-            if backspin is not None and float(backspin) < 0.0:
+            if msg.get("_source") not in ("cgp", "open_connect") and backspin is not None and float(backspin) < 0.0:
                 issues.append(f"negative backspin_rpm ({float(backspin):.0f})")
 
             ball_mps = msg.get("ball_speed_meters_per_second")
@@ -3059,6 +3082,13 @@ class ShanktuaryApp:
     def _process_queued_shot(self, msg):
         if not isinstance(msg, dict):
             raise ValueError("shot payload must be an object")
+        if "_input_generation" in msg and not source_connections.accepts(msg):
+            return
+        if msg.get("_source") in ("cgp", "open_connect", "gspro"):
+            from src.connections.enrichment import enrich_shot
+            cfg = gspro_settings.load_settings()
+            msg = enrich_shot(msg, enabled=cfg.get("ogc_enrichment", False),
+                              estimate_club=cfg.get("ogc_club_estimates", False))
         if msg.get("_source") == "gspro":
             # GSPro reports its own club string (from ITS bag config,
             # e.g. "7i"). Trust it when it matches a real SPS bag
@@ -3091,8 +3121,10 @@ class ShanktuaryApp:
         # Aim calibration collects raw start lines. The shot is stored
         # uncorrected either way -- calibration reads the device's own
         # frame, which is exactly the bias being measured.
-        if self.aim_calibrating:
-            self.aim_calib_shots.append(msg)
+        from src.connections.enrichment import calibration_shot
+        calibration = calibration_shot(msg)
+        if self.aim_calibrating and calibration.get("horizontal_launch_angle_degrees") is not None:
+            self.aim_calib_shots.append(calibration)
             if len(self.aim_calib_shots) >= MIN_CALIBRATION_SHOTS:
                 self.finish_aim_calibration()
 
@@ -3109,6 +3141,13 @@ class ShanktuaryApp:
         self.draw_screen()
 
     def poll_queue(self):
+        from src.connections.controller import club_code
+        code = club_code(getattr(self, "current_club", None))
+        if code:
+            try:
+                source_connections.update_player("LH" if getattr(self, "is_left_handed", False) else "RH", code)
+            except (ValueError, OSError):
+                pass
         # One malformed event or failing renderer must not disable acquisition
         # or prevent later shots/control messages from being handled.
         try:
@@ -3139,6 +3178,7 @@ class ShanktuaryApp:
                     gspro_status.get("enabled", False),
                     gspro_status.get("connected", False),
                     gspro_status.get("db_found", False),
+                    tuple(sorted(source_connections.snapshot().items())),
                 )
                 if status_now != getattr(self, "_last_conn_status", None):
                     self._last_conn_status = status_now
@@ -4955,7 +4995,7 @@ class ShanktuaryApp:
             # GSPro-sourced shots carry MEASURED club metrics from the launch
             # monitor (via SimRead), not OGC's derived model — the identity
             # below is specific to Nova payloads and must not be checked here.
-            if shot.get("_source") == "gspro":
+            if shot.get("_source") in ("gspro", "cgp", "open_connect"):
                 return True
             ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
             if not isinstance(ogc, dict):
@@ -5450,7 +5490,10 @@ class ShanktuaryApp:
         self.draw_top_header(w, h, offset_x=offset_x)
 
         # 3. Workspace View Routing
-        if self.view_mode == 1:
+        if self.current_shot and self.current_shot.get("_source") in ("cgp", "open_connect", "gspro") and self.view_mode in (0, 1, 9):
+            from src.connections.metric_view import draw_connection_metrics
+            draw_connection_metrics(self, avail_w, h, offset_x)
+        elif self.view_mode == 1:
             # Mode 1: Delivery (4-Quadrant Studio)
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
             if self.current_shot:

@@ -9,6 +9,7 @@ import overview_redesign_v8 as shot_v8
 import overview_redesign_v14 as shot_v14
 
 import theme
+from src.connections.presentation import metric_status, metric_value
 
 GOLD = shot_v14.GOLD
 GOLD_LIGHT = shot_v14.GOLD_LIGHT
@@ -46,6 +47,50 @@ def _background(app, avail_w, h, offset_x=0):
     app.canvas.create_image(offset_x, 52, image=img, anchor="nw")
 
 
+def _connection_cards(app):
+    """Read source presence rather than legacy zero/default arguments."""
+    shot = app.current_shot or {}
+    if callable(getattr(app, "aim_corrected", None)):
+        shot = app.aim_corrected(shot)
+    left_handed = bool(getattr(app, "is_left_handed", False))
+
+    def path(value):
+        in_out = value < 0 if left_handed else value > 0
+        return f"{abs(value):.1f}° {'In-Out' if in_out else 'Out-In'}" if value else "0.0°"
+
+    def direction(value, negative, positive, suffix=""):
+        return f"{abs(value):.1f}{suffix} {negative if value < 0 else positive}" if value else f"0.0{suffix}"
+
+    metrics = (
+        ("CARRY DISTANCE", "carry", lambda v: f"{v:.1f}", "YARDS"),
+        ("TOTAL DISTANCE", "total", lambda v: f"{v:.1f}", "YARDS"),
+        ("BALL SPEED", "ball_speed", lambda v: f"{v:.1f}", "MPH"),
+        ("CLUB SPEED", "club_speed", lambda v: f"{v:.1f}", "MPH"),
+        ("SMASH FACTOR", "smash", lambda v: f"{v:.2f}", "RATIO"),
+        ("LAUNCH ANGLE", "launch", lambda v: f"{v:.1f}°", ""),
+        ("TOTAL SPIN", "spin", lambda v: f"{int(v)}", "RPM"),
+        ("SPIN AXIS", "spin_axis", lambda v: direction(v, "L", "R", "°"), ""),
+        ("CLOSURE RATE", "closure_rate", lambda v: f"{int(v)}", "DEG / SEC"),
+        ("APEX HEIGHT", "apex", lambda v: f"{v * 3:.1f}", "FEET"),
+        ("CLUB PATH", "club_path", path, ""),
+        ("FACE TO PATH", "face_to_path", lambda v: direction(v, "Closed", "Open", "°"), ""),
+        ("ATTACK ANGLE", "attack_angle", lambda v: f"{v:.1f}°", ""),
+        ("DYNAMIC LOFT", "dynamic_loft", lambda v: f"{v:.1f}°", ""),
+        ("HANG TIME", "hang_time", lambda v: f"{v:.1f}s", ""),
+        ("OFFLINE", "offline", lambda v: direction(v, "L", "R"), "YARDS"),
+    )
+    cards = []
+    for label, key, format_value, unit in metrics:
+        value = metric_value(shot, key, left_handed=left_handed)
+        status = metric_status(shot, key, left_handed=left_handed)
+        if value is None:
+            cards.append((label, "--", "", TEXT_3, "NOT REPORTED", True))
+            continue
+        color = GOLD_LIGHT if key == "carry" or (key == "offline" and abs(value) > 4) else TEXT
+        cards.append((label, format_value(value), unit, color, status, False))
+    return cards
+
+
 def draw_big_numbers_viewport(
     app, avail_w, h, carry, total, ball_speed, club_speed, smash, launch, spin,
     spin_axis, club_path, face_to_path, apex, offline, closure_rate=0.0,
@@ -61,51 +106,56 @@ def draw_big_numbers_viewport(
     grid_w = avail_w - pad_x * 2
     grid_h = bot_y - top_y
 
-    if getattr(app, "is_left_handed", False):
-        path_dir = "In-Out" if club_path < 0 else "Out-In"
+    source_shot = getattr(app, "current_shot", None) or {}
+    external = source_shot.get("_source") in ("open_connect", "cgp", "gspro")
+    if external:
+        cards = _connection_cards(app)
     else:
-        path_dir = "In-Out" if club_path > 0 else "Out-In"
+        if getattr(app, "is_left_handed", False):
+            path_dir = "In-Out" if club_path < 0 else "Out-In"
+        else:
+            path_dir = "In-Out" if club_path > 0 else "Out-In"
 
-    face_dir = "Open" if face_to_path > 0 else "Closed"
-    axis_dir = "R" if spin_axis > 0 else "L"
-    off_dir = "L" if offline < 0 else "R"
-    apex_ft = apex * 3.0
+        face_dir = "Open" if face_to_path > 0 else "Closed"
+        axis_dir = "R" if spin_axis > 0 else "L"
+        off_dir = "L" if offline < 0 else "R"
+        apex_ft = apex * 3.0
 
-    clamped = app.compute_smash_confidence(
-        (app.current_shot or {}).get("ball_speed_meters_per_second"),
-        (app.current_shot or {}).get("vertical_launch_angle_degrees"),
-        (app.current_shot or {}).get("total_spin_rpm"),
-    )["clamped"] if app.current_shot else False
+        clamped = app.compute_smash_confidence(
+            (app.current_shot or {}).get("ball_speed_meters_per_second"),
+            (app.current_shot or {}).get("vertical_launch_angle_degrees"),
+            (app.current_shot or {}).get("total_spin_rpm"),
+        )["clamped"] if app.current_shot else False
 
-    cards = [
-        # label, value, unit, value colour, status, unavailable
-        ("CARRY DISTANCE", f"{carry:.1f}", "YARDS", GOLD_LIGHT, "", False),
-        ("TOTAL DISTANCE", f"{total:.1f}", "YARDS", TEXT, "", False),
-        ("BALL SPEED", f"{ball_speed:.1f}", "MPH", TEXT, "", False),
-        ("CLUB SPEED", "--" if clamped else f"{club_speed:.1f}",
-         "" if clamped else "MPH", TEXT_3 if clamped else TEXT,
-         "DERIVED" if not clamped else "UNAVAILABLE", clamped),
-        ("SMASH FACTOR", "--" if clamped else f"{smash:.2f}",
-         "" if clamped else "RATIO", TEXT_3 if clamped else TEXT,
-         "DERIVED" if not clamped else "UNAVAILABLE", clamped),
-        ("LAUNCH ANGLE", f"{launch:.1f}°", "", TEXT, "", False),
-        ("TOTAL SPIN", f"{int(spin)}", "RPM", TEXT, "", False),
-        ("SPIN AXIS", f"{abs(spin_axis):.1f}° {axis_dir}", "", TEXT,
-         "DRAW" if spin_axis < 0 else ("FADE" if spin_axis > 0 else "STRAIGHT"), False),
-        ("CLOSURE RATE", f"{int(closure_rate)}", "DEG / SEC", TEXT,
-         "DERIVED", False),
-        ("APEX HEIGHT", f"{apex_ft:.1f}", "FEET", TEXT, "", False),
-        ("CLUB PATH", f"{abs(club_path):.1f}° {path_dir}", "", TEXT,
-         "DERIVED", False),
-        ("FACE TO PATH", f"{abs(face_to_path):.1f}° {face_dir}", "", TEXT,
-         "DERIVED", False),
-        ("ATTACK ANGLE", "--", "", TEXT_3, "NOT MEASURED", True),
-        ("DYNAMIC LOFT", "--", "", TEXT_3, "NOT MEASURED", True),
-        ("HANG TIME", f"{hang_time:.1f}s", "", TEXT, "", False),
-        ("OFFLINE", f"{abs(offline):.1f} {off_dir}", "YARDS",
-         TEXT if abs(offline) <= 4.0 else GOLD_LIGHT,
-         "ON TARGET" if abs(offline) <= 4.0 else "", False),
-    ]
+        cards = [
+            # label, value, unit, value colour, status, unavailable
+            ("CARRY DISTANCE", f"{carry:.1f}", "YARDS", GOLD_LIGHT, "", False),
+            ("TOTAL DISTANCE", f"{total:.1f}", "YARDS", TEXT, "", False),
+            ("BALL SPEED", f"{ball_speed:.1f}", "MPH", TEXT, "", False),
+            ("CLUB SPEED", "--" if clamped else f"{club_speed:.1f}",
+             "" if clamped else "MPH", TEXT_3 if clamped else TEXT,
+             "DERIVED" if not clamped else "UNAVAILABLE", clamped),
+            ("SMASH FACTOR", "--" if clamped else f"{smash:.2f}",
+             "" if clamped else "RATIO", TEXT_3 if clamped else TEXT,
+             "DERIVED" if not clamped else "UNAVAILABLE", clamped),
+            ("LAUNCH ANGLE", f"{launch:.1f}°", "", TEXT, "", False),
+            ("TOTAL SPIN", f"{int(spin)}", "RPM", TEXT, "", False),
+            ("SPIN AXIS", f"{abs(spin_axis):.1f}° {axis_dir}", "", TEXT,
+             "DRAW" if spin_axis < 0 else ("FADE" if spin_axis > 0 else "STRAIGHT"), False),
+            ("CLOSURE RATE", f"{int(closure_rate)}", "DEG / SEC", TEXT,
+             "DERIVED", False),
+            ("APEX HEIGHT", f"{apex_ft:.1f}", "FEET", TEXT, "", False),
+            ("CLUB PATH", f"{abs(club_path):.1f}° {path_dir}", "", TEXT,
+             "DERIVED", False),
+            ("FACE TO PATH", f"{abs(face_to_path):.1f}° {face_dir}", "", TEXT,
+             "DERIVED", False),
+            ("ATTACK ANGLE", "--", "", TEXT_3, "NOT MEASURED", True),
+            ("DYNAMIC LOFT", "--", "", TEXT_3, "NOT MEASURED", True),
+            ("HANG TIME", f"{hang_time:.1f}s", "", TEXT, "", False),
+            ("OFFLINE", f"{abs(offline):.1f} {off_dir}", "YARDS",
+             TEXT if abs(offline) <= 4.0 else GOLD_LIGHT,
+             "ON TARGET" if abs(offline) <= 4.0 else "", False),
+        ]
 
     rows, cols = 4, 4
     col_gap = int(12 * ui_scale)
@@ -144,8 +194,10 @@ def draw_big_numbers_viewport(
         )
         if status:
             c.create_text(
-                x2 - int(15 * ui_scale), y1 + int(17 * ui_scale),
-                text=status, fill=status_col, font=status_font, anchor="e",
+                (x1 + x2) / 2 if external else x2 - int(15 * ui_scale),
+                y2 - int(14 * ui_scale) if external else y1 + int(17 * ui_scale),
+                text=status, fill=status_col, font=status_font,
+                anchor="center" if external else "e",
             )
 
         val_len = len(value)
@@ -157,7 +209,7 @@ def draw_big_numbers_viewport(
             f_size = max(21, int(31 * ui_scale))
         value_font = (theme.ui_font(), f_size, "bold")
 
-        group_y = y1 + card_h * .55
+        group_y = y1 + card_h * (.48 if external else .55)
         c.create_text(
             (x1 + x2) / 2, group_y,
             text=value, fill=value_col, font=value_font, anchor="center",

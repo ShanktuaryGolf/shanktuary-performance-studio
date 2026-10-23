@@ -328,7 +328,7 @@ class SplashScreen:
             iron_path = asset_path("iron_side.png")
             if os.path.isfile(iron_path):
                 iron = Image.open(iron_path).convert("RGBA")
-                target_h = int(ih * 0.46)
+                target_h = int(ih * getattr(self, "hero_club_height", 0.46))
                 ratio = target_h / max(1, iron.height)
                 iron = iron.resize(
                     (max(1, round(iron.width * ratio)), target_h),
@@ -340,7 +340,7 @@ class SplashScreen:
                 ball = self._load_ball(ball_d)
 
                 ball_x = int(iw * 0.30)
-                ball_y = int(ih * 0.60)
+                ball_y = int(ih * getattr(self, "hero_ball_y", 0.60))
 
                 iron_bbox = iron.getbbox() or (0, 0, iron.width, iron.height)
                 club_x = ball_x - int(iron.width * 0.18)

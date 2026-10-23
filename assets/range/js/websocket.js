@@ -1040,10 +1040,97 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         return inferCategory(n) === 'Putter';
     }
 
+    // External monitors retain missing values. No Nova-only heuristic defaults.
+    function extractExternalTelemetry(raw) {
+        const ogc = raw.open_golf_coach ?? {};
+        const us = ogc.us_customary_units ?? {};
+        const n = (v) => typeof v === 'number' && Number.isFinite(v) ? v : NaN;
+        const scaled = (v, factor) => Number.isFinite(n(v)) ? v * factor : undefined;
+        const provenance = raw._metric_provenance ?? {};
+        const sourceEstimated = raw._cgp?.estimated_fields ?? [];
+        const provenanceKind = (path, seen = new Set()) => {
+            if (seen.has(path)) return 'source_reported';
+            const next = new Set(seen); next.add(path);
+            const meta = provenance[path] ?? {};
+            const kinds = [meta.kind, ...((meta.inputs ?? []).map(p => provenanceKind(p, next)))];
+            if (kinds.some(k => ['modelled', 'modeled', 'speculative'].includes(k))) return 'modelled';
+            if (sourceEstimated.includes(path) || kinds.some(k => ['source_estimated', 'estimated'].includes(k))) return 'source_estimated';
+            return meta.kind ?? 'source_reported';
+        };
+        const metricProvenance = {};
+        const pick = (key, paths) => {
+            for (const path of paths) {
+                const v = path.split('.').reduce((o, p) => o?.[p], raw);
+                if (v !== undefined && v !== null) {
+                    metricProvenance[key] = provenanceKind(path);
+                    return v;
+                }
+            }
+            return undefined;
+        };
+        const ballSpeed = n(pick('ballSpeed', ['open_golf_coach.us_customary_units.ball_speed_mph', 'ball_speed_mph'])
+            ?? scaled(pick('ballSpeed', ['ball_speed_meters_per_second']), 1 / .44704));
+        const verticalLaunchAngle = n(pick('launch', ['vertical_launch_angle_degrees', 'open_golf_coach.vertical_launch_angle_degrees']));
+        const horizontalLaunchAngle = n(pick('hla', ['horizontal_launch_angle_degrees', 'open_golf_coach.horizontal_launch_angle_degrees']));
+        const inheritedKind = (...kinds) => kinds.includes('modelled') ? 'modelled' : kinds.includes('source_estimated') ? 'source_estimated' : 'derived';
+        let total_spin = n(pick('totalSpin', ['total_spin_rpm', 'open_golf_coach.total_spin_rpm']));
+        let spin_axis = n(pick('spinAxis', ['spin_axis_degrees', 'open_golf_coach.spin_axis_degrees']));
+        let backspin = n(pick('backspin', ['open_golf_coach.backspin_rpm', 'backspin_rpm']));
+        let sidespin = n(pick('sidespin', ['open_golf_coach.sidespin_rpm', 'sidespin_rpm']));
+        if (Number.isFinite(backspin) && backspin >= 0 && Number.isFinite(sidespin)) {
+            const inherited = inheritedKind(metricProvenance.backspin, metricProvenance.sidespin);
+            if (!Number.isFinite(total_spin)) { total_spin = Math.hypot(backspin, sidespin); metricProvenance.totalSpin = inherited; }
+            if (!Number.isFinite(spin_axis)) { spin_axis = Math.atan2(sidespin, backspin) * 180 / Math.PI; metricProvenance.spinAxis = inherited; }
+        }
+        if (Number.isFinite(total_spin) && Number.isFinite(spin_axis)) {
+            const inherited = inheritedKind(metricProvenance.totalSpin, metricProvenance.spinAxis);
+            if (!Number.isFinite(backspin)) { backspin = total_spin * Math.cos(spin_axis * Math.PI / 180); metricProvenance.backspin = inherited; }
+            if (!Number.isFinite(sidespin)) { sidespin = (raw._source === 'cgp' ? Math.abs(total_spin) : total_spin) * Math.sin(spin_axis * Math.PI / 180); metricProvenance.sidespin = inherited; }
+        }
+        const h = (v) => n(handed(v, null));
+        const clubSpeed = n(pick('clubSpeed', ['open_golf_coach.us_customary_units.club_speed_mph', 'club_speed_mph'])
+            ?? scaled(pick('clubSpeed', ['open_golf_coach.club_speed_meters_per_second', 'club_speed_meters_per_second']), 1 / .44704));
+        const distance = (key, imperial, metric) => n(pick(key, ['open_golf_coach.us_customary_units.' + imperial])
+            ?? scaled(pick(key, ['open_golf_coach.' + metric, metric]), 1 / .9144));
+        const required = [ballSpeed, verticalLaunchAngle, horizontalLaunchAngle, total_spin, spin_axis];
+        let simulationStatus = required.every(Number.isFinite) ? 'ready' : 'missing_launch_or_spin';
+        if (total_spin === 0 && spin_axis !== 0) simulationStatus = 'inconsistent_spin';
+        if (required.every(Number.isFinite) && total_spin >= 0 && Number.isFinite(backspin) && Number.isFinite(sidespin)) {
+            const expected = [total_spin * Math.cos(spin_axis * Math.PI / 180), total_spin * Math.sin(spin_axis * Math.PI / 180)];
+            if ([backspin, sidespin].some((v, i) => Math.abs(v - expected[i]) > Math.max(2, Math.abs(expected[i]) * .01))) simulationStatus = 'inconsistent_spin';
+        }
+        if (total_spin < 0 || backspin < 0) simulationStatus = 'unsupported_topspin';
+        if (simulationStatus === 'ready' && !(ballSpeed > 0 && Math.abs(spin_axis) <= 90 && verticalLaunchAngle >= 0 && verticalLaunchAngle <= 90)) simulationStatus = 'invalid_launch_or_spin';
+        return {
+            shotId: raw.shotId ?? raw.id ?? raw._cgp?.measurement_id ?? raw.shot_number ?? raw.timestamp_ns ?? raw.timestamp,
+            club: raw.club ?? '', clubColor: raw.club_color ?? null,
+            source: raw._source, external: true, metricProvenance, derived: {}, simulationStatus,
+            ballSpeed, verticalLaunchAngle, horizontalLaunchAngle, total_spin, spin_axis, backspin, sidespin,
+            clubSpeed, smash: n(pick('smash', ['open_golf_coach.smash_factor', 'smash_factor'])),
+            clubPath: h(pick('clubPath', ['open_golf_coach.club_path_degrees', 'club_path_degrees'])),
+            faceAngle: h(pick('faceToPath', ['open_golf_coach.club_face_to_path_degrees', 'club_face_to_path_degrees'])),
+            faceToTarget: h(pick('faceToTarget', ['open_golf_coach.club_face_to_target_degrees', 'club_face_to_target_degrees'])),
+            attackAngle: h(pick('attackAngle', ['open_golf_coach.angle_of_attack_degrees', 'angle_of_attack_degrees'])),
+            dynamicLoft: h(pick('dynamicLoft', ['open_golf_coach.dynamic_loft_degrees', 'dynamic_loft_degrees'])),
+            closureRate: n(pick('closureRate', ['open_golf_coach.face_closure_rate_dps', 'face_closure_rate_dps'])),
+            hangTime: n(pick('hangTime', ['open_golf_coach.hang_time_seconds', 'hang_time_seconds'])),
+            descent: n(pick('descent', ['open_golf_coach.descent_angle_degrees', 'descent_angle_degrees'])),
+            ogcCarry: distance('carry', 'carry_distance_yards', 'carry_distance_meters'),
+            ogcTotal: distance('total', 'total_distance_yards', 'total_distance_meters'),
+            ogcOffline: distance('offline', 'offline_distance_yards', 'offline_distance_meters'),
+            apexFt: n(scaled(pick('apex', ['open_golf_coach.us_customary_units.peak_height_yards']), 3)
+                ?? scaled(pick('apex', ['open_golf_coach.peak_height_meters']), 1 / .3048)),
+        };
+    }
+
     function extractShotTelemetry(msg) {
         if (!msg) return null;
         const raw = msg.data || msg.shot || msg;
         if (!raw || typeof raw !== 'object') return null;
+
+        if (raw._source && !['nova', 'demo'].includes(raw._source)) {
+            return extractExternalTelemetry({ ...raw, shotId: msg.shotId ?? raw.shotId });
+        }
 
         const ogc = raw.open_golf_coach || (raw.shot && raw.shot.open_golf_coach) || {};
         const us = ogc.us_customary_units || raw.us_units || (raw.shot && raw.shot.us_units) || {};
@@ -1144,7 +1231,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         const shotClub = raw.club || ogc.club || "7 Iron";
         const clubColor = raw.club_color || ogc.club_color || null;
-        const shotId = raw.shot_number || raw.timestamp || raw.id || `${ballSpeed.toFixed(1)}_${vla.toFixed(1)}_${totalSpin.toFixed(0)}`;
+        const shotId = msg.shotId ?? raw.shotId ?? raw.id ?? raw.shot_number ?? raw.timestamp ?? `${ballSpeed.toFixed(1)}_${vla.toFixed(1)}_${totalSpin.toFixed(0)}`;
 
         return {
             shotId,
@@ -1217,12 +1304,12 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         // the next shot arrives.
         if (lastShotTelemetry) {
             const t = lastShotTelemetry;
-            const carryYds = t.ogcCarry || 0.0;
+            const carryYds = t.ogcCarry ?? NaN;
             paintStrip(t, {
                 carryYds,
-                totalYds: t.ogcTotal || (carryYds * 1.08),
+                totalYds: t.ogcTotal ?? (t.external ? NaN : carryYds * 1.08),
                 offlineYds: t.ogcOffline !== null ? t.ogcOffline : 0.0,
-                apexFt: t.apexFt || (carryYds * 0.42 * 3.0),
+                apexFt: t.apexFt ?? (t.external ? NaN : carryYds * 0.42 * 3.0),
                 smashClamped: isSmashClamped(t.smash),
             });
         }
@@ -1610,10 +1697,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     function updateHUDTelemetry(shotData, simulatedCarry = null, simulatedOffline = null, shotOpts = {}) {
         if (!shotData) return;
 
-        const carryYds = shotData.ogcCarry || simulatedCarry || 0.0;
-        const totalYds = shotData.ogcTotal || (carryYds * 1.08);
-        const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : (simulatedOffline || 0.0);
-        const apexFt = shotData.apexFt || (carryYds * 0.42 * 3.0);
+        const carryYds = shotData.external ? (Number.isFinite(shotData.ogcCarry) ? shotData.ogcCarry : simulatedCarry ?? NaN) : (shotData.ogcCarry ?? simulatedCarry ?? NaN);
+        const totalYds = shotData.ogcTotal ?? (shotData.external ? NaN : carryYds * 1.08);
+        const offlineYds = Number.isFinite(shotData.ogcOffline) ? shotData.ogcOffline : (simulatedOffline ?? NaN);
+        const apexFt = shotData.apexFt ?? (shotData.external ? NaN : carryYds * 0.42 * 3.0);
 
         // --- bottom strip (configurable) ---
         // Rendered from the saved layout so adding/removing a metric is a data
@@ -1626,18 +1713,32 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         paintStrip(shotData, stripCtx);
 
         // --- All Metrics panel (static, always complete) ---
-        if (elClubSpeed) elClubSpeed.innerText = (typeof shotData.clubSpeed === 'number') ? shotData.clubSpeed.toFixed(1) : '--';
-        if (elSpinAxis) elSpinAxis.innerText = (typeof shotData.spin_axis === 'number') ? `${shotData.spin_axis >= 0 ? '+' : ''}${shotData.spin_axis.toFixed(1)}` : '--';
-        if (elHla) elHla.innerText = (typeof shotData.horizontalLaunchAngle === 'number') ? `${shotData.horizontalLaunchAngle >= 0 ? '+' : ''}${shotData.horizontalLaunchAngle.toFixed(1)}` : '--';
-        if (elClosureRate) elClosureRate.innerText = shotData.closureRate ? Math.round(shotData.closureRate) : '--';
-        if (elClubPath) elClubPath.innerText = (typeof shotData.clubPath === 'number') ? `${shotData.clubPath >= 0 ? '+' : ''}${shotData.clubPath.toFixed(1)}°` : '--';
-        if (elFaceAngle) elFaceAngle.innerText = (typeof shotData.faceAngle === 'number') ? `${shotData.faceAngle >= 0 ? '+' : ''}${shotData.faceAngle.toFixed(1)}°` : '--';
-        if (elAttackAngle) elAttackAngle.innerText = (typeof shotData.attackAngle === 'number') ? `${shotData.attackAngle >= 0 ? '+' : ''}${shotData.attackAngle.toFixed(1)}°` : '--';
-        if (elDynamicLoft) elDynamicLoft.innerText = (typeof shotData.dynamicLoft === 'number') ? `${shotData.dynamicLoft.toFixed(1)}°` : '--';
-        if (elBackspin) elBackspin.innerText = Math.round(shotData.backspin || shotData.total_spin || 0);
-        if (elSidespin) elSidespin.innerText = Math.round(shotData.sidespin || 0);
-        if (elDescent) elDescent.innerText = (typeof shotData.descent === 'number') ? `${shotData.descent.toFixed(1)}°` : '--';
-        if (elHangTime) elHangTime.innerText = (typeof shotData.hangTime === 'number') ? `${shotData.hangTime.toFixed(1)}` : '--';
+        if (elClubSpeed) elClubSpeed.innerText = Number.isFinite(shotData.clubSpeed) ? shotData.clubSpeed.toFixed(1) : '--';
+        if (elSpinAxis) elSpinAxis.innerText = Number.isFinite(shotData.spin_axis) ? `${shotData.spin_axis >= 0 ? '+' : ''}${shotData.spin_axis.toFixed(1)}` : '--';
+        if (elHla) elHla.innerText = Number.isFinite(shotData.horizontalLaunchAngle) ? `${shotData.horizontalLaunchAngle >= 0 ? '+' : ''}${shotData.horizontalLaunchAngle.toFixed(1)}` : '--';
+        if (elClosureRate) elClosureRate.innerText = Number.isFinite(shotData.closureRate) ? Math.round(shotData.closureRate) : '--';
+        if (elClubPath) elClubPath.innerText = Number.isFinite(shotData.clubPath) ? `${shotData.clubPath >= 0 ? '+' : ''}${shotData.clubPath.toFixed(1)}°` : '--';
+        if (elFaceAngle) elFaceAngle.innerText = Number.isFinite(shotData.faceAngle) ? `${shotData.faceAngle >= 0 ? '+' : ''}${shotData.faceAngle.toFixed(1)}°` : '--';
+        if (elAttackAngle) elAttackAngle.innerText = Number.isFinite(shotData.attackAngle) ? `${shotData.attackAngle >= 0 ? '+' : ''}${shotData.attackAngle.toFixed(1)}°` : '--';
+        if (elDynamicLoft) elDynamicLoft.innerText = Number.isFinite(shotData.dynamicLoft) ? `${shotData.dynamicLoft.toFixed(1)}°` : '--';
+        if (elBackspin) elBackspin.innerText = Number.isFinite(shotData.backspin) ? Math.round(shotData.backspin) : '--';
+        if (elSidespin) elSidespin.innerText = Number.isFinite(shotData.sidespin) ? Math.round(shotData.sidespin) : '--';
+        if (elDescent) elDescent.innerText = Number.isFinite(shotData.descent) ? `${shotData.descent.toFixed(1)}°` : '--';
+        if (elHangTime) elHangTime.innerText = Number.isFinite(shotData.hangTime) ? `${shotData.hangTime.toFixed(1)}` : '--';
+
+        if (shotData.external) {
+            for (const [element, key] of [[elClubSpeed, 'clubSpeed'], [elSpinAxis, 'spinAxis'],
+                [elHla, 'hla'], [elClosureRate, 'closureRate'], [elClubPath, 'clubPath'],
+                [elFaceAngle, 'faceToPath'], [elAttackAngle, 'attackAngle'],
+                [elDynamicLoft, 'dynamicLoft'], [elBackspin, 'backspin'],
+                [elSidespin, 'sidespin'], [elDescent, 'descent'], [elHangTime, 'hangTime']]) {
+                if (!element) continue;
+                const kind = shotData.metricProvenance?.[key];
+                const estimated = ['modelled', 'source_estimated', 'estimated'].includes(kind);
+                element.title = estimated ? 'Estimated/modelled, not measured' : 'Source-reported value';
+                if (estimated && element.innerText !== '--') element.innerText += ' EST';
+            }
+        }
 
         if (hudClubName) {
             hudClubName.innerText = shotData.club || '--';
@@ -1655,6 +1756,12 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     ? `${n} shot${n === 1 ? '' : 's'} this session`
                     : 'Awaiting shot';
             }
+        }
+
+        if (shotData.external && (!Number.isFinite(carryYds) || !Number.isFinite(offlineYds) || shotData.simulationStatus !== 'ready')) {
+            if (practiceLastCarry) practiceLastCarry.innerText = Number.isFinite(carryYds) ? `${carryYds.toFixed(1)} yds` : '--';
+            if (practiceLastOffline) practiceLastOffline.innerText = Number.isFinite(offlineYds) ? `${offlineYds.toFixed(1)} yds` : '--';
+            return; // Missing trajectory is not a scored miss.
         }
 
         // 1. Update Free Practice Status
@@ -1852,6 +1959,13 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             shotData = { ...shotData, club: manualClub.name };
         }
 
+        if (shotData.external && shotData.simulationStatus !== 'ready') {
+            lastShotTelemetry = shotData; lastShotId = shotData.shotId;
+            updateHUDTelemetry(shotData);
+            if (lmStatusText) lmStatusText.textContent = shotData.simulationStatus === 'unsupported_topspin'
+                ? 'Shot received; topspin simulation unsupported' : 'Shot received; complete launch and spin needed for range';
+            return;
+        }
         if (isPutterClub(shotData.club)) {
             firePutt(shotData, opts);
             return;
@@ -1875,6 +1989,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         lastShotId = shotData.shotId;
 
         const trajectory = physicsEngine.calculateTrajectory(shotData);
+        if (!trajectory.length) return;
         const finalPt = trajectory[trajectory.length - 1];
         // Carry = first ground contact, NOT the post-roll final point —
         // falling back to finalPt.z inflated carry by the bounce/roll-out.
@@ -1885,8 +2000,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 break;
             }
         }
-        const carryYds = shotData.ogcCarry || Math.abs(carryPt.z);
-        const offlineYds = shotData.ogcOffline !== null ? shotData.ogcOffline : finalPt.x;
+        const carryYds = Number.isFinite(shotData.ogcCarry) ? shotData.ogcCarry : Math.abs(carryPt.z);
+        if (shotData.external && !Number.isFinite(shotData.ogcCarry)) shotData.metricProvenance.carry = 'modelled';
+        const offlineYds = Number.isFinite(shotData.ogcOffline) ? shotData.ogcOffline : finalPt.x;
+        if (shotData.external && !Number.isFinite(shotData.ogcOffline)) shotData.metricProvenance.offline = 'modelled';
 
         if (record) {
             const entry = shotHistory.add(shotData, carryYds, offlineYds, opts.demo === true);

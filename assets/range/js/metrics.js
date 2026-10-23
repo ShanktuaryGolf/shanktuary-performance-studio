@@ -259,13 +259,15 @@ export function readMetric(key, telemetry, ctx) {
     }
 
     const derivedMap = telemetry.derived || {};
-    const est = !!def.est || (def.estIfDerived ? !!derivedMap[def.estIfDerived] : false);
+    const provenance = telemetry.metricProvenance?.[key];
+    const estimated = ['modelled', 'modeled', 'source_estimated', 'estimated', 'speculative'].includes(provenance);
+    const est = estimated || !!def.est || (def.estIfDerived ? !!derivedMap[def.estIfDerived] : false);
 
     return {
         ...base,
         ...out,
         est: out.muted ? false : est,   // an unavailable value isn't an estimate
         unit: out.unit || def.unit,
-        title: out.title || '',
+        title: out.title || (estimated ? (provenance === 'modelled' ? 'Modelled, not measured' : 'Source estimate, not measured') : ''),
     };
 }

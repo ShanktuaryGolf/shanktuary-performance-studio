@@ -258,6 +258,15 @@ def paint_top_header(app, w, h, offset_x=0):
         up = nova_up
         label = "Nova" if nova_up else "Ready"
 
+    try:
+        selected = _studio.gspro_settings.effective_source()
+        if selected in ("cgp", "open_connect"):
+            state = _studio.source_connections.snapshot()
+            up = state.get("state") in ("connected", "ready")
+            label = "CGP" if selected == "cgp" else "Open Connect"
+    except Exception:
+        pass
+
     status_x = club_rect[0] - 82
     c.create_oval(status_x, 23, status_x + 8, 31,
                   fill=v9.GOOD if up else theme.TEXT_3, outline="")

@@ -14,6 +14,7 @@ import statistics
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 import theme
+from src.connections.presentation import metric_status, metric_value
 
 GOLD = "#D4A24F"
 GOLD_LIGHT = "#E3BC70"
@@ -148,8 +149,14 @@ def _scene_background(app, w, h, horizon_rel):
     return app._range_v2_bg_img
 
 
+def _external(shot):
+    return isinstance(shot, dict) and shot.get("_source") in ("gspro", "cgp", "open_connect")
+
+
 def _shot_values(shot):
     shot = shot or {}
+    if _external(shot):
+        return tuple(metric_value(shot, key) for key in ("carry", "offline", "apex"))
     ogc = shot.get("open_golf_coach", {}) or {}
     us = ogc.get("us_customary_units", {}) or {}
     carry = float(us.get("carry_distance_yards") or shot.get("carry_distance_yards") or 0.0)
@@ -169,12 +176,43 @@ def _club_session_shots(app):
     return subset or shots
 
 
-def _metric(c, x0, x1, label, value, value_color=TEXT):
+def _metric(c, x0, x1, label, value, value_color=TEXT, status=""):
     c.create_text(x0 + 18, 68, text=label.upper(), fill=TEXT_3,
                   font=(theme.ui_font(), 7, "bold"), anchor="nw")
     c.create_text(x0 + 18, 89, text=value, fill=value_color,
                   font=(theme.ui_font(), 11, "bold"), anchor="w")
+    if status:
+        c.create_text(x0 + 18, 104, text=status, fill=TEXT_3,
+                      font=(theme.ui_font(), 6), anchor="w")
     c.create_line(x1, 65, x1, 102, fill="#1E4149")
+
+
+def _presence_metrics(shot):
+    """Use actual payload fields, never legacy call-site numeric defaults."""
+    specs = (("Carry", "carry", "YDS"), ("Total", "total", "YDS"),
+             ("Ball Speed", "ball_speed", "MPH"), ("Club Speed", "club_speed", "MPH"),
+             ("Launch", "launch", "°"), ("Total Spin", "spin", "RPM"),
+             ("Apex", "apex", "YDS"), ("Offline", "offline", "YDS"))
+    metrics = []
+    for label, key, unit in specs:
+        value = metric_value(shot, key)
+        status = metric_status(shot, key)
+        if value is None:
+            text = "--"
+        else:
+            if key == "offline":
+                direction = " R" if value > 0 else " L" if value < 0 else ""
+                text = f"{abs(value):.1f}{direction} {unit}"
+            elif key == "launch":
+                text = f"{value:.1f}°"
+            elif key == "spin":
+                text = f"{value:.0f} {unit}"
+            else:
+                text = f"{value:.1f} {unit}"
+            if status in ("MODELLED", "ESTIMATED"):
+                text += "~"
+        metrics.append((label, text, TEAL_TEXT if key == "carry" else TEXT, status))
+    return metrics
 
 
 def draw_range(app, avail_w, h, carry_yds, total_yds, ball_speed, club_speed,
@@ -248,7 +286,7 @@ def draw_range(app, avail_w, h, carry_yds, total_yds, ball_speed, club_speed,
     numeric = []
     for shot in shots:
         carry, off, shot_apex = _shot_values(shot)
-        if carry > 0:
+        if carry is not None and carry > 0 and off is not None and shot_apex is not None:
             numeric.append((carry, off, shot_apex, shot))
 
     # Session landing zone / confidence cue. This is deliberately subtle and
@@ -277,14 +315,16 @@ def draw_range(app, avail_w, h, carry_yds, total_yds, ball_speed, club_speed,
         )
 
     # Historical flights and landing dots. Draw current last so it owns the scene.
-    def draw_flight(carry, off, apex, current=False):
+    def draw_flight(carry, off, apex, current=False, external=False, estimated=False):
         if carry <= 0:
             return
         land_y = y_for_distance(carry)
         land_x = x_for_offline(off, land_y)
         pts = []
         steps = 34
-        apex_px = max(34.0, min(150.0, (apex or apex_yds or 30.0) * 3.0))
+        # Do not invent a 30-yard apex or minimum arc for external data.
+        apex_px = (max(0.0, min(150.0, apex * 3.0)) if external else
+                   max(34.0, min(150.0, (apex or apex_yds or 30.0) * 3.0)))
         for i in range(steps + 1):
             t = i / steps
             dist = carry * t
@@ -299,7 +339,7 @@ def draw_range(app, avail_w, h, carry_yds, total_yds, ball_speed, club_speed,
                           fill=GOLD, outline=GOLD_LIGHT, width=1)
             c.create_oval(land_x - 13, land_y - 13, land_x + 13, land_y + 13,
                           fill="", outline=TEAL_LINE, width=2)
-            label = f"{carry:.1f} YDS"
+            label = f"{carry:.1f} YDS" + ("~" if estimated else "")
             lx = land_x + 42 if land_x < cx + avail_w * .28 else land_x - 42
             c.create_rectangle(lx - 42, land_y - 36, lx + 42, land_y - 17,
                                fill="#0D242B", outline=GOLD)
@@ -315,28 +355,43 @@ def draw_range(app, avail_w, h, carry_yds, total_yds, ball_speed, club_speed,
         if shot is app.current_shot:
             current_row = (carry, off, apex)
         else:
-            draw_flight(carry, off, apex, current=False)
+            draw_flight(carry, off, apex, current=False, external=_external(shot))
+    external = _external(app.current_shot)
+    estimated = external and any(metric_status(app.current_shot, key) in ("MODELLED", "ESTIMATED")
+                                 for key in ("carry", "offline", "apex"))
     if current_row:
-        draw_flight(*current_row, current=True)
+        draw_flight(*current_row, current=True, external=external, estimated=estimated)
+    elif external:
+        values = _shot_values(app.current_shot)
+        if all(value is not None for value in values):
+            draw_flight(*values, current=True, external=True, estimated=estimated)
+        else:
+            c.create_text(cx, metric_bottom + 28,
+                          text="Flight unavailable: carry, offline and apex are required.",
+                          fill=TEXT_3, font=(theme.ui_font(), 9), anchor="center")
     else:
         draw_flight(carry_yds, offline_yds, apex_yds, current=True)
 
     # Top metrics stay visually integrated with the shell and Shot page.
     c.create_rectangle(x0, top_y, x1, metric_bottom, fill="#0A222B", outline="")
     c.create_line(x0, metric_bottom, x1, metric_bottom, fill="#31545D")
-    metrics = [
-        ("Carry", f"{carry_yds:.1f} YDS", TEAL_TEXT),
-        ("Total", f"{total_yds:.1f} YDS", TEXT),
-        ("Ball Speed", f"{ball_speed:.1f} MPH", TEXT),
-        ("Club Speed", f"{club_speed:.1f} MPH", TEXT),
-        ("Launch", f"{vert_launch:.1f}°", TEXT),
-        ("Total Spin", f"{total_spin:.0f} RPM", TEXT),
-        ("Apex", f"{apex_yds:.1f} YDS", TEXT),
-        ("Offline", f"{abs(offline_yds):.1f} {'R' if offline_yds > 0 else 'L' if offline_yds < 0 else ''} YDS".replace("  ", " "), TEXT),
-    ]
+    if external:
+        metrics = _presence_metrics(app.current_shot)
+    else:
+        metrics = [
+            ("Carry", f"{carry_yds:.1f} YDS", TEAL_TEXT),
+            ("Total", f"{total_yds:.1f} YDS", TEXT),
+            ("Ball Speed", f"{ball_speed:.1f} MPH", TEXT),
+            ("Club Speed", f"{club_speed:.1f} MPH", TEXT),
+            ("Launch", f"{vert_launch:.1f}°", TEXT),
+            ("Total Spin", f"{total_spin:.0f} RPM", TEXT),
+            ("Apex", f"{apex_yds:.1f} YDS", TEXT),
+            ("Offline", f"{abs(offline_yds):.1f} {'R' if offline_yds > 0 else 'L' if offline_yds < 0 else ''} YDS".replace("  ", " "), TEXT),
+        ]
+        metrics = [(label, value, color, "") for label, value, color in metrics]
     step = avail_w / len(metrics)
-    for i, (label, value, col) in enumerate(metrics):
-        _metric(c, x0 + i * step, x0 + (i + 1) * step, label, value, col)
+    for i, (label, value, col, status) in enumerate(metrics):
+        _metric(c, x0 + i * step, x0 + (i + 1) * step, label, value, col, status)
 
     # Secondary action: visible, but never louder than the live shot.
     btn_w, btn_h = 248, 38

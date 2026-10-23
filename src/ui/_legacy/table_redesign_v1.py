@@ -6,6 +6,77 @@ header, low-noise rows, and a restrained current-shot treatment.
 """
 
 import theme
+from src.connections.presentation import metric_status, metric_value
+
+_EXTERNAL_SOURCES = {"gspro", "cgp", "open_connect"}
+_TABLE_METRICS = {
+    "carry": "carry", "total": "total", "ball_speed": "ball_speed",
+    "club_speed": "club_speed", "smash": "smash", "launch": "launch",
+    "push_pull": "horizontal_launch", "spin": "spin", "sidespin": "sidespin",
+    "axis": "spin_axis", "path": "club_path", "face": "face_to_path",
+    "apex": "apex", "descent": "descent", "offline": "offline",
+}
+
+
+def _external(shot):
+    return shot.get("_source") in _EXTERNAL_SOURCES
+
+
+def _presence_row(shot, left_handed=False):
+    """Format actual fields; missing and measured zero remain distinct."""
+    result = {}
+    for column, metric in _TABLE_METRICS.items():
+        value = metric_value(shot, metric, left_handed=left_handed)
+        if value is None:
+            result[column] = "--"
+            continue
+        if column == "spin":
+            text = f"{int(value)}"
+        elif column == "sidespin":
+            text = f"{int(value):+d}"
+        elif column in ("push_pull", "axis", "path", "face", "offline"):
+            text = f"{value:+.1f}"
+        else:
+            text = f"{value:.2f}" if column == "smash" else f"{value:.1f}"
+        if metric_status(shot, metric, left_handed=left_handed) in ("MODELLED", "ESTIMATED"):
+            text += "~"
+        result[column] = text
+    return result
+
+
+def _presence_summary(shots, left_handed=False):
+    """Field means exclude missing values; count still means active shots."""
+    shots = [shot for shot in shots if not shot.get("excluded", False)]
+    result = {"count": len(shots), "estimated": set(), "field_counts": {}}
+    for metric in _TABLE_METRICS.values():
+        values = []
+        for shot in shots:
+            value = metric_value(shot, metric, left_handed=left_handed)
+            if value is None:
+                continue
+            values.append(value)
+            if metric_status(shot, metric, left_handed=left_handed) in ("MODELLED", "ESTIMATED"):
+                result["estimated"].add(metric)
+        result[metric] = sum(values) / len(values) if values else None
+        result["field_counts"][metric] = len(values)
+    return result
+
+
+def _presence_summary_parts(summary):
+    specs = (("Carry", "carry", ".1f", "y"), ("Ball", "ball_speed", ".1f", " mph"),
+             ("Club", "club_speed", ".1f", " mph"), ("Smash", "smash", ".2f", ""),
+             ("Launch", "launch", ".1f", "°"), ("Spin", "spin", ".0f", " rpm"),
+             ("Apex", "apex", ".1f", "y"), ("Offline", "offline", "+.1f", "y"))
+    parts = []
+    for label, key, fmt, unit in specs:
+        value = summary[key]
+        if value is None:
+            parts.append(f"{label} --")
+        else:
+            mark = "~" if key in summary["estimated"] else ""
+            parts.append(f"{label} {value:{fmt}}{mark}{unit}")
+    return parts
+
 
 
 def _mix(a, b, t):
@@ -47,7 +118,9 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
     c.create_line(table_x1, avg_y2, table_x2, avg_y2,
                   fill=theme.HAIRLINE)
 
-    avgs = app.calculate_session_averages()
+    has_external = any(_external(shot) for shot in app.session_shots)
+    avgs = (_presence_summary(app.session_shots, getattr(app, "is_left_handed", False))
+            if has_external else app.calculate_session_averages())
     active_count = int(avgs.get("count", 0) if avgs else 0)
 
     title_x = table_x1 + int(16 * font_scale)
@@ -64,30 +137,33 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
         metrics_x = (title_bb[2] + int(26 * font_scale)) if title_bb else (
             table_x1 + int(165 * font_scale)
         )
-        all_clamped = all(
-            app.compute_smash_confidence(
-                s.get("ball_speed_meters_per_second"),
-                s.get("vertical_launch_angle_degrees"),
-                s.get("total_spin_rpm"),
-            )["clamped"]
-            for s in app.session_shots
-        ) if app.session_shots else False
+        if has_external:
+            parts = _presence_summary_parts(avgs)
+        else:
+            all_clamped = all(
+                app.compute_smash_confidence(
+                    s.get("ball_speed_meters_per_second"),
+                    s.get("vertical_launch_angle_degrees"),
+                    s.get("total_spin_rpm"),
+                )["clamped"]
+                for s in app.session_shots
+            ) if app.session_shots else False
 
-        parts = [
-            f"Carry {avgs.get('carry', 0.0):.1f}y",
-            f"Ball {avgs.get('ball_speed', 0.0):.1f} mph",
-        ]
-        if not all_clamped:
+            parts = [
+                f"Carry {avgs.get('carry', 0.0):.1f}y",
+                f"Ball {avgs.get('ball_speed', 0.0):.1f} mph",
+            ]
+            if not all_clamped:
+                parts.extend([
+                    f"Club {avgs.get('club_speed', 0.0):.1f} mph",
+                    f"Smash {avgs.get('smash', 1.0):.2f}",
+                ])
             parts.extend([
-                f"Club {avgs.get('club_speed', 0.0):.1f} mph",
-                f"Smash {avgs.get('smash', 1.0):.2f}",
+                f"Launch {avgs.get('launch_angle', 0.0):.1f}°",
+                f"Spin {int(avgs.get('total_spin', 0.0))} rpm",
+                f"Apex {avgs.get('apex', 0.0):.1f}y",
+                f"Offline {avgs.get('offline', 0.0):+.1f}y",
             ])
-        parts.extend([
-            f"Launch {avgs.get('launch_angle', 0.0):.1f}°",
-            f"Spin {int(avgs.get('total_spin', 0.0))} rpm",
-            f"Apex {avgs.get('apex', 0.0):.1f}y",
-            f"Offline {avgs.get('offline', 0.0):+.1f}y",
-        ])
         c.create_text(
             metrics_x, (avg_y1 + avg_y2) / 2,
             text="   ·   ".join(parts),
@@ -184,6 +260,9 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
 
     def get_sort_val(item):
         idx, s = item
+        if _external(s) and app.table_sort_col in _TABLE_METRICS:
+            return metric_value(s, _TABLE_METRICS[app.table_sort_col],
+                                left_handed=getattr(app, "is_left_handed", False))
         ogc = s.get("open_golf_coach", {})
         us = ogc.get("us_customary_units", {})
         key = app.table_sort_col
@@ -207,8 +286,11 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
         if key == "offline": return us.get("offline_distance_yards", 0.0)
         return idx
 
-    sorted_items = sorted(raw_items, key=get_sort_val,
-                          reverse=not app.table_sort_asc)
+    # Missing external values stay last in either sort direction.
+    present_items = [item for item in raw_items if get_sort_val(item) is not None]
+    missing_items = [item for item in raw_items if get_sort_val(item) is None]
+    sorted_items = sorted(present_items, key=get_sort_val,
+                          reverse=not app.table_sort_asc) + missing_items
     visible_items = sorted_items[
         app.table_scroll_offset: app.table_scroll_offset + avail_rows
     ]
@@ -236,50 +318,55 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
 
         app.table_row_rects.append((table_x1, ry1, table_x2, ry2, real_idx))
 
-        ogc = shot.get("open_golf_coach", {})
-        us = ogc.get("us_customary_units", {})
-        c_val = us.get("carry_distance_yards", 0.0)
-        tot_val = us.get("total_distance_yards", 0.0)
-        bs_val = us.get("ball_speed_mph", 0.0)
-        cs_val = us.get("club_speed_mph", 0.0)
-        sm_val = ogc.get("smash_factor", 1.0)
-        row_clamped = app.compute_smash_confidence(
-            shot.get("ball_speed_meters_per_second"),
-            shot.get("vertical_launch_angle_degrees"),
-            shot.get("total_spin_rpm"),
-        )["clamped"]
-        la_val = shot.get("vertical_launch_angle_degrees", 0.0)
-        hl_val = shot.get("horizontal_launch_angle_degrees", 0.0)
-        sp_val = ogc.get("total_spin_rpm", 0.0)
-        ss_val = ogc.get("sidespin_rpm", 0.0)
-        sa_val = ogc.get("spin_axis_degrees", 0.0)
-        cp_val = app.resolve_handed(ogc.get("club_path_degrees"), 0.0)
-        fp_val = app.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
-        ap_val = us.get("peak_height_yards", 0.0)
-        da_val = ogc.get("descent_angle_degrees", 0.0)
-        off_val = us.get("offline_distance_yards", 0.0)
+        if _external(shot):
+            row_data = _presence_row(shot, getattr(app, "is_left_handed", False))
+            row_data.update(index=f"#{real_idx + 1}", excluded="×" if is_ex else "✓",
+                            club=shot.get("club", "Club"))
+        else:
+            ogc = shot.get("open_golf_coach", {})
+            us = ogc.get("us_customary_units", {})
+            c_val = us.get("carry_distance_yards", 0.0)
+            tot_val = us.get("total_distance_yards", 0.0)
+            bs_val = us.get("ball_speed_mph", 0.0)
+            cs_val = us.get("club_speed_mph", 0.0)
+            sm_val = ogc.get("smash_factor", 1.0)
+            row_clamped = app.compute_smash_confidence(
+                shot.get("ball_speed_meters_per_second"),
+                shot.get("vertical_launch_angle_degrees"),
+                shot.get("total_spin_rpm"),
+            )["clamped"]
+            la_val = shot.get("vertical_launch_angle_degrees", 0.0)
+            hl_val = shot.get("horizontal_launch_angle_degrees", 0.0)
+            sp_val = ogc.get("total_spin_rpm", 0.0)
+            ss_val = ogc.get("sidespin_rpm", 0.0)
+            sa_val = ogc.get("spin_axis_degrees", 0.0)
+            cp_val = app.resolve_handed(ogc.get("club_path_degrees"), 0.0)
+            fp_val = app.resolve_handed(ogc.get("club_face_to_path_degrees"), 0.0)
+            ap_val = us.get("peak_height_yards", 0.0)
+            da_val = ogc.get("descent_angle_degrees", 0.0)
+            off_val = us.get("offline_distance_yards", 0.0)
 
-        # Units are already in the headers; rows can be pure comparable values.
-        row_data = {
-            "index": f"#{real_idx + 1}",
-            "excluded": "×" if is_ex else "✓",
-            "club": shot.get("club", "Club"),
-            "carry": f"{c_val:.1f}",
-            "total": f"{tot_val:.1f}",
-            "ball_speed": f"{bs_val:.1f}",
-            "club_speed": "--" if row_clamped else f"{cs_val:.1f}",
-            "smash": "--" if row_clamped else f"{sm_val:.2f}",
-            "launch": f"{la_val:.1f}",
-            "push_pull": f"{hl_val:+.1f}",
-            "spin": f"{int(sp_val)}",
-            "sidespin": f"{int(ss_val):+d}",
-            "axis": f"{sa_val:+.1f}",
-            "path": f"{cp_val:+.1f}",
-            "face": f"{fp_val:+.1f}",
-            "apex": f"{ap_val:.1f}",
-            "descent": f"{da_val:.1f}",
-            "offline": f"{off_val:+.1f}",
-        }
+            # Units are already in the headers; rows can be pure comparable values.
+            row_data = {
+                "index": f"#{real_idx + 1}",
+                "excluded": "×" if is_ex else "✓",
+                "club": shot.get("club", "Club"),
+                "carry": f"{c_val:.1f}",
+                "total": f"{tot_val:.1f}",
+                "ball_speed": f"{bs_val:.1f}",
+                "club_speed": "--" if row_clamped else f"{cs_val:.1f}",
+                "smash": "--" if row_clamped else f"{sm_val:.2f}",
+                "launch": f"{la_val:.1f}",
+                "push_pull": f"{hl_val:+.1f}",
+                "spin": f"{int(sp_val)}",
+                "sidespin": f"{int(ss_val):+d}",
+                "axis": f"{sa_val:+.1f}",
+                "path": f"{cp_val:+.1f}",
+                "face": f"{fp_val:+.1f}",
+                "apex": f"{ap_val:.1f}",
+                "descent": f"{da_val:.1f}",
+                "offline": f"{off_val:+.1f}",
+            }
 
         curr_x = table_x1
         for col_key, _title, _unit, col_w, align in cols:
@@ -314,3 +401,7 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
                 c.create_text(tx, (ry1 + ry2) / 2, text=val_text,
                               fill=txt_col, font=font, anchor=anchor)
             curr_x = cx2
+
+    if has_external:
+        c.create_text(table_x2, h - 3, text="~ = estimated / modelled · -- = not reported",
+                      fill=theme.TEXT_3, font=(theme.ui_font(), 7), anchor="se")

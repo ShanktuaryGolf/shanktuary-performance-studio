@@ -6,8 +6,8 @@ src/gspro/mapper.py correctly leaves ogc.club_path_degrees etc. absent
 from the payload. The quad view was reading that absence as 0.0 and
 rendering a fake dead-straight, dead-centre shot for EVERY GSPro shot --
 indistinguishable from a real flush strike. This locks in the fix: those
-specific readouts must say "not measured" instead of drawing invented
-zeros.
+specific readouts must show an explicit absence state instead of invented
+zeros. The guided-source grid uses a blank value plus NOT REPORTED provenance.
 """
 
 import pytest
@@ -66,16 +66,10 @@ def test_gspro_shot_with_no_club_data_shows_not_measured():
     root, app = _quad_app_with_shot(ogc_extra={})
     try:
         texts = _canvas_texts(app)
-        joined = " | ".join(texts)
-        assert "not measured" in joined, (
-            "quad view has no 'not measured' state for missing club data "
-            f"-- texts were: {texts}"
-        )
-        # Specifically CLUB PATH's own readout, not just some other caption.
         idx = texts.index("CLUB PATH")
-        assert texts[idx + 1] == "not measured", (
-            f"CLUB PATH should read 'not measured' with no source data, got {texts[idx + 1]!r}"
-        )
+        assert texts[idx + 1] == "--", f"missing path must be blank: {texts}"
+        assert texts[idx + 2] == "NOT REPORTED", f"missing path needs provenance: {texts}"
+        joined = " | ".join(texts)
         # The fabricated-zero symptom: a fake "Neutral path" claim with no
         # real data behind it must not appear.
         assert "Neutral path" not in joined, (
@@ -96,15 +90,9 @@ def test_shot_with_real_club_data_still_shows_real_values():
     })
     try:
         texts = _canvas_texts(app)
-        joined = " | ".join(texts)
-        assert "4.2°" in joined, f"real club path value missing -- texts: {texts}"
-        # Check specifically that CLUB PATH's own value isn't "not measured"
-        # (attack angle legitimately says "not measured" elsewhere in this
-        # view -- that assertion must not be confused by it).
         idx = texts.index("CLUB PATH")
-        assert texts[idx + 1] != "not measured", (
-            "CLUB PATH shows 'not measured' despite real data being present"
-        )
+        assert texts[idx + 1].replace(" ", "") == "4.2°", texts
+        assert texts[idx + 2] == "REPORTED", texts
     finally:
         root.destroy()
 
@@ -118,10 +106,9 @@ def test_zero_club_path_is_distinguishable_from_missing_club_path():
     })
     try:
         texts = _canvas_texts(app)
-        joined = " | ".join(texts)
-        assert "0.0°" in joined, (
-            f"a real 0.0-degree measurement was swallowed as 'not measured' -- texts: {texts}"
-        )
+        idx = texts.index("CLUB PATH")
+        assert texts[idx + 1].replace(" ", "") == "0.0°", texts
+        assert texts[idx + 2] == "REPORTED", texts
     finally:
         root.destroy()
 
@@ -181,9 +168,9 @@ def test_overview_gspro_shot_with_no_club_data_does_not_claim_neutral_path():
             "Overview's delivery takeaway still claims a neutral/flush path "
             f"with no club data present -- texts: {texts}"
         )
-        assert "not measured" in joined or "not reported" in joined, (
-            f"Overview has no honest absence state for missing club data -- texts: {texts}"
-        )
+        idx = texts.index("CLUB PATH")
+        assert texts[idx + 1] == "--", texts
+        assert texts[idx + 2] == "NOT REPORTED", texts
     finally:
         root.destroy()
 
@@ -196,7 +183,8 @@ def test_overview_shot_with_real_club_data_shows_real_values():
     })
     try:
         texts = _canvas_texts(app)
-        joined = " | ".join(texts)
-        assert "5.5°" in joined, f"real club path value missing from Overview -- texts: {texts}"
+        idx = texts.index("CLUB PATH")
+        assert texts[idx + 1].replace(" ", "") == "5.5°", texts
+        assert texts[idx + 2] == "REPORTED", texts
     finally:
         root.destroy()
