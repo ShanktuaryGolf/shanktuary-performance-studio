@@ -62,6 +62,19 @@ def test_frozen_entrypoints_and_optional_package_markers():
     assert 'platform_machine == "arm64"' in req
 
 
-def test_release_workflow_remains_tag_only():
-    text=(ROOT/'.github/workflows/build-releases.yml').read_text()
-    assert "if: startsWith(github.ref, 'refs/tags/v')" in text
+def test_release_workflow_requires_all_builds_and_explicit_approved_commit():
+    text = (ROOT / '.github/workflows/build-releases.yml').read_text()
+    build, release = text.split('  release:\n', 1)
+    assert 'softprops/action-gh-release' not in build
+    assert 'needs: [test, build]' in release
+    assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in release
+    assert "github.event.head_commit.message == 'Release v1.8.1: fix Pillow Tk packaging'" in release
+    assert 'RELEASE_TAG: v1.8.1' in release
+    assert 'draft: true' in release
+    assert 'fail_on_unmatched_files: true' in release
+    assert "if: steps.release_check.outputs.publish == 'true'" in release
+    assert release.index('PYVERIFY\n') < release.index('gh release edit')
+    for name in ('Shanktuary-Studio-Linux-x64.tar.gz', 'Shanktuary-Studio-Windows-x64.zip',
+                 'Shanktuary-Studio-macOS.zip', 'Shanktuary-Studio-x86_64.AppImage',
+                 'SHA256SUMS.txt'):
+        assert 'release-assets/' + name in release
