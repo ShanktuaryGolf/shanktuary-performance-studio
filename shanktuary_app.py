@@ -9,7 +9,12 @@ Usage:
 
 import argparse
 import os
+import sys
 import threading
+
+# Smoke launches must disable import-time pressure hardware probing too.
+if "--smoke-test" in sys.argv[1:]:
+    os.environ["SPS_UI_PREVIEW"] = "1"
 
 # Mirror the console into ~/.shanktuary/logs/ BEFORE the studio import.
 # Importing it initialises the pressure subsystem and prints several lines;
@@ -38,11 +43,52 @@ def parse_args(argv=None):
         "--no-splash", action="store_true",
         help="never show the splash, even on a first run",
     )
+    group.add_argument(
+        "--smoke-test", action="store_true",
+        help="render the desktop and sidebar once, then exit (packaging check)",
+    )
     return parser.parse_args(argv)
+
+
+def smoke_test():
+    """Exercise the real UI, including Pillow's lazily loaded native Tk bridge.
+
+    No main connection workers or HTTP server are started. Set SPS_UI_PREVIEW=1
+    to disable import-time pressure hardware probing, and use an isolated HOME
+    and XDG_DATA_HOME: importing the app and creating its UI uses normal logging
+    and user-data paths, just as a production launch does.
+    """
+    root = studio.tk.Tk()
+    callback_errors = []
+    root.report_callback_exception = lambda *error: callback_errors.append(error)
+    try:
+        root.geometry("1920x1080")
+        app = ShanktuaryDesktopApp(root)
+        root.update()
+        app.draw_screen()
+        root.update()
+        if callback_errors:
+            _, error, traceback = callback_errors[0]
+            raise error.with_traceback(traceback)
+        # This image is created by the actual sidebar renderer with ImageTk,
+        # not by a smoke-only import that could hide a missing PyInstaller hook.
+        image = getattr(app, "_brand_header_v17_img", None)
+        if image is None or image.width() <= 0 or image.height() <= 0:
+            raise RuntimeError("Sidebar ImageTk image was not rendered")
+        if not app.canvas.find_all():
+            raise RuntimeError("Desktop canvas was not rendered")
+        print("SPS_SMOKE_TEST_OK: desktop and sidebar rendered", flush=True)
+    finally:
+        studio.source_connections.stop()
+        root.destroy()
 
 
 def main(argv=None):
     args = parse_args(argv)
+
+    if args.smoke_test:
+        smoke_test()
+        return
 
     if _LOG_FILE:
         print(f"[+] Logging to {_LOG_FILE}")

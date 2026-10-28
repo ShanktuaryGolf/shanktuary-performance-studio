@@ -5,6 +5,11 @@
 
 ---
 
+## v1.8.1 packaging fix
+
+Linux standalone packages now include Pillow's Tk bridge helper so sidebar
+images initialize correctly. Packaged startup is smoke-tested before upload.
+
 ## v1.8.0 connection setup
 
 Choose Nova, GSPro, or Another launch monitor in the built-in guided setup. Another launch monitor starts listening when selected; open your usual compatible connector and select its GSPro / Open Connect output if offered. No address entry or extra Start button is needed for the normal local setup. Advanced settings retain explicit network and port choices. A connection alone is not a verified shot; Start Session unlocks only after an accepted test shot.
