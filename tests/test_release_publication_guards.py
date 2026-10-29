@@ -15,7 +15,7 @@ import pytest
 
 WORKFLOW = Path(__file__).resolve().parents[1] / '.github/workflows/build-releases.yml'
 SHA = 'a' * 40
-TAG = 'v1.8.1'
+TAG = 'v1.8.2'
 REPO = 'owner/repository'
 
 
@@ -61,7 +61,7 @@ def preflight_responses():
 
 def write_versions(path):
     for name in ('obs_server.py', 'shanktuary_performance_studio.py'):
-        (path / name).write_text('APP_VERSION = "v1.8.1"\nBUILD_NUMBER = "2026.10.28.1"\n')
+        (path / name).write_text('APP_VERSION = "v1.8.2"\nBUILD_NUMBER = "2026.10.29.1"\n')
 
 
 def test_preflight_allows_new_release(release_context, monkeypatch):
@@ -88,7 +88,7 @@ def test_preflight_refuses_unapproved_target(release_context, monkeypatch, fault
     elif fault == 'wrong_tag':
         responses[f'repos/{REPO}/git/ref/tags/{TAG}'] = {'object': {'type': 'commit', 'sha': 'b' * 40}}
     else:
-        (release_context / 'obs_server.py').write_text('APP_VERSION = "v1.8.0"\nBUILD_NUMBER = "2026.10.28.1"\n')
+        (release_context / 'obs_server.py').write_text('APP_VERSION = "v1.8.0"\nBUILD_NUMBER = "2026.10.29.1"\n')
     with pytest.raises(AssertionError):
         execute('PYCHECK', responses, monkeypatch)
     assert not (release_context / 'output').exists()

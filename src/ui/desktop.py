@@ -19,6 +19,15 @@ from pathlib import Path
 import shanktuary_performance_studio as studio
 import theme
 
+from .scaling import (
+    CHOICES,
+    ScaledCanvas,
+    configure_root,
+    logical_font,
+    resolve_scale,
+    save_choice,
+)
+
 # The approved renderer snapshot predates package-relative imports. Keep its
 # internal module names private to this UI layer instead of scattering v1...v17
 # files through the repository root. PyInstaller is given this directory via
@@ -96,6 +105,9 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         return bool(rect and rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3])
 
     def __init__(self, root):
+        self.ui_scale_choice, self.ui_scale = configure_root(root)
+        self._display_dpi = root._sps_original_dpi
+        self.ui_scale_controls = {}
         # These are referenced by overridden painters during base __init__.
         self.design_sidebar_toggle_rect = None
         self.design_shot_card_rects = []
@@ -121,8 +133,98 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         root.title(f"Shanktuary Performance Studio {studio.APP_VERSION}")
         self.draw_screen()
 
+    def _make_canvas(self, root):
+        frame = studio.tk.Frame(root, bg=theme.BG)
+        frame.pack(fill="both", expand=True)
+        canvas = ScaledCanvas(frame, scale=self.ui_scale, bg=theme.BG,
+                              highlightthickness=0)
+        # Scrolling is an explicit fallback when a large accessibility scale
+        # cannot fit a complete workspace; never silently shrink the chosen UI.
+        horizontal = studio.tk.Scrollbar(frame, orient="horizontal", command=canvas.xview)
+        vertical = studio.tk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        def show_scrollbar(bar, side, fill, first, last):
+            bar.set(first, last)
+            needed = float(first) > .0001 or float(last) < .9999
+            if needed and not bar.winfo_manager():
+                options = {"before": canvas} if canvas.winfo_manager() else {}
+                bar.pack(side=side, fill=fill, **options)
+            elif not needed and bar.winfo_manager():
+                bar.pack_forget()
+        canvas.configure(
+            xscrollcommand=lambda a, b: show_scrollbar(horizontal, "bottom", "x", a, b),
+            yscrollcommand=lambda a, b: show_scrollbar(vertical, "right", "y", a, b),
+        )
+        self._display_scrollbars = horizontal, vertical
+        return canvas
+
+    def _canvas_font(self, **kwargs):
+        return logical_font(kwargs.pop("root", self.root), **kwargs)
+
+    def _text_width(self, text, font_spec):
+        size = font_spec[1] if len(font_spec) > 1 else 10
+        return logical_font(self.root, family=font_spec[0], size=size,
+                            weight="bold" if "bold" in font_spec else "normal").measure(text)
+
+    def set_ui_scale(self, choice, *, persist=True):
+        if choice not in CHOICES:
+            raise ValueError("Unsupported UI scale")
+        if persist:
+            save_choice(choice)
+        self.ui_scale_choice = choice
+        self.ui_scale = resolve_scale(choice, self._display_dpi)
+        self.root._sps_ui_scale = self.ui_scale
+        self.root.tk.call("tk", "scaling", 96 / 72 * self.ui_scale)
+        self.canvas.ui_scale = self.ui_scale
+        self.canvas._scaled_images.clear()
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
+        self.draw_screen()
+
+    def step_ui_scale(self, direction):
+        """Move one preset without jumping at bounds or losing Auto there."""
+        presets = [int(choice[:-1]) / 100 for choice in CHOICES if choice != "Auto"]
+        options = [scale for scale in presets if (scale - self.ui_scale) * direction > .001]
+        if options:
+            scale = min(options) if direction > 0 else max(options)
+            self.set_ui_scale(f"{round(scale * 100)}%")
+
+    def draw_tools_display_controls(self, x1, y, x2):
+        """Compact size controls live inside Tools, not in the persistent bar."""
+        c = self.canvas
+        c.create_text(x1 + 20, y + 17, text="UI SCALE", fill=theme.TEXT_3,
+                      font=(theme.ui_font(), 8), anchor="w")
+        right = x2 - 16
+        controls = {
+            "minus": (right - 216, y + 2, right - 184, y + 34),
+            "plus": (right - 116, y + 2, right - 84, y + 34),
+            "auto": (right - 62, y + 2, right, y + 34),
+        }
+        self.ui_scale_controls = controls
+        for action in ("minus", "plus"):
+            rect = controls[action]
+            enabled = self.ui_scale > 1 if action == "minus" else self.ui_scale < 2
+            c.create_rectangle(*rect, fill="#18313A", outline="#24434C")
+            cx, cy = (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
+            color = theme.TEXT if enabled else theme.TEXT_3
+            # Draw signs as strokes, avoiding font-specific missing glyphs.
+            c.create_line(cx - 5, cy, cx + 5, cy, fill=color, width=1.5)
+            if action == "plus":
+                c.create_line(cx, cy - 5, cx, cy + 5, fill=color, width=1.5)
+        c.create_text(right - 150, y + 18, text=f"{round(self.ui_scale * 100)}%",
+                      fill="#D4A24F", font=(theme.ui_font(), 10, "bold"))
+        auto = controls["auto"]
+        c.create_text((auto[0] + auto[2]) / 2, y + 18, text="Auto",
+                      fill="#D4A24F" if self.ui_scale_choice == "Auto" else theme.TEXT_3,
+                      font=(theme.ui_font(), 9))
+        c.create_line(x1 + 20, y + 48, x2 - 20, y + 48, fill="#24434C")
+        return y + 68
+
     def draw_screen(self):
         """Reserve a dedicated drawer gutter only while Recent Shots is closed."""
+        if isinstance(getattr(self, "canvas", None), ScaledCanvas):
+            self.canvas.minimum_size = (1600 if getattr(self, "view_mode", 9) == 4 else 1100,
+                                        1050 if getattr(self, "show_tools_menu", False) else 900)
+            self.canvas.update_scrollregion()
         old_rail_w = theme.RAIL_W
         try:
             if getattr(self, "sidebar_collapsed", False):
@@ -139,6 +241,12 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         self.show_tools_menu = False
         self.sidebar_width = 300
         self.draw_screen()
+
+    def handle_scroll_delta(self, delta, mouse_x=None):
+        if mouse_x is None:
+            physical_x = self.canvas.winfo_pointerx() - self.canvas.winfo_rootx()
+            mouse_x = self.canvas.canvasx(physical_x) / self.ui_scale
+        return super().handle_scroll_delta(delta, mouse_x)
 
     # ---- Session pages -------------------------------------------------
     def draw_overview_viewport(self, *args, **kwargs):
@@ -258,6 +366,23 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
     # ---- Final-shell hit testing --------------------------------------
     def handle_mouse_press(self, event):
         x, y = event.x, event.y
+        if any(getattr(self, flag, False) for flag in (
+            "show_pairing_modal", "show_board_assign_modal", "show_aim_modal",
+            "show_spec_editor_modal", "show_autofill_modal", "show_custom_club_modal",
+        )):
+            return studio.ShanktuaryApp.handle_mouse_press(self, event)
+        if getattr(self, "show_tools_menu", False):
+            for action, rect in self.ui_scale_controls.items():
+                if self._design_hit(rect, x, y):
+                    try:
+                        if action == "auto":
+                            self.set_ui_scale("Auto")
+                        else:
+                            self.step_ui_scale(-1 if action == "minus" else 1)
+                    except OSError as exc:
+                        from tkinter import messagebox
+                        messagebox.showerror("Display size", f"Could not save display size: {exc}", parent=self.root)
+                    return
 
         # Full-window takeovers owned by the production class. The redesigned
         # shell's hit rects are still live underneath them, so a click on the

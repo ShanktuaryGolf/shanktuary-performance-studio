@@ -15,6 +15,7 @@ from tkinter import filedialog
 import theme
 from src.ui import tokens as T
 from src.ui.asset_paths import asset_path
+from src.ui.scaling import ScaledCanvas
 from src.ui.splash import SplashScreen
 
 
@@ -74,30 +75,40 @@ class ConnectionWizard(SplashScreen):
         self.win = tk.Toplevel(root)
         self.win.title("Shanktuary · Connection")
         self.win.configure(bg=T.PAGE_BG)
-        self.w = min(self.W, self.win.winfo_screenwidth() - 40)
-        viewport_h = min(self.H, self.win.winfo_screenheight() - 70)
-        self.h = self.H
-        self.win.geometry(f"{self.w}x{viewport_h}+20+20")
-        self.win.resizable(False, False)
-        self.canvas = tk.Canvas(self.win, bg=T.PAGE_BG, highlightthickness=0)
-        if viewport_h < self.h:
-            scroll = tk.Scrollbar(
-                self.win, orient="vertical", command=self.canvas.yview
-            )
-            scroll.pack(side="right", fill="y")
-            self.canvas.configure(
-                yscrollcommand=scroll.set, scrollregion=(0, 0, self.w, self.h)
-            )
-            self.canvas.bind(
-                "<Button-4>", lambda _: self.canvas.yview_scroll(-1, "units")
-            )
-            self.canvas.bind(
-                "<Button-5>", lambda _: self.canvas.yview_scroll(1, "units")
-            )
-            self.canvas.bind(
-                "<MouseWheel>",
-                lambda e: self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"),
-            )
+        self.ui_scale = float(getattr(root, "_sps_ui_scale", 1.0))
+        # Keep the composition in logical design pixels. A smaller display is
+        # a viewport, not permission to squeeze cards and their text together.
+        self.w, self.h = self.W, self.H
+        viewport_w = min(round(self.w * self.ui_scale), self.win.winfo_screenwidth() - 40)
+        viewport_h = min(round(self.h * self.ui_scale), self.win.winfo_screenheight() - 70)
+        self.win.geometry(f"{viewport_w}x{viewport_h}+20+20")
+        self.win.resizable(True, True)
+        self.canvas = ScaledCanvas(
+            self.win, scale=self.ui_scale, minimum_size=(self.w, self.h),
+            bg=T.PAGE_BG, highlightthickness=0,
+        )
+        # Both axes remain reachable after a user resizes the wizard.
+        horizontal = tk.Scrollbar(self.win, orient="horizontal", command=self.canvas.xview)
+        vertical = tk.Scrollbar(self.win, orient="vertical", command=self.canvas.yview)
+        def show_scrollbar(bar, side, fill, first, last):
+            bar.set(first, last)
+            needed = float(first) > .0001 or float(last) < .9999
+            if needed and not bar.winfo_manager():
+                options = {"before": self.canvas} if self.canvas.winfo_manager() else {}
+                bar.pack(side=side, fill=fill, **options)
+            elif not needed and bar.winfo_manager():
+                bar.pack_forget()
+        self.canvas.configure(
+            xscrollcommand=lambda a, b: show_scrollbar(horizontal, "bottom", "x", a, b),
+            yscrollcommand=lambda a, b: show_scrollbar(vertical, "right", "y", a, b),
+        )
+        self.canvas.bind("<Configure>", lambda _: self.canvas.update_scrollregion())
+        self.canvas.bind("<Button-4>", lambda _: self.canvas.yview_scroll(-1, "units"))
+        self.canvas.bind("<Button-5>", lambda _: self.canvas.yview_scroll(1, "units"))
+        self.canvas.bind(
+            "<MouseWheel>",
+            lambda e: self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"),
+        )
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self._on_click)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -111,6 +122,15 @@ class ConnectionWizard(SplashScreen):
             self.win.grab_set()
         self._draw()
         self.win.after(200, self._poll_status)
+
+    def _px(self, value):
+        return round(value * self.ui_scale)
+
+    def _dialog_geometry(self, dialog, width, height):
+        # Native widgets use Tk's selected DPI; their container and padding
+        # must follow the same scale as the canvas.
+        dialog.geometry(f"{self._px(width)}x{self._px(height)}")
+        dialog.resizable(True, True)
 
     @staticmethod
     def _saved_open_connect_options(settings):
@@ -449,9 +469,9 @@ class ConnectionWizard(SplashScreen):
             fg=T.TEXT_2,
             anchor="w",
             justify="left",
-            wraplength=right - sx - 30,
-            padx=10,
-            pady=10,
+            wraplength=self._px(right - sx - 30),
+            padx=self._px(10),
+            pady=self._px(10),
             font=(theme.ui_font(), 9),
         )
         self.canvas.create_window(
@@ -549,8 +569,8 @@ class ConnectionWizard(SplashScreen):
             relief="flat",
             anchor="w",
             font=(theme.ui_font(), 10),
-            padx=10,
-            pady=8,
+            padx=self._px(10),
+            pady=self._px(8),
         )
         menu = tk.Menu(
             button,
@@ -667,7 +687,7 @@ class ConnectionWizard(SplashScreen):
 
     def _on_click(self, event):
         for x1, y1, x2, y2, action, payload in reversed(self._hit_rects):
-            if x1 <= event.x <= x2 and y1 <= self.canvas.canvasy(event.y) <= y2:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
                 self._action(action, payload)
                 return
 
@@ -795,7 +815,7 @@ class ConnectionWizard(SplashScreen):
         dialog.title("Advanced connection settings")
         dialog.configure(bg=T.PAGE_BG)
         dialog.transient(self.win)
-        dialog.geometry("540x365")
+        self._dialog_geometry(dialog, 540, 365)
         options = self._options["open_connect"]
         location = tk.StringVar(value=options.get("location", "local"))
         port = tk.StringVar(value=str(options.get("port", 921)))
@@ -805,7 +825,7 @@ class ConnectionWizard(SplashScreen):
             bg=T.PAGE_BG,
             fg=T.TEXT,
             font=(theme.ui_font(), 15, "bold"),
-        ).pack(anchor="w", padx=24, pady=(22, 12))
+        ).pack(anchor="w", padx=self._px(24), pady=(self._px(22), self._px(12)))
         for text, value in [
             ("This computer only (recommended)", "local"),
             ("Allow a connector on my network", "network"),
@@ -820,9 +840,9 @@ class ConnectionWizard(SplashScreen):
                 selectcolor=T.SURFACE,
                 activebackground=T.PAGE_BG,
                 activeforeground=T.TEXT,
-            ).pack(anchor="w", padx=24, pady=5)
+            ).pack(anchor="w", padx=self._px(24), pady=self._px(5))
         tk.Label(dialog, text="Port", bg=T.PAGE_BG, fg=T.TEXT_2).pack(
-            anchor="w", padx=24, pady=(12, 4)
+            anchor="w", padx=self._px(24), pady=(self._px(12), self._px(4))
         )
         tk.Entry(
             dialog,
@@ -831,24 +851,24 @@ class ConnectionWizard(SplashScreen):
             fg=T.TEXT,
             insertbackground=T.TEXT,
             relief="flat",
-        ).pack(anchor="w", padx=24, ipady=6)
+        ).pack(anchor="w", padx=self._px(24), ipady=self._px(6))
         error = tk.StringVar()
         tk.Label(
             dialog,
             textvariable=error,
             bg=T.PAGE_BG,
             fg=T.GOLD,
-            wraplength=490,
+            wraplength=self._px(490),
             justify="left",
-        ).pack(anchor="w", padx=24, pady=8)
+        ).pack(anchor="w", padx=self._px(24), pady=self._px(8))
         tk.Label(
             dialog,
             text="Default: 921. Change it only if your connector supports another port.\nNetwork mode exposes the listener to your network; no firewall settings are changed.",
             bg=T.PAGE_BG,
             fg=T.TEXT_3,
             justify="left",
-            wraplength=490,
-        ).pack(anchor="w", padx=24)
+            wraplength=self._px(490),
+        ).pack(anchor="w", padx=self._px(24))
 
         def close():
             dialog.destroy()
@@ -880,9 +900,9 @@ class ConnectionWizard(SplashScreen):
             bg=T.GOLD,
             fg=T.PAGE_BG,
             relief="flat",
-            padx=16,
-            pady=8,
-        ).pack(anchor="e", padx=24, pady=12)
+            padx=self._px(16),
+            pady=self._px(8),
+        ).pack(anchor="e", padx=self._px(24), pady=self._px(12))
         dialog.protocol("WM_DELETE_WINDOW", close)
         dialog.grab_set()
 
@@ -891,14 +911,14 @@ class ConnectionWizard(SplashScreen):
         dialog.title("Optional metric estimates")
         dialog.configure(bg=T.PAGE_BG)
         dialog.transient(self.win)
-        dialog.geometry("560x330")
+        self._dialog_geometry(dialog, 560, 330)
         tk.Label(
             dialog,
             text="Optional estimates, not measurements",
             bg=T.PAGE_BG,
             fg=T.TEXT,
             font=(theme.ui_font(), 15, "bold"),
-        ).pack(anchor="w", padx=24, pady=(24, 14))
+        ).pack(anchor="w", padx=self._px(24), pady=(self._px(24), self._px(14)))
         tk.Label(
             dialog,
             text="OpenGolfCoach runs locally and only fills missing metrics.\nMeasured values and their provenance stay unchanged.\nChanges take effect on your next explicit connection start.",
@@ -906,7 +926,7 @@ class ConnectionWizard(SplashScreen):
             bg=T.PAGE_BG,
             fg=T.TEXT_2,
             font=(theme.ui_font(), 10),
-        ).pack(anchor="w", padx=24)
+        ).pack(anchor="w", padx=self._px(24))
         variables = {}
         for key, text in [
             (
@@ -928,7 +948,7 @@ class ConnectionWizard(SplashScreen):
                 activeforeground=T.TEXT,
                 highlightthickness=0,
                 font=(theme.ui_font(), 10),
-            ).pack(anchor="w", padx=24, pady=10)
+            ).pack(anchor="w", padx=self._px(24), pady=self._px(10))
 
         def close():
             values = {key: var.get() for key, var in variables.items()}
@@ -954,9 +974,9 @@ class ConnectionWizard(SplashScreen):
             bg=T.GOLD,
             fg=T.PAGE_BG,
             relief="flat",
-            padx=24,
-            pady=8,
-        ).pack(anchor="e", padx=24, pady=10)
+            padx=self._px(24),
+            pady=self._px(8),
+        ).pack(anchor="e", padx=self._px(24), pady=self._px(10))
         dialog.protocol("WM_DELETE_WINDOW", close)
         dialog.grab_set()
 

@@ -164,14 +164,14 @@ jobs:
     needs: [test, build]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      github.event.head_commit.message == 'Release v1.8.1: fix Pillow Tk packaging'
+      github.event.head_commit.message == 'Release v1.8.2: add coherent UI scaling and aligned Tables'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: v1.8.1
+      RELEASE_TAG: v1.8.2
       RELEASE_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -202,7 +202,7 @@ jobs:
                         and isinstance(node.targets[0], ast.Name)
                         and node.targets[0].id in ("APP_VERSION", "BUILD_NUMBER")}
               assert values["APP_VERSION"] == tag, filename
-              assert values["BUILD_NUMBER"] == "2026.10.28.1", filename
+              assert values["BUILD_NUMBER"] == "2026.10.29.1", filename
           head = api(f"repos/{repo}/git/ref/heads/main")
           assert head["object"]["sha"] == sha, "main moved; refuse stale publication"
           ref = api(f"repos/{repo}/git/ref/tags/{tag}", optional=True)
@@ -235,7 +235,7 @@ jobs:
         id: draft_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.8.1
+          tag_name: v1.8.2
           target_commitish: ${{ github.sha }}
           draft: true
           fail_on_unmatched_files: true

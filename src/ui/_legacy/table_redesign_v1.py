@@ -93,6 +93,49 @@ def _mix(a, b, t):
     return "#%02X%02X%02X" % vals
 
 
+_COLUMNS = [
+    ("index", "#", "", 40, "c"),
+    ("excluded", "Excl", "", 44, "c"),
+    ("club", "Club", "", 70, "w"),
+    ("carry", "Carry", "yds", 68, "c"),
+    ("total", "Total", "yds", 68, "c"),
+    ("ball_speed", "Ball Spd", "mph", 74, "c"),
+    ("club_speed", "Club Spd", "mph", 74, "c"),
+    ("smash", "Smash", "", 60, "c"),
+    ("launch", "Launch", "deg", 64, "c"),
+    ("push_pull", "Start", "deg", 72, "c"),
+    ("spin", "Spin", "rpm", 68, "c"),
+    ("sidespin", "Sidespin", "rpm", 72, "c"),
+    ("axis", "Axis", "deg", 64, "c"),
+    ("path", "Path", "deg", 64, "c"),
+    ("face", "Face", "deg", 64, "c"),
+    ("apex", "Apex", "yds", 62, "c"),
+    ("descent", "Descent", "deg", 64, "c"),
+    ("offline", "Offline", "yds", 72, "c"),
+]
+
+
+def _column_layout(x1, x2):
+    """One set of boundaries/anchors for headers, values and sorting targets.
+
+    Fractional boundaries avoid cumulative rounding drift. Fitting the entire
+    width also prevents the final columns becoming zero-width at small sizes.
+    Numeric labels and values share the same optical centre; Club stays left
+    aligned for scanning names.
+    """
+    total = sum(column[3] for column in _COLUMNS)
+    consumed = 0
+    result = []
+    for key, title, unit, width, align in _COLUMNS:
+        left = x1 + (x2 - x1) * consumed / total
+        consumed += width
+        right = x1 + (x2 - x1) * consumed / total
+        text_x = left + 9 if align == "w" else (left + right) / 2
+        anchor = "w" if align == "w" else "center"
+        result.append((key, title, unit, left, right, text_x, anchor))
+    return result
+
+
 def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
     c = app.canvas
     app.table_row_rects.clear()
@@ -105,7 +148,6 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
     top_y = 60
     table_x1 = offset_x + 12
     table_x2 = offset_x + avail_w - 12
-    table_avail_w = table_x2 - table_x1
 
     # ------------------------------------------------------------------
     # Quiet pinned session summary
@@ -185,70 +227,34 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
     c.create_line(table_x1, head_y2, table_x2, head_y2,
                   fill=theme.HAIRLINE)
 
-    # key, title, unit, base width, alignment
-    cols_base = [
-        ("index", "#", "", 40, "c"),
-        ("excluded", "Excl", "", 44, "c"),
-        ("club", "Club", "", 70, "w"),
-        ("carry", "Carry", "yds", 68, "e"),
-        ("total", "Total", "yds", 68, "e"),
-        ("ball_speed", "Ball Spd", "mph", 74, "e"),
-        ("club_speed", "Club Spd", "mph", 74, "e"),
-        ("smash", "Smash", "", 60, "e"),
-        ("launch", "Launch", "deg", 64, "e"),
-        ("push_pull", "Start", "deg", 72, "e"),
-        ("spin", "Spin", "rpm", 68, "e"),
-        ("sidespin", "Sidespin", "rpm", 72, "e"),
-        ("axis", "Axis", "deg", 64, "e"),
-        ("path", "Path", "deg", 64, "e"),
-        ("face", "Face", "deg", 64, "e"),
-        ("apex", "Apex", "yds", 62, "e"),
-        ("descent", "Descent", "deg", 64, "e"),
-        ("offline", "Offline", "yds", 72, "e"),
-    ]
+    cols = _column_layout(table_x1, table_x2)
 
-    base_tot_w = sum(col[3] for col in cols_base)
-    w_factor = max(1.0, table_avail_w / float(base_tot_w))
-    cols = [(k, t, u, int(w * w_factor), a)
-            for k, t, u, w, a in cols_base]
-
-    curr_x = table_x1
     title_font = (theme.ui_font(), max(8, int(10 * font_scale)), "bold")
     unit_font = (theme.ui_font(), max(7, int(8 * font_scale)))
 
-    for col_key, col_title, unit, col_w, align in cols:
-        cx2 = min(table_x2, curr_x + col_w)
+    for col_key, col_title, unit, curr_x, cx2, tx, anchor in cols:
         app.table_header_rects.append((curr_x, head_y1, cx2, head_y2, col_key))
         is_sorted = (app.table_sort_col == col_key)
         txt_col = theme.ACCENT_TEXT if is_sorted else theme.TEXT_2
 
-        if align == "c":
-            tx, anchor = (curr_x + cx2) / 2, "center"
-        elif align == "e":
-            tx, anchor = cx2 - 9, "e"
-        else:
-            tx, anchor = curr_x + 9, "w"
-
-        title_y = head_y1 + (13 if unit else head_h / 2)
-        tid = c.create_text(tx, title_y, text=col_title, fill=txt_col,
-                            font=title_font, anchor=anchor)
+        title_y = head_y1 + head_h * (.33 if unit else .5)
+        c.create_text(tx, title_y, text=col_title, fill=txt_col,
+                      font=title_font, anchor=anchor)
         if unit:
-            c.create_text(tx, head_y1 + 28, text=unit, fill=theme.TEXT_3,
+            c.create_text(tx, head_y1 + head_h * .73, text=unit, fill=theme.TEXT_3,
                           font=unit_font, anchor=anchor)
 
-        # Small blue sort arrow is attached to the active label instead of
-        # turning the whole '# ▲' header into a special-looking control.
+        # A tiny marker in the top gutter never changes the label's centre
+        # and cannot collide with a long label in a neighbouring column.
         if is_sorted:
-            bb = c.bbox(tid)
-            if bb:
-                arrow_x = bb[2] + 5 if align != "e" else bb[0] - 5
-                arrow_anchor = "w" if align != "e" else "e"
-                c.create_text(arrow_x, title_y,
-                              text="▲" if app.table_sort_asc else "▼",
-                              fill=theme.ACCENT_LINE,
-                              font=(theme.ui_font(), max(6, int(7 * font_scale)), "bold"),
-                              anchor=arrow_anchor)
-        curr_x = cx2
+            ax = (curr_x + cx2) / 2
+            ay = head_y1 + 4 * ui_scale
+            dx, dy = 3 * ui_scale, 2 * ui_scale
+            direction = -1 if app.table_sort_asc else 1
+            c.create_polygon(ax - dx, ay - direction * dy,
+                             ax + dx, ay - direction * dy,
+                             ax, ay + direction * dy,
+                             fill=theme.ACCENT_LINE, outline="")
 
     # ------------------------------------------------------------------
     # Sortable dense rows
@@ -368,9 +374,7 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
                 "offline": f"{off_val:+.1f}",
             }
 
-        curr_x = table_x1
-        for col_key, _title, _unit, col_w, align in cols:
-            cx2 = min(table_x2, curr_x + col_w)
+        for col_key, _title, _unit, curr_x, cx2, tx, anchor in cols:
             val_text = row_data.get(col_key, "-")
 
             if col_key == "excluded":
@@ -381,13 +385,6 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
                               font=(theme.ui_font(), max(8, int(10 * font_scale)), "bold"),
                               anchor="center")
             else:
-                if align == "c":
-                    tx, anchor = (curr_x + cx2) / 2, "center"
-                elif align == "e":
-                    tx, anchor = cx2 - 9, "e"
-                else:
-                    tx, anchor = curr_x + 9, "w"
-
                 # Selected row is identified structurally, not by turning every
                 # number orange. Keep orange on identity + two outcome anchors.
                 if is_ex:
@@ -400,7 +397,6 @@ def draw_shot_table_viewport(app, avail_w, h, offset_x=0):
                 font = row_bold if (is_sel and col_key in ("index", "club", "carry", "offline")) else row_font
                 c.create_text(tx, (ry1 + ry2) / 2, text=val_text,
                               fill=txt_col, font=font, anchor=anchor)
-            curr_x = cx2
 
     if has_external:
         c.create_text(table_x2, h - 3, text="~ = estimated / modelled · -- = not reported",

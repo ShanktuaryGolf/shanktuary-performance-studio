@@ -5,6 +5,18 @@
 
 ---
 
+## v1.8.2 — display scaling and Table alignment
+
+Build `2026.10.29.1`.
+
+- Text, controls, spacing, artwork and pointer targets now scale together on
+  high-DPI displays, including KDE/XWayland configurations with enlarged fonts.
+- Open **Tools** for compact **− / percentage / +** controls and **Auto**.
+  Your selection is remembered; large interfaces scroll rather than overlap.
+- Table headings, units and numeric values share aligned column centers.
+- Setup, connection wizard, notes dialogs and narrow-window layouts follow
+  the same desktop scale. OBS/browser layouts remain unchanged.
+
 ## v1.8.1 packaging fix
 
 Linux standalone packages now include Pillow's Tk bridge helper so sidebar

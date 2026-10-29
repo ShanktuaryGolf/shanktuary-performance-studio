@@ -37,7 +37,7 @@ def _fit_text(canvas, text, max_px, font):
     if width(text) <= max_px:
         return text
     for n in range(len(text) - 1, 0, -1):
-        candidate = text[:n].rstrip() + "…"
+        candidate = text[:n].rstrip() + "..."
         if width(candidate) <= max_px:
             return candidate
     return "…"
@@ -106,8 +106,8 @@ def paint_sidebar(app, w, h):
                                      (theme.ui_font(), 9, "bold")),
                       fill=theme.TEXT_2,
                       font=(theme.ui_font(), 9, "bold"), anchor="nw")
-        c.create_text(chevron_x, control_y + 1, text="⌄", fill=theme.TEXT_3,
-                      font=(theme.ui_font(), 10), anchor="nw")
+        c.create_line(chevron_x, control_y + 5, chevron_x + 4, control_y + 9,
+                      chevron_x + 8, control_y + 5, fill=theme.TEXT_3, width=1)
 
 
 def paint_top_header(app, w, h, offset_x=0):

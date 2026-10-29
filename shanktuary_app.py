@@ -26,6 +26,7 @@ _LOG_FILE = _install_session_log()
 
 import shanktuary_performance_studio as studio  # noqa: E402
 from src.ui import ShanktuaryDesktopApp, should_show_splash  # noqa: E402
+from src.ui.scaling import configure_root  # noqa: E402
 
 
 def parse_args(argv=None):
@@ -112,7 +113,8 @@ def main(argv=None):
         print("[preview] OBS server disabled; connection readiness remains real")
 
     root = studio.tk.Tk()
-    default_w, default_h = 1920, 1080
+    _, display_scale = configure_root(root)
+    default_w, default_h = round(1920 * display_scale), round(1080 * display_scale)
     scr_w = root.winfo_screenwidth()
     scr_h = root.winfo_screenheight()
     if scr_w >= default_w and scr_h >= default_h:

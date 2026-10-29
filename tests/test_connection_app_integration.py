@@ -68,8 +68,8 @@ def test_release_workflow_requires_all_builds_and_explicit_approved_commit():
     assert 'softprops/action-gh-release' not in build
     assert 'needs: [test, build]' in release
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in release
-    assert "github.event.head_commit.message == 'Release v1.8.1: fix Pillow Tk packaging'" in release
-    assert 'RELEASE_TAG: v1.8.1' in release
+    assert "github.event.head_commit.message == 'Release v1.8.2: add coherent UI scaling and aligned Tables'" in release
+    assert 'RELEASE_TAG: v1.8.2' in release
     assert 'draft: true' in release
     assert 'fail_on_unmatched_files: true' in release
     assert "if: steps.release_check.outputs.publish == 'true'" in release

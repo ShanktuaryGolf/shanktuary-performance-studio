@@ -271,12 +271,12 @@ def _fit_shot_name(text, max_w, base_size=28, font_name=None):
     """
     name = font_name or _ui_font()
     try:
-        import tkinter.font as tkfont
+        from src.ui.scaling import logical_font
     except Exception:
         return base_size
     for size in range(int(base_size), 13, -1):
         try:
-            if tkfont.Font(family=name, size=size, weight="bold").measure(text) <= max_w:
+            if logical_font(family=name, size=size, weight="bold").measure(text) <= max_w:
                 return size
         except Exception:
             return base_size

@@ -155,15 +155,15 @@ def test_the_shot_name_is_clamped_to_its_identity_column():
         pytest.skip("no display")
     try:
         base = 28
-        import tkinter.font as tkfont
+        from src.ui.scaling import logical_font
 
-        # Measure using this display's actual font/DPI rather than assuming
-        # every platform renders a 28pt label wider than a fixed 240 pixels.
-        font = tkfont.Font(family=v7._ui_font(), size=base, weight="bold")
+        # The renderer measures logical 96-DPI design pixels; native Tk DPI
+        # must not change the available width or the fit decision.
+        font = logical_font(family=v7._ui_font(), size=base, weight="bold")
         available = int(font.measure("Straight Fade") * 0.8)
         fitted = v7._fit_shot_name("Straight Fade", available, base)
         assert fitted < base
-        assert tkfont.Font(family=v7._ui_font(), size=fitted, weight="bold").measure("Straight Fade") <= available
+        assert logical_font(family=v7._ui_font(), size=fitted, weight="bold").measure("Straight Fade") <= available
         assert v7._fit_shot_name("Draw", font.measure("Draw") + 1, base) == base
     finally:
         root.destroy()

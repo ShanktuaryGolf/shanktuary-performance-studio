@@ -116,7 +116,7 @@ def test_a_long_session_name_ellipsizes_instead_of_running_under_controls(app):
 
     item, bbox = _session_label(application.canvas)
     shown = application.canvas.itemcget(item, "text")
-    assert shown.endswith("…"), f"long name was not ellipsized: {shown!r}"
+    assert shown.endswith("..."), f"long name was not ellipsized: {shown!r}"
     assert shown != long_name
     assert not _covering(application.canvas, item, bbox)
 

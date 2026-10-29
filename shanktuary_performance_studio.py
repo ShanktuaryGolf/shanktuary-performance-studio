@@ -179,6 +179,7 @@ SIDE_PATH = os.path.join(SCRIPT_DIR, "assets", "iron_side.png")
 
 shot_queue = queue.Queue()
 from src.connections.controller import SourceConnections, StudioConnectionSetup
+
 source_connections = SourceConnections(shot_queue)
 
 
@@ -577,8 +578,8 @@ def load_image_asset(path, target_h=210, mirror=False, pad_square=True):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.8.1"
-BUILD_NUMBER = "2026.10.28.1"
+APP_VERSION = "v1.8.2"
+BUILD_NUMBER = "2026.10.29.1"
 
 class ShanktuaryApp:
     # Bound on img_cache. Rotated overhead sprites measure ~0.5 MB each as PIL
@@ -778,7 +779,7 @@ class ShanktuaryApp:
         # OrderedDict + move_to_end gives LRU eviction.
         self.img_cache = OrderedDict()
 
-        self.canvas = tk.Canvas(root, bg=theme.BG, highlightthickness=0)
+        self.canvas = self._make_canvas(root)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         # Centralized Keyboard Handler (Modal & Global Hotkeys)
@@ -1048,7 +1049,7 @@ class ShanktuaryApp:
             top = tk.Toplevel(self.root)
             top.title("Session Notes")
             top.configure(bg=theme.SURFACE)
-            top.geometry("420x260")
+            top.geometry(f"{round(420 * getattr(self, 'ui_scale', 1))}x{round(260 * getattr(self, 'ui_scale', 1))}")
             top.transient(self.root)
 
             text = tk.Text(top, wrap="word", font=(theme.ui_font(), 10))
@@ -1549,6 +1550,13 @@ class ShanktuaryApp:
         return session_report.write_pdf(session, path, index_result=result,
                                         index_trend=trend, is_left_handed=self.is_left_handed)
 
+    def _canvas_font(self, **kwargs):
+        import tkinter.font as tkfont
+        return tkfont.Font(**kwargs)
+
+    def _make_canvas(self, root):
+        return tk.Canvas(root, bg=theme.BG, highlightthickness=0)
+
     def _text_width(self, text, font_spec):
         """Measured pixel width of a string, cached.
 
@@ -1561,11 +1569,10 @@ class ShanktuaryApp:
         cached = self._text_w_cache.get(key)
         if cached is None:
             try:
-                import tkinter.font as tkfont
                 fam = font_spec[0]
                 size = font_spec[1] if len(font_spec) > 1 else 10
                 weight = "bold" if "bold" in font_spec else "normal"
-                cached = tkfont.Font(family=fam, size=size,
+                cached = self._canvas_font(family=fam, size=size,
                                      weight=weight).measure(text)
             except Exception:
                 cached = int(len(text) * size * 0.62)
@@ -2476,7 +2483,7 @@ class ShanktuaryApp:
             top = tk.Toplevel(self.root)
             top.title("Club Notes")
             top.configure(bg=theme.SURFACE)
-            top.geometry("420x260")
+            top.geometry(f"{round(420 * getattr(self, 'ui_scale', 1))}x{round(260 * getattr(self, 'ui_scale', 1))}")
             top.transient(self.root)
 
             text = tk.Text(top, wrap="word", font=(theme.ui_font(), 10))
@@ -5202,6 +5209,10 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(x1 + 6, btn_y1, x2 - 6, btn_y2, fill=row_sel, outline="")
         self.canvas.create_text((x1 + x2) // 2, (btn_y1 + btn_y2) // 2, text="＋  Add custom club", fill=theme.TEXT_2, font=(theme.ui_font(), 9), anchor="center")
 
+    def draw_tools_display_controls(self, x1, y, x2):
+        """Optional desktop-only display controls; legacy entry point unchanged."""
+        return y
+
     def draw_tools_flyout_menu(self, w, h):
         """Tools flyout. Every row states what it does -- navigation says
         where it opens, copy actions show the literal URL -- so open-vs-copy
@@ -5258,7 +5269,7 @@ class ShanktuaryApp:
                                              fill=panel_bg, outline=edge)
 
         self.tools_menu_items.clear()
-        curr_y = y1 + 16
+        curr_y = self.draw_tools_display_controls(x1, y1 + 16, x2)
 
         for s_idx, (title, items) in enumerate(sections):
             if s_idx > 0:
@@ -6994,12 +7005,11 @@ class ShanktuaryApp:
         # concept has them tight, as one unit. Top-anchoring makes the gap
         # simply the caption's line height.
         try:
-            import tkinter.font as _tkf
-            _cap_line = _tkf.Font(family=cap_f[0], size=cap_f[1]).metrics("linespace")
+            _cap_line = self._canvas_font(family=cap_f[0], size=cap_f[1]).metrics("linespace")
         except Exception:
             _cap_line = int(cap_f[1] * 1.4)
         try:
-            _val_line = _tkf.Font(family=val_f[0], size=val_f[1]).metrics("linespace")
+            _val_line = self._canvas_font(family=val_f[0], size=val_f[1]).metrics("linespace")
         except Exception:
             _val_line = int(val_f[1] * 1.4)
         annot_gap = _cap_line + 1
@@ -7787,8 +7797,7 @@ class ShanktuaryApp:
         font_small = (theme.ui_font(), 8)
         font_body = (theme.ui_font(), 9)
         try:
-            import tkinter.font as _tkf
-            line_h = _tkf.Font(family=theme.ui_font(), size=9).metrics("linespace") + 4
+            line_h = self._canvas_font(family=theme.ui_font(), size=9).metrics("linespace") + 4
         except Exception:
             line_h = 16
 
@@ -7851,8 +7860,7 @@ class ShanktuaryApp:
 
         c = self.canvas
         try:
-            import tkinter.font as _tkf
-            line_h = _tkf.Font(family=theme.ui_font(), size=9).metrics("linespace") + 4
+            line_h = self._canvas_font(family=theme.ui_font(), size=9).metrics("linespace") + 4
         except Exception:
             line_h = 16
         c.create_line(x0, y0 - 10, x1, y0 - 10, fill=theme.HAIRLINE)
@@ -9202,11 +9210,9 @@ class ShanktuaryApp:
         f_label = max(11, int(15 * s))
         f_step = max(12, int(17 * s))
 
-        import tkinter.font as tkfont
-
         def lh(size, bold=False):
             try:
-                return tkfont.Font(root=self.root, family=theme.ui_font(),
+                return self._canvas_font(root=self.root, family=theme.ui_font(),
                                    size=size,
                                    weight="bold" if bold else "normal",
                                    ).metrics("linespace")
@@ -9424,11 +9430,9 @@ class ShanktuaryApp:
         # if it were a pixel height, so a 52pt headline reserved 52px for a
         # ~70px line -- which is why "Both boards assigned" sat on top of its
         # own subtitle, and "kg" ran straight through the weight.
-        import tkinter.font as tkfont
-
         def lh(size, bold=False):
             try:
-                return tkfont.Font(root=self.root, family=theme.ui_font(),
+                return self._canvas_font(root=self.root, family=theme.ui_font(),
                                    size=size,
                                    weight="bold" if bold else "normal",
                                    ).metrics("linespace")
@@ -10051,7 +10055,7 @@ class ShanktuaryApp:
                                 fill=theme.TEXT_3, font=(theme.ui_font(), 7),
                                 anchor="nw")
         self.setup_aim_nudge_rects = []
-        for i, (lbl, delta) in enumerate((("−1.0", -1.0), ("−0.1", -0.1),
+        for i, (lbl, delta) in enumerate((("-1.0", -1.0), ("-0.1", -0.1),
                                           ("+0.1", 0.1), ("+1.0", 1.0))):
             bw = 46
             bx0 = lx0 + 18 + i * (bw + 6)
@@ -10152,8 +10156,7 @@ class ShanktuaryApp:
         max_w = (lx1 - 18) - (lx0 + 18) - 120
         shown = log_p
         try:
-            import tkinter.font as _tkf
-            f_ = _tkf.Font(root=self.root, family=theme.ui_font(), size=7)
+            f_ = self._canvas_font(root=self.root, family=theme.ui_font(), size=7)
             while shown and f_.measure("…" + shown) > max_w and len(shown) > 12:
                 shown = shown[8:]
             if shown != log_p:

@@ -1,6 +1,4 @@
 """Shared contact presentation. Ball-flight comparisons are not strike estimates."""
-import tkinter.font as tkfont
-
 import theme
 from src.analytics.index import valid_shots
 from src.analytics.strike import (
@@ -12,6 +10,7 @@ from src.analytics.strike import (
     contact_location,
 )
 from src.analytics.strike_estimate import estimate as strike_estimate
+from src.ui.scaling import logical_font
 
 from . import tokens
 
@@ -167,9 +166,9 @@ def draw_contact_panel(app, x0, y0, x1, y1):
     width, height = x1-x0, y1-y0
     scale = max(.85, min(1.25, width / 520, height / 350))
     pad = max(12, int(16*scale))
-    small = tkfont.Font(root=c, family=theme.ui_font(), size=max(7, int(9*scale)))
-    body = tkfont.Font(root=c, family=theme.ui_font(), size=max(8, int(10*scale)))
-    bold = tkfont.Font(root=c, family=theme.ui_font(), size=max(9, int(11*scale)), weight="bold")
+    small = logical_font(c, family=theme.ui_font(), size=max(7, int(9*scale)))
+    body = logical_font(c, family=theme.ui_font(), size=max(8, int(10*scale)))
+    bold = logical_font(c, family=theme.ui_font(), size=max(9, int(11*scale)), weight="bold")
     left, right = x0+pad, x1-pad
 
     def text(x, yy, value, font=body, color=tokens.TEXT_2, anchor="nw", budget=None):
