@@ -167,7 +167,8 @@ def _draw_shot(app, shot, width, height, offset_x):
     _text(c, x+18, ribbon_y+17, "Shot Overview", 12 if width < 1000 else 15, TEAL)
     _text(c, x+18, ribbon_y+52, club, 19)
     _text(c, x+18, ribbon_y+90, "Supplied ball data", 10, theme.TEXT_2)
-    identity = min(200, usable * .18)
+    # Keep the identity labels clear of Carry even with wider Linux fonts.
+    identity = min(200, max(180, usable * .18))
     columns = [(("carry", "Carry", "yd"), ("total", "Total", "yd")),
                (("ball_speed", "Ball Speed", "mph"), ("club_speed", "Club Speed", "mph")),
                (("launch", "VLA", "deg"), ("horizontal_launch", "HLA", "deg")),
