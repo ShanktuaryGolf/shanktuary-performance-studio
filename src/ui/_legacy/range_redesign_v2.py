@@ -150,7 +150,7 @@ def _scene_background(app, w, h, horizon_rel):
 
 
 def _external(shot):
-    return isinstance(shot, dict) and shot.get("_source") in ("gspro", "cgp", "open_connect")
+    return isinstance(shot, dict) and shot.get("_source") in ("pureplay", "gspro", "cgp", "open_connect")
 
 
 def _shot_values(shot):

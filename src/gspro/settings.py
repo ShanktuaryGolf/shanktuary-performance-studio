@@ -29,7 +29,7 @@ import threading
 #:   gspro -- poll GSPro.db only; Nova shots are dropped so a launch monitor
 #:            feeding GSPro never double-ingests one physical shot
 #:   both  -- ingest from both (only correct for genuinely separate bays)
-VALID_SOURCES = ("nova", "gspro", "both", "open_connect", "cgp")
+VALID_SOURCES = ("nova", "gspro", "both", "open_connect", "cgp", "pureplay")
 DEFAULT_SOURCE = "nova"
 DEFAULT_OPEN_CONNECT_PORT = 921
 
@@ -124,6 +124,8 @@ def load_settings(refresh=False):
     Keys:
       source          -- one of VALID_SOURCES (effective value)
       db_path         -- explicit GSPro.db override, or "" for auto-locate
+      pureplay_profiles_path -- PurePlay Profiles folder, or "" for auto-locate
+      pureplay_profiles_path_locked -- True when SPS_PUREPLAY_PROFILES overrides it
       source_locked   -- True when SPS_SHOT_SOURCE forces the source
       db_path_locked  -- True when SPS_GSPRO_DB forces the database path
       onboarded       -- True once the user has completed the source picker
@@ -143,6 +145,12 @@ def load_settings(refresh=False):
         stored = _read_file()
         source = _normalise_source(stored.get("source")) or DEFAULT_SOURCE
         db_path = stored.get("db_path") if isinstance(stored.get("db_path"), str) else ""
+        pureplay_path = stored.get("pureplay_profiles_path", "")
+        if not isinstance(pureplay_path, str):
+            pureplay_path = ""
+        env_pureplay = os.environ.get("SPS_PUREPLAY_PROFILES", "").strip()
+        if env_pureplay:
+            pureplay_path = os.path.abspath(env_pureplay)
         onboarded = bool(stored.get("onboarded", False))
         always_show = bool(stored.get("always_show_splash", False))
         port = stored.get("open_connect_port")
@@ -165,6 +173,8 @@ def load_settings(refresh=False):
         _cache = {
             "source": source,
             "db_path": db_path,
+            "pureplay_profiles_path": pureplay_path,
+            "pureplay_profiles_path_locked": bool(env_pureplay),
             "source_locked": source_locked,
             "db_path_locked": db_path_locked,
             "onboarded": onboarded,
@@ -181,7 +191,7 @@ def load_settings(refresh=False):
 def save_settings(source=None, db_path=None, onboarded=None,
                   always_show_splash=None, open_connect_port=None,
                   open_connect_lan=None, cgp_device=None, ogc_enrichment=None,
-                  ogc_club_estimates=None):
+                  ogc_club_estimates=None, pureplay_profiles_path=None):
     """Persist user choices and refresh the cache.
 
     Environment overrides are never written to disk — the stored value keeps
@@ -197,6 +207,11 @@ def save_settings(source=None, db_path=None, onboarded=None,
         stored["source"] = norm
     if db_path is not None:
         stored["db_path"] = os.path.abspath(db_path.strip()) if db_path.strip() else ""
+    if pureplay_profiles_path is not None:
+        if not isinstance(pureplay_profiles_path, str):
+            raise ValueError("PurePlay profiles path must be a string")
+        path = pureplay_profiles_path.strip()
+        stored["pureplay_profiles_path"] = os.path.abspath(path) if path else ""
     if onboarded is not None:
         stored["onboarded"] = bool(onboarded)
     if always_show_splash is not None:

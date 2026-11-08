@@ -63,6 +63,8 @@ class TestManualMacOverride(unittest.TestCase):
         authoritative registry value."""
         with mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch.object(bluetooth_windows.sys, "platform", "win32"), \
+                mock.patch.object(bluetooth_windows, "_try_live_radio",
+                                  return_value=None) as live, \
                 mock.patch.object(bluetooth_windows, "_try_registry",
                                   return_value="AAAAAAAAAAAA") as reg, \
                 mock.patch.object(bluetooth_windows, "_try_powershell_pnp",
@@ -70,6 +72,7 @@ class TestManualMacOverride(unittest.TestCase):
             bluetooth_windows.get_host_bluetooth_mac.cache_clear()
             self.assertEqual(bluetooth_windows.get_host_bluetooth_mac(),
                              "AAAAAAAAAAAA")
+            live.assert_called_once()
             reg.assert_called_once()
             pnp.assert_not_called()
 

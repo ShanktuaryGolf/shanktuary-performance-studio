@@ -16,6 +16,7 @@ def test_linux_uses_absolute_xdg_data_home(tmp_path, monkeypatch):
 def test_relative_xdg_is_ignored(tmp_path, monkeypatch):
     monkeypatch.setattr(user_data.sys, "platform", "linux")
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("XDG_DATA_HOME", "relative")
     assert user_data.get_data_dir() == tmp_path / ".local/share/shanktuary"
 
@@ -29,6 +30,7 @@ def test_windows_uses_local_appdata(tmp_path, monkeypatch):
 def test_mac_uses_application_support(tmp_path, monkeypatch):
     monkeypatch.setattr(user_data.sys, "platform", "darwin")
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert user_data.get_data_dir() == tmp_path / "Library/Application Support/shanktuary"
 
 

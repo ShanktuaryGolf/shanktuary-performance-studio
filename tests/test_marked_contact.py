@@ -106,9 +106,13 @@ def _tk_app(tmp_path, monkeypatch, cls=None):
     except tk.TclError:
         pytest.skip("no display")
     root.geometry("1600x950")
+    # These bounds are 96-DPI logical geometry, not the host monitor DPI.
+    from src.ui import scaling
+    monkeypatch.setattr(scaling, "load_choice", lambda: "100%")
     if cls is None:
         from src.ui import ShanktuaryDesktopApp as cls
     a = cls(root)
+    root.update()  # Settle the requested viewport before drawing a shot.
     a.sessions = [{"name": "S", "shots": [
         {"club": "7 Iron", "ball_speed_meters_per_second": 40, "timestamp_ns": 1},
         {"club": "7 Iron", "ball_speed_meters_per_second": 40, "timestamp_ns": 2,

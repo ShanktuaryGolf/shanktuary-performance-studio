@@ -116,6 +116,11 @@ class SourceConnections:
                     if source == "open_connect":
                         from .open_connect import OpenConnectListener
                         client = OpenConnectListener(sink, on_status=status)
+                    elif source == "pureplay":
+                        from .pureplay import PureplayPoller
+                        client = PureplayPoller(
+                            on_shot=lambda payload, meta: sink.put(payload),
+                            profiles_path=options.get("pureplay_profiles_path"), on_status=status)
                     elif source == "cgp":
                         from .cgp import CGPClient
                         client = CGPClient(sink, on_status=status, measurement_ids=self._measurement_ids)
@@ -129,6 +134,8 @@ class SourceConnections:
                         if self._player:
                             client.set_player(*self._player)
                         client.start(host=options.get("host", "127.0.0.1"), port=options.get("port", 921))
+                    elif source == "pureplay":
+                        client.start()
                     else:
                         client.start(options["device"])
                 except Exception as exc:
@@ -171,7 +178,7 @@ class StudioConnectionSetup:
         self.select_source(source)
         options = dict(options or {})
         kwargs = {"source": source}
-        for key in ("db_path", "ogc_enrichment", "ogc_club_estimates"):
+        for key in ("db_path", "pureplay_profiles_path", "ogc_enrichment", "ogc_club_estimates"):
             if key in options:
                 kwargs[key] = options[key]
         if source == "open_connect":

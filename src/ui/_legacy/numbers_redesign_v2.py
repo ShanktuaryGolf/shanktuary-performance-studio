@@ -107,7 +107,7 @@ def draw_big_numbers_viewport(
     grid_h = bot_y - top_y
 
     source_shot = getattr(app, "current_shot", None) or {}
-    external = source_shot.get("_source") in ("open_connect", "cgp", "gspro")
+    external = source_shot.get("_source") in ("open_connect", "cgp", "gspro", "pureplay")
     if external:
         cards = _connection_cards(app)
     else:

@@ -84,7 +84,7 @@ def test_production_app_navigates_to_mode_11_runtime(tk_root, tmp_path, monkeypa
     monkeypatch.setattr(studio, "SESSION_LOG_PATH", str(tmp_path / "history.json"))
 
     app = studio.ShanktuaryApp(tk_root)
-    tk_root.update_idletasks()
+    tk_root.update()  # Process the initial Configure event on Windows too.
 
     assert 11 in app.mode_pill_rects
     r = app.mode_pill_rects[11]

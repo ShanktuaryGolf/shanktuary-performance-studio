@@ -35,7 +35,7 @@ class ConnectionWizard(SplashScreen):
         self.club_specs = club_specs or {}
         settings = dict(getattr(controller, "settings", {}) or {})
         self.source = settings.get("source", "nova")
-        if self.source not in ("nova", "gspro", "open_connect", "cgp", "both"):
+        if self.source not in ("nova", "gspro", "open_connect", "cgp", "both", "pureplay"):
             self.source = "nova"
         self.source_locked = bool(settings.get("source_locked", False))
         self.always_show = bool(settings.get("always_show_splash", False))
@@ -55,7 +55,7 @@ class ConnectionWizard(SplashScreen):
         self._devices = []
         self._fields = {}
         self._options = {
-            s: {} for s in ("nova", "gspro", "open_connect", "cgp", "both")
+            s: {} for s in ("nova", "gspro", "open_connect", "cgp", "both", "pureplay")
         }
         self._options["open_connect"] = self._saved_open_connect_options(settings)
         self._options["nova"] = {
@@ -63,6 +63,10 @@ class ConnectionWizard(SplashScreen):
             "discovery": True,
         }
         self._options["gspro"] = {"db_path": settings.get("db_path", "")}
+        self._options["pureplay"] = {
+            "pureplay_profiles_path": settings.get("pureplay_profiles_path", "")
+        }
+        self.pureplay_path_locked = bool(settings.get("pureplay_profiles_path_locked", False))
         self._options["cgp"] = {
             "host": settings.get("cgp_host", ""),
             "port": str(settings.get("cgp_port", 921)),
@@ -220,6 +224,12 @@ class ConnectionWizard(SplashScreen):
                 "Read shots from GSPro installed\non this computer.",
             ),
             (
+                "pureplay",
+                "pureplay_logo.png",
+                "Use PurePlay",
+                "Read new shots\nfrom local PurePlay session files.",
+            ),
+            (
                 "open_connect",
                 None,
                 "Another launch monitor",
@@ -227,7 +237,7 @@ class ConnectionWizard(SplashScreen):
             ),
         ]
         for i, (source, logo, title, note) in enumerate(cards):
-            y = 223 + i * 116
+            y = 223 + i * 86
             selected = self.source == source or (
                 self.source == "both" and source == "nova"
             )
@@ -235,29 +245,29 @@ class ConnectionWizard(SplashScreen):
                 x,
                 y,
                 right,
-                y + 104,
+                y + 78,
                 9,
                 T.ACTIVE_BG if selected else T.SURFACE,
                 T.GOLD if selected else T.HAIRLINE,
             )
             if logo:
-                im = self._load_image(source, asset_path(logo), 28)
+                im = self._load_image(source, asset_path(logo), 32 if source == "pureplay" else 28)
                 if im:
-                    self.canvas.create_image(x + 88, y + 52, image=im)
+                    self.canvas.create_image(x + 88, y + 39, image=im)
             else:
                 self._text(x + 69, y + 33, "♧", 26, T.TEAL_TEXT)
-            self._text(x + 174, y + 20, title, 12, T.TEXT, True)
-            self._text(x + 174, y + 49, note, 9, width=right - x - 220)
+            self._text(x + 174, y + 10, title, 12, T.TEXT, True)
+            self._text(x + 174, y + 34, note, 9, width=right - x - 220)
             self.canvas.create_oval(
                 right - 39,
-                y + 45,
+                y + 31,
                 right - 24,
-                y + 60,
+                y + 46,
                 outline=T.GOLD if selected else T.HAIRLINE,
                 width=3 if selected else 1,
             )
             if not self.source_locked:
-                self._hit((x, y, right, y + 104), "source", source)
+                self._hit((x, y, right, y + 78), "source", source)
         self._text(x, 578, "Not sure which to choose?  Help me choose", 8, T.TEAL_TEXT)
         self._hit((x, 573, x + 300, 603), "help")
         self._text(
@@ -335,6 +345,7 @@ class ConnectionWizard(SplashScreen):
             "nova": "Connect your Nova",
             "both": "Nova + GSPro · legacy setting",
             "gspro": "Read your GSPro shots",
+            "pureplay": "Read your PurePlay shots",
             "open_connect": "Set up your connector",
             "cgp": "CGP Draft 2 · Experimental",
         }[self.source]
@@ -397,6 +408,19 @@ class ConnectionWizard(SplashScreen):
                 9,
                 width=iw,
             )
+        elif self.source == "pureplay":
+            self._text(ix, 280,
+                "Read new shots saved by PurePlay, regardless of the launch monitor or input. Data is source-reported, not hardware-verified.",
+                10, width=iw)
+            self._entry(ix, 370, iw, "PurePlay Profiles folder (optional)", "pureplay_profiles_path")
+            if self.pureplay_path_locked:
+                self._text(ix, 445, "Folder fixed by SPS_PUREPLAY_PROFILES.", 9, T.GOLD, width=iw)
+                self._widgets[-1].configure(state="disabled")
+            else:
+                self._button(ix, 445, 190, "Browse Profiles folder", "browse_pureplay")
+            self._text(ix, 515,
+                "Leave blank to auto-locate. Start reading, then hit a new shot in PurePlay. Existing history is skipped; wait for PurePlay to save the session.",
+                9, T.TEAL_TEXT, width=iw)
         elif self.source == "gspro":
             self._text(
                 ix,
@@ -454,7 +478,7 @@ class ConnectionWizard(SplashScreen):
             "START LISTENER"
             if self.source == "open_connect"
             else "START READING"
-            if self.source == "gspro"
+            if self.source in ("gspro", "pureplay")
             else "CONNECT"
         )
         if self.source != "open_connect":
@@ -647,7 +671,16 @@ class ConnectionWizard(SplashScreen):
                 else:
                     self._update_status()
             self.win.after(250, self._poll_status)
-        except tk.TclError:
+        except tk.TclError as exc:
+            # Display/DPI transitions can invalidate a widget while the window
+            # still exists. Do not permanently stop polling a live connection.
+            try:
+                if self.win.winfo_exists():
+                    print(f"[connection] Retrying status repaint: {exc}")
+                    self.win.after(250, self._poll_status)
+                    return
+            except tk.TclError:
+                pass
             self._alive = False
 
     def _update_status(self):
@@ -741,6 +774,10 @@ class ConnectionWizard(SplashScreen):
             )
             if path:
                 self._options[self.source]["db_path"] = path
+        elif action == "browse_pureplay" and not self.pureplay_path_locked:
+            path = filedialog.askdirectory(parent=self.win, title="Select PurePlay Profiles folder")
+            if path:
+                self._options[self.source]["pureplay_profiles_path"] = path
         elif action == "metrics":
             self._show_metric_options()
         elif action == "discover":
@@ -773,7 +810,7 @@ class ConnectionWizard(SplashScreen):
 
             messagebox.showinfo(
                 "Choose your connection",
-                "Nova: direct Nova connection.\n\nGSPro: read range shots from GSPro on this computer.\n\nAnother launch monitor: a compatible OpenConnect connector is required.\n\nCGP Draft 2: experimental, for compatible CGP devices only.",
+                "Nova: direct Nova connection.\n\nGSPro: read range shots from GSPro on this computer.\n\nPurePlay: read new shots from local saved sessions, independent of launch-monitor brand. Existing history is skipped; data is not hardware-verified.\n\nAnother launch monitor: a compatible OpenConnect connector is required.\n\nCGP Draft 2: experimental, for compatible CGP devices only.",
                 parent=self.win,
             )
         self._draw()

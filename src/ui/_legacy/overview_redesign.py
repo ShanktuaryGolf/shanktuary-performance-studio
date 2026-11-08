@@ -50,6 +50,9 @@ def _num(val, default=0.0, app=None):
 
 
 def _values(shot, app=None):
+    from src.ui.source_display import is_pureplay, overview_values
+    if is_pureplay(shot):
+        return overview_values(shot, app)
     ogc = (shot or {}).get("open_golf_coach", {}) or {}
     us = ogc.get("us_customary_units", {}) or {}
     # GSPro (and any source with no club-level sensor) simply omits these

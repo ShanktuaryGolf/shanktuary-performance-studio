@@ -82,6 +82,8 @@ def draw_contact_face(app, cx, cy, size, left_limit=None, right_limit=None,
 
     contact = contact_location(current)
     if not contact.complete:
+        if isinstance(current, dict) and current.get("_source") == "pureplay":
+            return None
         # Approximate strike: a hollow ring at "where you usually hit it",
         # sized by the spread of your marks. Never a dot, never unlabelled --
         # the caller writes the EST label from the returned estimate.
@@ -234,7 +236,9 @@ def draw_contact_panel(app, x0, y0, x1, y1):
         eid = text(face_cx, y, where, small, tokens.TEAL_TEXT, anchor="n", budget=avail_w)
         y = bottom(eid, y + label_h)
 
-    text(left, foot_y, "Nova measures ball flight, not face contact", small,
+    text(left, foot_y, ("Ball data does not establish face contact"
+                       if (app.current_shot or {}).get("_source") == "pureplay" else
+                       "Nova measures ball flight, not face contact"), small,
          tokens.TEXT_3, budget=avail_w)
 
 

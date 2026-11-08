@@ -578,8 +578,8 @@ def load_image_asset(path, target_h=210, mirror=False, pad_square=True):
             print(f"[!] Error loading {path}: {e}")
     return None
 
-APP_VERSION = "v1.8.2"
-BUILD_NUMBER = "2026.10.29.1"
+APP_VERSION = "v1.9.0"
+BUILD_NUMBER = "2026.11.08.1"
 
 class ShanktuaryApp:
     # Bound on img_cache. Rotated overhead sprites measure ~0.5 MB each as PIL
@@ -3091,17 +3091,17 @@ class ShanktuaryApp:
             raise ValueError("shot payload must be an object")
         if "_input_generation" in msg and not source_connections.accepts(msg):
             return
-        if msg.get("_source") in ("cgp", "open_connect", "gspro"):
+        if msg.get("_source") in ("cgp", "open_connect", "gspro", "pureplay"):
             from src.connections.enrichment import enrich_shot
             cfg = gspro_settings.load_settings()
             msg = enrich_shot(msg, enabled=cfg.get("ogc_enrichment", False),
                               estimate_club=cfg.get("ogc_club_estimates", False))
-        if msg.get("_source") == "gspro":
+        if msg.get("_source") in ("gspro", "pureplay"):
             # GSPro reports its own club string (from ITS bag config,
             # e.g. "7i"). Trust it when it matches a real SPS bag
             # entry; otherwise fall back to the current selection —
             # never invent a phantom club name.
-            gspro = msg.get("_gspro")
+            gspro = msg.get("_gspro") or msg.get("_pureplay")
             raw_club = gspro.get("club") if isinstance(gspro, dict) else None
             matched = None
             if raw_club:
@@ -5002,7 +5002,7 @@ class ShanktuaryApp:
             # GSPro-sourced shots carry MEASURED club metrics from the launch
             # monitor (via SimRead), not OGC's derived model — the identity
             # below is specific to Nova payloads and must not be checked here.
-            if shot.get("_source") in ("gspro", "cgp", "open_connect"):
+            if shot.get("_source") in ("gspro", "cgp", "open_connect", "pureplay"):
                 return True
             ogc = shot.get("open_golf_coach", {}) if isinstance(shot, dict) else {}
             if not isinstance(ogc, dict):
@@ -6961,6 +6961,27 @@ class ShanktuaryApp:
         return contact.headline, contact.detail, theme.TEXT_2
 
     def draw_4_quadrant_studio(self, avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent, opt_max, eff_pct, shot_name, shot_rank, smash, ball_speed=0.0, offset_x=0, top_bar_h=108, club_path_known=True, face_to_path_known=True, face_to_target_known=True):
+        source_aware = (self.current_shot or {}).get("_source") == "pureplay"
+        if source_aware:
+            from src.connections.presentation import (
+                metric_status,
+                metric_value,
+                shot_shape,
+            )
+            def value(key):
+                return metric_value(self.current_shot, key, self.is_left_handed)
+            def status(key):
+                return metric_status(self.current_shot, key, self.is_left_handed)
+            club_path_known = value("club_path") is not None
+            face_to_path_known = value("face_to_path") is not None
+            face_to_target_known = value("face_to_target") is not None
+            club_path, face_to_path, face_to_target = (value(k) or 0.0 for k in
+                                                      ("club_path", "face_to_path", "face_to_target"))
+            vert_launch, sidespin, backspin, total_spin, spin_axis, apex_yds, descent = (
+                value(k) or 0.0 for k in ("launch", "sidespin", "backspin", "spin", "spin_axis", "apex", "descent"))
+            shape, shape_status = shot_shape(self.current_shot, self.is_left_handed)
+            shot_name = f"{shape} · {shape_status}" if shape else "Shape not reported"
+
         if isinstance(shot_rank, dict):
             shot_rank = shot_rank.get("left_handed" if self.is_left_handed else "right_handed", shot_rank.get("right_handed", "A"))
         shot_rank = str(shot_rank or "A")
@@ -7017,6 +7038,15 @@ class ShanktuaryApp:
         pair_h = annot_gap + _val_line
 
         def annot(ax, ay, cap, val, anchor="w", col=None):
+            if source_aware:
+                key = {"CLUB PATH": "club_path", "FACE TO PATH": "face_to_path",
+                       "FACE TO TARGET": "face_to_target", "SIDESPIN": "sidespin",
+                       "LAUNCH ANGLE": "launch", "BACKSPIN": "backspin", "DESCENT": "descent",
+                       "SPIN AXIS": "spin_axis", "TOTAL SPIN": "spin"}.get(cap)
+                if key:
+                    if value(key) is None:
+                        val = "--"
+                    cap += " · " + status(key)
             a = "ne" if anchor == "e" else "nw"
             self.canvas.create_text(ax, ay, text=cap, fill=theme.TEXT_3,
                                     font=cap_f, anchor=a)
@@ -7043,7 +7073,7 @@ class ShanktuaryApp:
 
         panel_cap(gut_l, q1_top + int(16 * font_scale), "CLUB PATH & FACE")
         self.canvas.create_text(gut_r, q1_top + int(16 * font_scale),
-                                text="DERIVED", fill=theme.TEXT_3,
+                                text=(status("club_path") if source_aware else "DERIVED"), fill=theme.TEXT_3,
                                 font=cap_f, anchor="e")
 
         path_val = (
@@ -7071,7 +7101,7 @@ class ShanktuaryApp:
             px1, py1 = self.rotate_point(q1_cx, q1_cy + arrow_len, q1_cx, q1_cy, path_rad)
             px2, py2 = self.rotate_point(q1_cx, q1_cy - arrow_len, q1_cx, q1_cy, path_rad)
             self.canvas.create_line(px1, py1, px2, py2, fill=theme.ACCENT_TEXT, width=max(3, int(3.5 * scale)), arrow=tk.LAST, arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
-        else:
+        elif not source_aware:
             # No directional arrow when the source never reported a path --
             # a straight line here would silently claim a dead-flush swing.
             arrow_len = int(75 * scale)
@@ -7128,7 +7158,11 @@ class ShanktuaryApp:
             y_p = ground_y - int(h_p)
             arc_pts.extend([x_p, y_p])
         
-        self.canvas.create_line(arc_pts, fill=theme.ACCENT_TEXT, width=max(3, int(3.5 * scale)), smooth=True)
+        if not source_aware or (value("apex") is not None and value("launch") is not None):
+            self.canvas.create_line(arc_pts, fill=theme.ACCENT_TEXT, width=max(3, int(3.5 * scale)), smooth=True)
+        else:
+            self.canvas.create_text(q2_cx, q2_cy, text="Flight geometry not reported",
+                                    fill=theme.TEXT_3, font=cap_f, anchor="center")
         ball_r2 = int(7 * scale)
         self.canvas.create_oval(q2_cx - side_offset_x - ball_r2, ground_y - ball_r2, q2_cx - side_offset_x + ball_r2, ground_y + ball_r2, fill=theme.TEXT)
 
@@ -7138,7 +7172,7 @@ class ShanktuaryApp:
               f"{descent:.1f}°", anchor="e")
         # The Nova measures ball flight only -- say so rather than leave a gap.
         self.canvas.create_text(gut_l, q2_bot - int(14 * font_scale),
-                                text="Attack angle not measured",
+                                text=("Flight values may include modelled estimates" if source_aware else "Attack angle not measured"),
                                 fill=theme.TEXT_3, font=cap_f, anchor="w")
 
         # Quadrant 3 (Top-Right): 3D Spin Axis
@@ -7165,7 +7199,8 @@ class ShanktuaryApp:
         spin_len = int(46 * scale)
         ax1, ay1 = self.rotate_point(q3_cx, q3_cy + spin_len, q3_cx, q3_cy, axis_rad)
         ax2, ay2 = self.rotate_point(q3_cx, q3_cy - spin_len, q3_cx, q3_cy, axis_rad)
-        self.canvas.create_line(ax1, ay1, ax2, ay2, fill=theme.ACCENT_LINE, width=max(4, int(4.5 * scale)), arrow=tk.LAST, arrowshape=(int(14 * scale), int(18 * scale), int(6 * scale)))
+        if not source_aware or value("spin_axis") is not None:
+            self.canvas.create_line(ax1, ay1, ax2, ay2, fill=theme.ACCENT_LINE, width=max(4, int(4.5 * scale)), arrow=tk.LAST, arrowshape=(int(14 * scale), int(18 * scale), int(6 * scale)))
 
 
         annot(gut_l3, q3_cy - int(34 * font_scale), "SPIN AXIS",

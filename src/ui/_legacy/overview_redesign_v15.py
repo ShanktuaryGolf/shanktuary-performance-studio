@@ -21,6 +21,7 @@ import overview_redesign_v12 as v12
 import overview_redesign_v14 as v14
 
 import theme
+from src.ui.source_display import is_pureplay, known, marker
 
 GOLD = v14.GOLD
 TEAL = v14.TEAL
@@ -60,7 +61,7 @@ def _draw_shape_mix(c, x0, y0, x1, shots):
         "Straight": v7.STRAIGHT,
         "Fade": GOLD,
     }
-    c.create_text(x0, y0, text="Session Shape Mix", fill=theme.TEXT_2,
+    c.create_text(x0, y0, text="Session Shape Mix" + (" ~" if any(marker(v7._values(s), "carry", "offline", "hlaunch") for s in shots) else ""), fill=theme.TEXT_2,
                   font=(v7._ui_font(), 10, "bold"), anchor="nw")
     bar_y = y0 + 28
     bar_h = 10
@@ -96,8 +97,11 @@ def _draw_dispersion(app, x0, y0, x1, y1, shots):
     _section_title(c, x0, y0, "Dispersion", f"{club} · carry landing pattern")
 
     points = [(v7._values(s, app), s) for s in shots]
-    points = [(vv, ss) for vv, ss in points if vv["carry"] > 0]
+    points = [(vv, ss) for vv, ss in points if vv["carry"] > 0 and known(vv, "carry", "offline")]
     if not points:
+        if any(is_pureplay(s) for s in shots):
+            c.create_text(x0, y0 + 72, text="Carry / offline unavailable", fill=theme.TEXT_3,
+                          font=(v7._ui_font(), 11), anchor="nw")
         return
 
     left, right = x0 + 58, x1 - 20
@@ -148,7 +152,7 @@ def _draw_dispersion(app, x0, y0, x1, y1, shots):
     ey1 = sy(mc - carry_half)
     ellipse_col = v7._mix(TEAL_LINE, "#102C35", .20)
     c.create_oval(ex0, ey0, ex1, ey1, outline=ellipse_col, width=2)
-    c.create_text(ex1 - 7, ey0 + 8, text="90% confidence",
+    c.create_text(ex1 - 7, ey0 + 8, text="Estimated / modelled pattern" if any(marker(vv, "carry", "offline") for vv, _ in points) else "90% confidence",
                   fill=v7._mix(TEAL_TEXT, theme.BG, .12),
                   font=(v7._ui_font(), 9, "bold"), anchor="ne")
 
@@ -187,9 +191,22 @@ def _draw_session_bottom(app, x0, y0, x1, y1, shots):
         return
 
     club = (app.current_shot or {}).get("club") or app.current_club
-    speeds = [v7._club_speed(s) for s in shots]
-    avg = lambda key: statistics.mean(v[key] for v in vals)
-    avg_club = statistics.mean(speeds) if speeds else 0.0
+    source_aware = any(is_pureplay(s) for s in shots)
+    speeds = [v.get("club", v7._club_speed(s)) for v, s in zip(vals, shots) if known(v, "club")]
+    def values(key, data=vals):
+        return [v[key] for v in data if known(v, key)]
+    def avg(key):
+        data = values(key)
+        return statistics.mean(data) if data else None
+    avg_club = statistics.mean(speeds) if speeds else None
+    def summary_value(key, unit="", side=False):
+        value = avg_club if key == "club" else avg(key)
+        if value is None:
+            return "--"
+        text = v7._side(value) if side else f"{value:.2f}" if key == "smash" else f"{value:.0f}" if key == "spin" else f"{value:.1f}"
+        estimate = "~" if any(marker(v, key) for v in vals) else ""
+        return f"{text}{estimate}{unit}"
+
 
     total_w = x1 - x0
     summary_w = total_w * .32
@@ -201,14 +218,14 @@ def _draw_session_bottom(app, x0, y0, x1, y1, shots):
                   fill=theme.TEXT_2, font=(v7._ui_font(), 10, "bold"), anchor="ne")
 
     summary = [
-        ("Avg Carry", f"{avg('carry'):.1f} yds"),
-        ("Avg Total", f"{avg('total'):.1f} yds"),
-        ("Avg Ball Speed", f"{avg('ball'):.1f} mph"),
-        ("Avg Club Speed", f"{avg_club:.1f} mph"),
-        ("Avg VLA", f"{avg('launch'):.1f}°"),
-        ("Avg Spin", f"{avg('spin'):.0f} rpm"),
-        ("Avg Offline", f"{v7._side(avg('offline'))} yds"),
-        ("Avg Smash", f"{avg('smash'):.2f}"),
+        ("Avg Carry", summary_value("carry", " yds")),
+        ("Avg Total", summary_value("total", " yds")),
+        ("Avg Ball Speed", summary_value("ball", " mph")),
+        ("Avg Club Speed", summary_value("club", " mph")),
+        ("Avg VLA", summary_value("launch", "°")),
+        ("Avg Spin", summary_value("spin", " rpm")),
+        ("Avg Offline", summary_value("offline", " yds", side=True)),
+        ("Avg Smash", summary_value("smash")),
     ]
     inner_w = summary_w - 22
     col_w = inner_w / 2
@@ -233,12 +250,12 @@ def _draw_session_bottom(app, x0, y0, x1, y1, shots):
                   fill=theme.TEXT_2, font=(v7._ui_font(), 10, "bold"), anchor="ne")
 
     recent = vals[-min(16, len(vals)):]
-    carries = [v["carry"] for v in recent]
-    balls = [v["ball"] for v in recent]
-    spins = [v["spin"] for v in recent]
-    offlines = [v["offline"] for v in recent]
-    starts = [v7._movement(v)[0] for v in recent]
-    moves = [v7._movement(v)[1] for v in recent]
+    carries = values("carry", recent)
+    balls = values("ball", recent)
+    spins = values("spin", recent)
+    offlines = values("offline", recent)
+    starts = [v7._movement(v)[0] for v in recent if known(v, "carry", "hlaunch")]
+    moves = [v7._movement(v)[1] for v in recent if known(v, "carry", "hlaunch", "offline")]
 
     def sd(arr, unit=""):
         if len(arr) <= 1:
@@ -248,21 +265,23 @@ def _draw_session_bottom(app, x0, y0, x1, y1, shots):
             return f"SD {s:.0f} rpm"
         return f"SD {s:.1f}{(' ' + unit) if unit else ''}"
 
-    # Checkerboard alternation keeps the six sparklines lively without adding
-    # a third analytical hue.
+    def trend(arr, key, unit="", side=False):
+        if not arr:
+            return "Avg --"
+        value = statistics.mean(arr)
+        text = v7._side(value) if side else f"{value:.0f}" if key == "spin" else f"{value:.1f}"
+        estimate = "~" if source_aware and any(marker(v, *(key if isinstance(key, tuple) else (key,))) for v in recent) else ""
+        return f"Avg {text}{estimate} {unit}".rstrip()
     rows_left = [
-        ("Carry", f"Avg {statistics.mean(carries):.1f} yds", sd(carries, "yds"), carries, TEAL_LINE),
-        ("Spin", f"Avg {statistics.mean(spins):.0f} rpm", sd(spins, "rpm"), spins, GOLD),
-        ("Offline", f"Avg {v7._side(statistics.mean(offlines))} yds", sd(offlines, "yds"), offlines, TEAL_LINE),
+        ("Carry", trend(carries, "carry", "yds"), sd(carries, "yds"), carries, TEAL_LINE),
+        ("Spin", trend(spins, "spin", "rpm"), sd(spins, "rpm"), spins, GOLD),
+        ("Offline", trend(offlines, "offline", "yds", True), sd(offlines, "yds"), offlines, TEAL_LINE),
     ]
     rows_right = [
-        ("Start Line", f"Avg {v7._side(statistics.mean(starts))} yds", sd(starts, "yds"), starts, GOLD),
-        ("Curve Movement",
-         f"Avg {abs(statistics.mean(moves)):.1f}{'L' if statistics.mean(moves) < 0 else 'R'} yds",
-         sd(moves, "yds"), moves, TEAL_LINE),
-        ("Ball Speed", f"Avg {statistics.mean(balls):.1f} mph", sd(balls, "mph"), balls, GOLD),
+        ("Start Line", trend(starts, ("carry", "hlaunch"), "yds", True), sd(starts, "yds"), starts, GOLD),
+        ("Curve Movement", trend(moves, ("carry", "hlaunch", "offline"), "yds", True), sd(moves, "yds"), moves, TEAL_LINE),
+        ("Ball Speed", trend(balls, "ball", "mph"), sd(balls, "mph"), balls, GOLD),
     ]
-
     trend_w = x1 - trend_x0
     gap = 28
     tw = (trend_w - gap) / 2

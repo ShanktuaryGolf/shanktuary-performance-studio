@@ -260,10 +260,10 @@ def paint_top_header(app, w, h, offset_x=0):
 
     try:
         selected = _studio.gspro_settings.effective_source()
-        if selected in ("cgp", "open_connect"):
+        if selected in ("cgp", "open_connect", "pureplay"):
             state = _studio.source_connections.snapshot()
             up = state.get("state") in ("connected", "ready")
-            label = "CGP" if selected == "cgp" else "Open Connect"
+            label = {"cgp": "CGP", "open_connect": "Open Connect", "pureplay": "PurePlay"}[selected]
     except Exception:
         pass
 

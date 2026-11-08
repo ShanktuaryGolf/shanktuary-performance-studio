@@ -11,6 +11,7 @@ import overview_redesign_v6 as v6
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 import theme
+from src.ui.source_display import display, is_pureplay, known, marker
 
 BLUE = v4.BLUE
 BLUE_LINE = v4.BLUE_LINE
@@ -244,7 +245,7 @@ def _shape_mix(shots):
     counts = {"Draw": 0, "Straight": 0, "Fade": 0}
     for s in shots:
         vv = _values(s)
-        if vv["carry"] <= 0:
+        if vv["carry"] <= 0 or not known(vv, "carry", "offline", "hlaunch"):
             continue
         counts[_shape_bucket(vv)] += 1
     total = sum(counts.values())
@@ -539,9 +540,10 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
 
     shots_all = list(app.session_shots)
     shots = _club_shots(app)
-    v = _values(app.current_shot)
-    v.update({
-        "carry": carry, "total": total, "ball": ball_speed, "smash": smash,
+    v = _values(app.current_shot, app)
+    if not is_pureplay(app.current_shot):
+        v.update({
+            "carry": carry, "total": total, "ball": ball_speed, "smash": smash,
         "launch": launch, "spin": spin, "apex": apex, "offline": offline,
         "descent": descent, "hang": hang_time, "path": club_path,
         "face_path": face_to_path, "axis": spin_axis,
@@ -575,11 +577,14 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
     # The identity column is width-capped by identity_w, but this label was
     # drawn at a fixed 28pt with no budget, so a wide name like "Straight Fade"
     # (306px) ran into the Carry metric. Shrink to fit rather than clip.
-    _shot_label = shot_name or "Straight"
+    _shot_label = v["shape"] if is_pureplay(app.current_shot) else shot_name or "Straight"
     c.create_text(ix, y0 + 58, text=_shot_label, fill=SECTION_TEXT,
                   font=(_ui_font(), _fit_shot_name(_shot_label, identity_w - 40),
                         "bold"), anchor="nw")
 
+    if is_pureplay(app.current_shot):
+        c.create_text(ix, y0 + top_h - 22, text="~ Estimated / modelled; -- unavailable",
+                      fill=theme.TEXT_3, font=(_ui_font(), 8), anchor="nw")
     mx0 = x0 + identity_w
     step = (x1 - mx0) / 6
     for i in range(1, 6):
@@ -587,20 +592,20 @@ def draw_overview(app, avail_w, h, carry, total, ball_speed, club_speed, smash,
         c.create_line(xx, y0 + 24, xx, y0 + top_h - 24, fill=SOFT_LINE)
 
     _draw_pair_metric(c, mx0 + 16, y0 + 22, mx0 + step,
-                      "Carry", f"{carry:.1f}", "yds",
-                      "Total", f"{total:.1f}", "yds")
+                      "Carry", display(v, "carry"), "yds",
+                      "Total", display(v, "total"), "yds")
     _draw_pair_metric(c, mx0 + step + 16, y0 + 22, mx0 + step * 2,
-                      "Ball Speed", f"{ball_speed:.1f}", "mph",
-                      "Club", f"{club_speed:.1f}", "mph")
+                      "Ball Speed", display(v, "ball"), "mph",
+                      "Club", display(v, "club") if is_pureplay(app.current_shot) else f"{club_speed:.1f}", "mph")
     _draw_pair_metric(c, mx0 + step * 2 + 16, y0 + 22, mx0 + step * 3,
-                      "VLA", f"{launch:.1f}°", "",
-                      "HLA", _fmt_hla(v.get("hlaunch", 0.0)), "")
+                      "VLA", display(v, "launch", unit="°"), "",
+                      "HLA", (_fmt_hla(v["hlaunch"]) + marker(v, "hlaunch")) if known(v, "hlaunch") else "--", "")
     v5._draw_single_metric(c, mx0 + step * 3 + 16, y0 + 22,
-                           "Spin Rate", f"{spin:.0f}", "rpm")
+                           "Spin Rate", display(v, "spin", ".0f"), "rpm")
     v5._draw_single_metric(c, mx0 + step * 4 + 16, y0 + 22,
-                           "Apex", f"{apex * 3:.0f}", "ft")
+                           "Apex", (f"{v['apex'] * 3:.0f}" + marker(v, "apex")) if known(v, "apex") else "--", "ft")
     v5._draw_single_metric(c, mx0 + step * 5 + 16, y0 + 22,
-                           "Offline", _side(offline), "yds")
+                           "Offline", (_side(v["offline"]) + marker(v, "offline")) if known(v, "offline") else "--", "yds")
 
     main_y0 = y0 + top_h + gap
     bottom_h = max(205, min(232, int(usable_h * .255)))

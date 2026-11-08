@@ -5,6 +5,15 @@
 
 ---
 
+## v1.9.0 - PurePlay connection and shared shot views
+
+Build `2026.11.08.1`.
+
+- Read new PurePlay schema-1 session shots locally without a direct monitor connection.
+- PurePlay Overview and Club use the same designs as Nova, with missing values left blank and estimates identified.
+- Optional OpenGolfCoach fills supported gaps without replacing PurePlay values. Flight and speculative club estimation remain separate, default-off choices.
+- Live ingestion was checked with Nova feeding PurePlay on Windows. Other hardware and PurePlay versions have not been verified; this local-file connector remains experimental.
+
 ## v1.8.2 — display scaling and Table alignment
 
 Build `2026.10.29.1`.
@@ -196,3 +205,31 @@ banner. Fix storage permissions or free space and retry; restart after a
 migration/load error. History saves are blocked when necessary to protect
 unreadable or unmigrated data. Back up the entire data directory before moving
 it to another machine.
+
+
+### PurePlay connection (experimental local session files)
+
+Choose **Use PurePlay** in Connection, continue, and select **Start Reading**.
+Studio automatically looks for `%LOCALAPPDATA%/Pureplaygolf/Saved/Profiles` on
+Windows. If needed, browse to the **Profiles** folder, not an individual session
+file. The folder preference is saved; `SPS_PUREPLAY_PROFILES` can override it.
+`SPS_SHOT_SOURCE=pureplay` also selects this source explicitly.
+
+PurePlay saves shots in `<profile>/shots/session-*.json`, not a GSPro-style SQLite
+database. This is a read-only, local-file connection, not an official network
+API. Studio does not modify PurePlay's files or connect to the launch monitor.
+New valid saved shots are accepted after reading starts, regardless of launch-monitor
+brand or input method. PurePlay's launch-monitor flag is retained as metadata, not
+used as a gate or proof of measurement. Existing history is skipped to avoid
+replaying old shots into a live session. Hit a new shot in PurePlay
+and wait for it to save the session before completing the connection check.
+Availability and delay depend on PurePlay saving those files; an installed folder
+alone does not prove that live shots are working. Missing measurements remain
+missing rather than being replaced with invented defaults.
+
+This connector currently supports session schema 1. Ball launch values are labelled
+source-reported; carry, total and apex are labelled estimates from PurePlay. Club
+metrics and impact coordinates are retained in raw metadata only because their
+default values and measurement semantics are not independently verified. Live save
+and ingestion were checked with Nova feeding PurePlay on Windows; spin/launch
+direction signs and other hardware still need independent verification. It does not import saved history or create a network listener.

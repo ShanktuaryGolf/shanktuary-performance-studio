@@ -112,3 +112,18 @@ def metric_value(shot, key, left_handed=False):
 def metric_status(shot, key, left_handed=False):
     """REPORTED, DERIVED, ESTIMATED, MODELLED, or NOT REPORTED."""
     return _metric(shot, key, left_handed)[1]
+
+
+def shot_shape(shot, left_handed=False):
+    """Return an explicit source/model label and provenance, never infer a label."""
+    if not isinstance(shot, dict):
+        return None, "NOT REPORTED"
+    candidates = []
+    for path in ('shot_name', OGC + 'shot_name'):
+        value = _get(shot, path)
+        if isinstance(value, dict):
+            value = value.get('left_handed' if left_handed else 'right_handed')
+        if (isinstance(value, str) and value.strip() and len(value) <= 80
+                and all(c.isprintable() for c in value)):
+            candidates.append((value.strip(), _path_status(shot, path)))
+    return min(candidates, key=lambda item: _STATUS_RANK[item[1]]) if candidates else (None, "NOT REPORTED")

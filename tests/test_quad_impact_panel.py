@@ -39,8 +39,11 @@ def _quad_app(tmp_path, monkeypatch, geometry="1600x950", contact=None):
         pytest.skip("no display available")
     try:
         root.geometry(geometry)
+        from src.ui import scaling
         from src.ui.desktop import ShanktuaryDesktopApp
 
+        # These bounds are 96-DPI logical geometry, not the host monitor DPI.
+        monkeypatch.setattr(scaling, "load_choice", lambda: "100%")
         app = ShanktuaryDesktopApp(root)
         shot = {
             "type": "shot", "club": "7 Iron", "timestamp": "06:24 PM",

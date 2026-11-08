@@ -20,7 +20,7 @@ def wizard():
     w._status = {}
     w._discovery_generation = 0
     w._fields = {}
-    w._options = {s: {} for s in ("nova", "gspro", "open_connect", "cgp")}
+    w._options = {s: {} for s in ("nova", "gspro", "open_connect", "cgp", "pureplay")}
     w._draw = Mock()
     w._close = Mock()
     w.result = None
@@ -190,7 +190,7 @@ def test_back_invalidates_pending_discovery():
     assert not w._discovering
 
 
-@pytest.mark.parametrize("source", ["nova", "gspro", "cgp"])
+@pytest.mark.parametrize("source", ["nova", "gspro", "cgp", "pureplay"])
 def test_other_source_selection_does_not_start(source):
     w = wizard()
     w.source = "open_connect"
@@ -295,3 +295,38 @@ def test_discovery_worker_does_not_retain_tk_wizard(monkeypatch):
     assert "self" not in owned
     assert all(value is not w for value in owned.values())
     assert owned["results"] is w._discovery_results
+
+
+def test_pureplay_requires_explicit_start_and_keeps_folder_on_back():
+    w = wizard()
+    w._action("source", "pureplay")
+    w._action("continue")
+    w.controller.start.assert_not_called()
+    w._fields = {"pureplay_profiles_path": Mock(get=lambda: " C:/PurePlay/Profiles ")}
+    w._action("connect")
+    w.controller.start.assert_called_once_with("pureplay", {"pureplay_profiles_path": "C:/PurePlay/Profiles"})
+    w._action("back")
+    assert w._options["pureplay"]["pureplay_profiles_path"] == "C:/PurePlay/Profiles"
+    w.controller.stop.assert_called_once()
+
+
+def test_pureplay_browse_cancel_preserves_folder(monkeypatch):
+    w = wizard()
+    w.source = "pureplay"
+    w.win = Mock()
+    w.pureplay_path_locked = False
+    w._options["pureplay"] = {"pureplay_profiles_path": "original"}
+    monkeypatch.setattr("src.ui.connection_wizard.filedialog.askdirectory", lambda **kwargs: "")
+    w._action("browse_pureplay")
+    assert w._options["pureplay"]["pureplay_profiles_path"] == "original"
+    w.controller.start.assert_not_called()
+
+
+def test_pureplay_locked_folder_cannot_browse(monkeypatch):
+    w = wizard()
+    w.source = "pureplay"
+    w.pureplay_path_locked = True
+    browse = Mock()
+    monkeypatch.setattr("src.ui.connection_wizard.filedialog.askdirectory", browse)
+    w._action("browse_pureplay")
+    browse.assert_not_called()

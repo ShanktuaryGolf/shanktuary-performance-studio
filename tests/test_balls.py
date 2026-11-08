@@ -120,6 +120,7 @@ def test_split_toggle_is_offered_only_when_balls_exist_and_is_wired(tmp_path, mo
     try:
         root.geometry("1600x950")
         a = studio.ShanktuaryApp(root)
+        root.update()  # Process the initial Configure event before layout assertions.
         a.sessions = [{"name": "S", "shots": [{"club": "7 Iron", "ball": "Pro V1"}]}]
         a.active_session_index = 0
         a.balls = []

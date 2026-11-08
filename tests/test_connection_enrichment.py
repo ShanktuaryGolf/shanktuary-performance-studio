@@ -20,6 +20,7 @@ def engine(inputs):
     return {'open_golf_coach': {'carry_distance_meters': 210, 'total_distance_meters': 220,
             'offline_distance_meters': 0, 'peak_height_meters': 25, 'descent_angle_degrees': 40,
             'hang_time_seconds': 6, 'club_speed_meters_per_second': 48, 'smash_factor': 1.458,
+            'shot_name': {'right_handed': 'Straight Fade', 'left_handed': 'Straight Draw'},
             'club_path_degrees': {'right_handed': 1, 'left_handed': -1},
             'angle_of_attack_degrees': 2, 'dynamic_loft_degrees': 12, 'face_contact': {'x': 2}}}
 
@@ -173,3 +174,36 @@ def test_real_pinned_engine():
     assert 150 < r['open_golf_coach']['carry_distance_meters'] < 300
     assert r['open_golf_coach']['offline_distance_meters'] == pytest.approx(0)
     assert 'club_speed_meters_per_second' not in r['open_golf_coach']
+    assert set(r['open_golf_coach']['shot_name']) == {'right_handed', 'left_handed'}
+
+
+def test_modelled_shape_has_provenance_without_club_toggle():
+    original = shot()
+    result = enrich_shot(original, enabled=True, calculator=engine)
+    path = 'open_golf_coach.shot_name'
+    assert result['open_golf_coach']['shot_name']['left_handed'] == 'Straight Draw'
+    assert result['_metric_provenance'][path]['kind'] == 'modelled'
+    assert path in result['_enrichment']['modelled_fields']
+    assert calibration_shot(result) == original
+    assert 'shot_name' not in original.get('open_golf_coach', {})
+
+
+@pytest.mark.parametrize('value', [None, '', 0, 'Reported shape', {'right_handed': 'Reported fade'}])
+@pytest.mark.parametrize('nested', [False, True])
+def test_source_shape_is_never_replaced(value, nested):
+    original = shot(**({'open_golf_coach': {'shot_name': value}} if nested else {'shot_name': value}))
+    result = enrich_shot(original, enabled=True, calculator=engine)
+    assert (result['open_golf_coach'] if nested else result)['shot_name'] == value
+    assert 'open_golf_coach.shot_name' not in result['_enrichment']['modelled_fields']
+
+
+@pytest.mark.parametrize('value', [None, 'Straight', {}, {'right_handed': 'Fade'},
+    {'right_handed': 'Fade', 'left_handed': 1},
+    {'right_handed': 'Fade\nGrade A', 'left_handed': 'Draw'}])
+def test_invalid_model_shape_not_added(value):
+    def invalid(inputs):
+        result = engine(inputs)
+        result['open_golf_coach']['shot_name'] = value
+        return result
+    result = enrich_shot(shot(), enabled=True, calculator=invalid)
+    assert 'shot_name' not in result['open_golf_coach']

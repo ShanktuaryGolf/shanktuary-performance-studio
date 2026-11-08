@@ -264,21 +264,36 @@ def test_reconnects_by_itself_after_the_board_drops(board):
         be.close()
 
 
-def test_open_never_blocks_when_the_board_is_off():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()  # nothing listens here
-    be = OpenFpBackend(f"http://127.0.0.1:{port}", connect_timeout=2.0)
+def test_open_never_blocks_when_the_board_is_off(monkeypatch):
+    from src.hardware.pressure.openfp_backend import SocketIOClient
+
+    connecting = threading.Event()
+    refuse = threading.Event()
+
+    def unavailable_board(client):
+        connecting.set()
+        # Keep connection setup pending until open() has already returned.
+        # Real Windows TCP refusal can take longer than a fixed 0.2s sleep.
+        refuse.wait(2.0)
+        raise ConnectionRefusedError("board is off")
+
+    monkeypatch.setattr(SocketIOClient, "connect", unavailable_board)
+    be = OpenFpBackend("http://127.0.0.1:7000", connect_timeout=2.0)
     t0 = time.monotonic()
     be.open()
     try:
         assert time.monotonic() - t0 < 0.1
-        time.sleep(0.2)
+        assert connecting.wait(1.0)
         assert not be.is_open and be.is_running
-        assert be.last_error  # refused, recorded, retrying
+        refuse.set()
+        deadline = time.monotonic() + 1.0
+        while be.last_error is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert be.last_error == "ConnectionRefusedError: board is off"  # refused, recorded, retrying
+        assert not be.is_open and be.is_running
         assert be.read() is None and be.read_all() == []
     finally:
+        refuse.set()
         t0 = time.monotonic()
         be.close()
         assert time.monotonic() - t0 < 0.5

@@ -8,8 +8,9 @@ import pytest
 from src.ui.connection_wizard import ConnectionWizard
 
 
+@pytest.mark.parametrize("source", ["gspro", "pureplay"])
 @pytest.mark.parametrize("scale", [1, 1.25, 1.5, 2])
-def test_wizard_scale_widgets_and_scrolled_clicks(scale):
+def test_wizard_scale_widgets_and_scrolled_clicks(scale, source):
     try:
         root = tk.Tk()
     except tk.TclError:
@@ -37,7 +38,7 @@ def test_wizard_scale_widgets_and_scrolled_clicks(scale):
         root.update()
         wizard._action.assert_called_once_with("continue", None)
         wizard._action = original
-        wizard.source = "gspro"
+        wizard.source = source
         wizard.page = "connect"
         wizard._draw()
         root.update()

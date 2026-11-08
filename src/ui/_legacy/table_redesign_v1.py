@@ -8,7 +8,7 @@ header, low-noise rows, and a restrained current-shot treatment.
 import theme
 from src.connections.presentation import metric_status, metric_value
 
-_EXTERNAL_SOURCES = {"gspro", "cgp", "open_connect"}
+_EXTERNAL_SOURCES = {"pureplay", "gspro", "cgp", "open_connect"}
 _TABLE_METRICS = {
     "carry": "carry", "total": "total", "ball_speed": "ball_speed",
     "club_speed": "club_speed", "smash": "smash", "launch": "launch",

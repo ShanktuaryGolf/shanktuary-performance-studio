@@ -8,6 +8,7 @@ import overview_redesign_v11 as v11
 
 import shanktuary_performance_studio as studio
 import theme
+from src.ui.source_display import known, marker
 
 BLUE_LINE = v7.BLUE_LINE
 BLUE_TEXT = v7.BLUE_TEXT
@@ -30,13 +31,19 @@ def _draw_shape(app, x0, y0, x1, y1, v, shots):
     """Put START/FINISH beneath the line and shorten the target guide."""
     c = app.canvas
     v7._section_title(c, x0, y0, "Shot Shape")
+    if not known(v, "carry", "hlaunch", "offline"):
+        c.create_text(x0, y0 + 54, text=v["shape"] + (" ~" if v.get("_shape_status") in ("MODELLED", "ESTIMATED") else ""), fill=SHAPE_TEXT,
+                      font=(_ui_font(), 18, "bold"), anchor="w")
+        c.create_text(x0, y0 + 95, text="Movement unavailable", fill=theme.TEXT_3,
+                      font=(_ui_font(), 11), anchor="nw")
+        return
     start, move = _movement(v)
 
     direction = "Right → Left" if move < -1.5 else (
         "Left → Right" if move > 1.5 else "Minimal curve")
 
     shape_y = y0 + 54
-    shape_id = c.create_text(x0, shape_y, text=v["shape"], fill=SHAPE_TEXT,
+    shape_id = c.create_text(x0, shape_y, text=v["shape"] + (" ~" if v.get("_shape_status") in ("MODELLED", "ESTIMATED") else ""), fill=SHAPE_TEXT,
                              font=(_ui_font(), 18, "bold"), anchor="w")
     bb = c.bbox(shape_id)
     direction_x = (bb[2] + 12) if bb else x0 + 120
@@ -44,7 +51,7 @@ def _draw_shape(app, x0, y0, x1, y1, v, shots):
                   font=(_ui_font(), 13, "bold"), anchor="w")
 
     hero_y = y0 + 95
-    c.create_text(x0, hero_y, text="Movement", fill=theme.TEXT_2,
+    c.create_text(x0, hero_y, text="Movement" + (" (estimated/modelled)" if marker(v, "carry", "hlaunch", "offline") else ""), fill=theme.TEXT_2,
                   font=(_ui_font(), 11, "bold"), anchor="nw")
     move_dir = "R" if move > 0.12 else ("L" if move < -0.12 else "")
     c.create_text(x0, hero_y + 23, text=f"{abs(move):.1f} yds {move_dir}".strip(),

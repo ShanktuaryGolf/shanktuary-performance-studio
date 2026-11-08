@@ -1,12 +1,31 @@
 # Studio connections (local development build)
 
 Open **Tools → Shot source** (Connection) or the startup guided setup. Choose Nova,
-GSPro, or Other connector. Experimental Common Golf Protocol is under Advanced.
+GSPro, PurePlay, or Other connector. Experimental Common Golf Protocol is under Advanced.
 Selecting **Another launch monitor** opens its setup and starts local listening
 immediately. Nova and CGP retain their explicit **Connect** action; GSPro retains
 **Start Reading**. A valid new test shot is required before entering the session. Back/close/stop cancels the input; choosing another source
 invalidates queued events from the old source. No source auto-starts on launch.
 Existing `both` configuration remains a compatibility mode, not a wizard choice.
+
+## PurePlay (experimental local files)
+
+Choose **Use PurePlay**, select its **Profiles** folder if it is not detected,
+and click **Start Reading** before hitting a new shot. Studio reads schema-1
+`<profile>/shots/session-*.json` files without changing PurePlay data. Existing
+history is skipped. Valid newly saved shots are accepted independently of the
+input hardware; input flags are retained but do not certify measurements.
+
+PurePlay launch values are source-reported, while its carry, total and apex are
+source estimates. Optional OpenGolfCoach fills only supported missing fields;
+its output is labelled modelled/derived, never measured. Unverified raw club and
+impact values are retained as metadata rather than presented as measured values.
+The Overview and Club pages use the same layouts as Nova with presence-aware
+values and geometry. No missing value is silently replaced with zero.
+
+Live ingestion was checked with Nova feeding PurePlay on Windows. Other hardware,
+PurePlay versions and spin/launch sign conventions are not independently verified.
+This is not an official PurePlay API or a guarantee of monitor compatibility.
 
 ## Open Connect
 
@@ -79,6 +98,6 @@ or connection readiness. Use an isolated HOME/data profile for screenshots.
 The flag is for UI inspection only, not normal play. Open Connect can still be
 started explicitly for a loopback test; never represent a fixture as hardware.
 
-This is a reconstruction after a lost ephemeral workspace, not the identical
-bytes of the earlier local commit. Fresh test results and screenshots apply only
-to this build. No remote push, merge, tag or release is authorized.
+Release packages are built from the versioned source after repository-backed
+CI tests and platform builds pass. Hardware verification remains limited to the
+scenarios explicitly described above.

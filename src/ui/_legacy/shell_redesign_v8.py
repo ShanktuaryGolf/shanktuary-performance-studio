@@ -85,7 +85,7 @@ def paint_sidebar(app, w, h):
         ogc = shot.get("open_golf_coach", {}) or {}
         us = ogc.get("us_customary_units", {}) or {}
         club = str(shot.get("club") or "—")
-        external = shot.get("_source") in ("gspro", "cgp", "open_connect")
+        external = shot.get("_source") in ("pureplay", "gspro", "cgp", "open_connect")
         if external:
             def metric_text(key, unit):
                 value = metric_value(shot, key)

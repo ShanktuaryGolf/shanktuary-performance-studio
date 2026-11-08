@@ -7,6 +7,7 @@ import overview_redesign_v10 as v10
 
 import shanktuary_performance_studio as studio
 import theme
+from src.ui.source_display import is_pureplay, known, marker
 
 BLUE_LINE = v7.BLUE_LINE
 BLUE_TEXT = v7.BLUE_TEXT
@@ -86,7 +87,7 @@ def _draw_strike(app, x0, y0, x1, y1):
     from src.analytics.strike import contact_location
     contact = contact_location(app.current_shot)
     head, detail = contact.headline, contact.detail
-    if contact.source is None:
+    if contact.source is None and not is_pureplay(app.current_shot):
         # Approximate strike from the golfer's own marks (or the sweet spot
         # with none): say so, and keep the click-to-mark invitation.
         head = "Approximate"
@@ -138,7 +139,7 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
 
     c.create_text(x0, y0 + 2, text="Path & Face", fill=theme.TEXT_2,
                   font=(_ui_font(), 11, "bold"), anchor="nw")
-    c.create_text(x0, y0 + 25, text=_delivery_takeaway(v), fill=BLUE_TEXT,
+    c.create_text(x0, y0 + 25, text=_delivery_takeaway(v) + (" ~" if marker(v, "path", "face_path") else ""), fill=BLUE_TEXT,
                   font=(_ui_font(), 9, "bold"), anchor="nw")
 
     table_w = w * .43
@@ -149,7 +150,7 @@ def _draw_delivery(app, x0, y0, x1, y1, v):
                         if v.get("face_path_known", True) else "not measured"),
         ("Face / Target", f"{abs(v['face_target']):.1f}° {'open' if v['face_target'] >= 0 else 'closed'}"
                           if v.get("face_target_known", True) else "not measured"),
-        ("Spin Axis", f"{abs(v['axis']):.1f}° {'R' if v['axis'] > 0 else 'L'}"),
+        ("Spin Axis", f"{abs(v['axis']):.1f}° {'R' if v['axis'] > 0 else 'L'}" if known(v, "axis") else "not measured"),
     ]
 
     yy = y0 + 55

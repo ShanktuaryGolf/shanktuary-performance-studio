@@ -120,7 +120,7 @@ def enrich_shot(shot, *, enabled=False, estimate_club=False, calculator=None):
     estimated = _get(result, '_cgp.estimated_fields', [])
     source_meta = result.get('_cgp' if source == 'cgp' else '_open_connect', {})
     derived = source_meta.get('derived_fields', [])
-    for field in BALL + SPIN + FLIGHT + CLUB + OTHER:
+    for field in BALL + SPIN + FLIGHT + CLUB + OTHER + ('shot_name',):
         paths = [field, OGC + field]
         if field in ALIASES:
             paths.append(OGC + 'us_customary_units.' + ALIASES[field][0])
@@ -240,6 +240,16 @@ def enrich_shot(shot, *, enabled=False, estimate_club=False, calculator=None):
         candidate = output.get(field)
         if _number(candidate) and (field == 'offline_distance_meters' or candidate >= 0):
             add(OGC + field, candidate, 'modelled', dependencies, assumptions)
+    # A descriptive model classification, never a measured strike or quality grade.
+    # Keep both handed labels so changing display handedness needs no recalculation.
+    if not any(_present(result, p) for p in ('shot_name', OGC + 'shot_name')):
+        candidate = output.get('shot_name')
+        if (isinstance(candidate, dict) and set(candidate) == {'right_handed', 'left_handed'}
+                and all(isinstance(v, str) and v.strip() and len(v) <= 80
+                        and all(c.isprintable() for c in v) for v in candidate.values())):
+            add(OGC + 'shot_name', candidate, 'modelled', dependencies,
+                ['OpenGolfCoach launch/spin classification; not measured contact'],
+                ['heuristic_not_measured'])
     if estimate_club:
         saturated = _saturated(speed, inputs[BALL[1]], total)
         status['club_estimate_saturated'] = saturated

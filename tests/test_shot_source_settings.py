@@ -24,6 +24,7 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("SPS_SHOT_SOURCE_FILE", str(path))
     monkeypatch.delenv("SPS_SHOT_SOURCE", raising=False)
     monkeypatch.delenv("SPS_GSPRO_DB", raising=False)
+    monkeypatch.delenv("SPS_PUREPLAY_PROFILES", raising=False)
     importlib.reload(gspro_settings)
     yield path
     importlib.reload(gspro_settings)
@@ -169,6 +170,7 @@ def test_read_only_install_dir_falls_back_to_the_user_home(tmp_path, monkeypatch
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(gspro_settings, "_settings_path",
                         lambda: str(ro / "locked" / "s.json"))
 
@@ -185,3 +187,32 @@ def test_read_only_install_dir_falls_back_to_the_user_home(tmp_path, monkeypatch
     fallback = home / ".shanktuary" / gspro_settings.SETTINGS_FILENAME
     assert fallback.is_file(), "choice was not written to the user-home fallback"
     assert json.loads(fallback.read_text())["source"] == "gspro"
+
+
+def test_pureplay_persists_without_enabling_other_sources(isolated_settings):
+    folder = str(isolated_settings.parent / "Profiles")
+    gspro_settings.save_settings(source="pureplay", pureplay_profiles_path=folder)
+    importlib.reload(gspro_settings)
+    settings = gspro_settings.load_settings()
+    assert settings["source"] == "pureplay"
+    assert settings["pureplay_profiles_path"] == folder
+    assert not gspro_settings.nova_enabled()
+    assert not gspro_settings.gspro_enabled()
+
+
+def test_pureplay_folder_override_does_not_replace_saved_preference(monkeypatch):
+    gspro_settings.save_settings(pureplay_profiles_path="saved-profiles")
+    monkeypatch.setenv("SPS_PUREPLAY_PROFILES", "forced-profiles")
+    settings = gspro_settings.load_settings(refresh=True)
+    assert settings["pureplay_profiles_path_locked"]
+    assert settings["pureplay_profiles_path"] == os.path.abspath("forced-profiles")
+    gspro_settings.save_settings(source="pureplay")
+    monkeypatch.delenv("SPS_PUREPLAY_PROFILES")
+    assert gspro_settings.load_settings(refresh=True)["pureplay_profiles_path"] == os.path.abspath("saved-profiles")
+
+
+def test_pureplay_folder_clear_and_invalid_type():
+    gspro_settings.save_settings(pureplay_profiles_path="somewhere")
+    assert gspro_settings.save_settings(pureplay_profiles_path=" ")["pureplay_profiles_path"] == ""
+    with pytest.raises(ValueError):
+        gspro_settings.save_settings(pureplay_profiles_path=123)

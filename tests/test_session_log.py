@@ -88,8 +88,17 @@ class TestTee:
     def test_unwritable_dir_does_not_break_startup(self, session_log,
                                                     monkeypatch):
         """A missing log must never stop the app from launching."""
-        monkeypatch.setattr(session_log, "LOG_DIR", "/proc/nope/cannot")
+        # /proc is not an unwritable filesystem on Windows. Simulate the
+        # permission failure without creating anything outside the temp dir.
+        def denied(path, **kwargs):
+            assert path == session_log.LOG_DIR
+            raise PermissionError("log directory is not writable")
+
+        monkeypatch.setattr(session_log.os, "makedirs", denied)
+        stdout, stderr = sys.stdout, sys.stderr
         assert session_log.install() is None
+        assert sys.stdout is stdout and sys.stderr is stderr
+        assert not session_log._installed
         print("still works")  # must not raise
 
 

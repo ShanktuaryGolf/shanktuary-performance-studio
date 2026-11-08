@@ -8,6 +8,19 @@ certainty explicit.
 import math
 
 import theme
+from src.connections.presentation import metric_status, metric_value, shot_shape
+
+
+def _pureplay(app):
+    return (getattr(app, "current_shot", None) or {}).get("_source") == "pureplay"
+
+
+def _metric(app, key):
+    return metric_value(app.current_shot, key, getattr(app, "is_left_handed", False))
+
+
+def _status(app, key):
+    return metric_status(app.current_shot, key, getattr(app, "is_left_handed", False))
 
 
 def _num(value, default=0.0):
@@ -85,6 +98,20 @@ def draw_top_metric_toolbar(app, avail_w, ball_speed, club_speed, smash, carry,
          theme.TEXT if off_abs <= 4.0 else (theme.WARN if off_abs <= 12.0 else theme.DANGER)),
     ]
 
+    if _pureplay(app):
+        entries = (("ball_speed", "BALL SPEED", "MPH"), ("club_speed", "CLUB SPEED", "MPH"),
+                   ("smash", "SMASH", ""), ("carry", "CARRY", "YDS"),
+                   ("total", "TOTAL", "YDS"), ("offline", "OFFLINE", "YDS"))
+        metrics = []
+        for key, label, unit in entries:
+            value, status = _metric(app, key), _status(app, key)
+            digits = 2 if key == "smash" else 1
+            val = "--" if value is None else f"{value:.{digits}f} {unit}".strip()
+            tag = {"MODELLED": "MODELLED", "ESTIMATED": "EST", "DERIVED": "DERIVED"}.get(status)
+            caption = f"{label} · {tag}" if tag else label
+            metrics.append((caption, val,
+                            theme.ACCENT_TEXT if key == "carry" else theme.TEXT))
+
     lbl_font = (theme.ui_font(), max(7, int(8 * t_scale)), "bold")
     val_font = (theme.ui_font(), max(10, int(13 * t_scale)), "bold")
     col_w = avail_w / len(metrics)
@@ -130,6 +157,17 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                      face_to_target_known=True):
     """Overlay only the areas that need polish after production draws the page."""
     c = app.canvas
+    source_aware = _pureplay(app)
+    if source_aware:
+        club_path_known = _metric(app, "club_path") is not None
+        face_to_path_known = _metric(app, "face_to_path") is not None
+        club_path = _metric(app, "club_path") or 0.0
+        face_to_path = _metric(app, "face_to_path") or 0.0
+        spin_axis = _metric(app, "spin_axis") or 0.0
+        total_spin = _metric(app, "spin") or 0.0
+        backspin = _metric(app, "backspin") or 0.0
+        shape, shape_status = shot_shape(app.current_shot, getattr(app, "is_left_handed", False))
+        shot_name = f"{shape} · {shape_status}" if shape else "Shape not reported"
     avail_h = h - top_bar_h - 10
     quad_w = avail_w // 2
     quad_h = avail_h // 2
@@ -154,12 +192,14 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                        gut_r + 2, top_bar_h + int(54 * fs),
                        fill=theme.BG, outline="")
     tag_x = gut_l + int(128 * fs)
+    tag_text = _status(app, "club_path") if source_aware else "DERIVED"
+    tag_w = max(52, len(tag_text) * 5) * fs
     tag_y = top_bar_h + int(16 * fs)
     c.create_rectangle(tag_x, tag_y - int(7 * fs),
-                       tag_x + int(52 * fs), tag_y + int(8 * fs),
+                       tag_x + int(tag_w), tag_y + int(8 * fs),
                        fill=theme.SURFACE_2, outline="")
-    c.create_text(tag_x + int(26 * fs), tag_y,
-                  text="DERIVED", fill=theme.TEXT_3,
+    c.create_text(tag_x + int(tag_w / 2), tag_y,
+                  text=tag_text, fill=theme.TEXT_3,
                   font=(theme.ui_font(), max(6, int(7 * fs)), "bold"),
                   anchor="center")
     c.create_text(gut_r, top_bar_h + int(39 * fs),
@@ -183,7 +223,12 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
     # 175x77 block reached far left of the widest label ("DYNAMIC LOFT",
     # ~100px) and down past the trajectory apex, erasing the top of the
     # ball-flight arc so it looked cut off mid-curve.
-    rows = int(abs(dyn) > 0.05) + int(abs(aoa) > 0.05)
+    if source_aware:
+        dyn = _metric(app, "dynamic_loft")
+        aoa = _metric(app, "attack_angle")
+    dyn_present = dyn is not None if source_aware else abs(dyn) > 0.05
+    aoa_present = aoa is not None if source_aware else abs(aoa) > 0.05
+    rows = int(dyn_present) + int(aoa_present)
     if rows:
         mask_w = 0
         for label in ("DYNAMIC LOFT", "ATTACK ANGLE"):
@@ -198,14 +243,14 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                            gut_r + 2, mask_bottom,
                            fill=theme.BG, outline="")
     yy = q2_top + int(34 * fs)
-    if abs(dyn) > 0.05:
-        c.create_text(gut_r, yy, text="DYNAMIC LOFT", fill=theme.TEXT_3,
+    if dyn_present:
+        c.create_text(gut_r, yy, text=("DYNAMIC LOFT · " + _status(app, "dynamic_loft") if source_aware else "DYNAMIC LOFT"), fill=theme.TEXT_3,
                       font=cap_f, anchor="ne")
         c.create_text(gut_r, yy + int(16 * fs), text=f"{dyn:.1f}°",
                       fill=theme.TEXT, font=val_f, anchor="ne")
         yy += int(40 * fs)
-    if abs(aoa) > 0.05:
-        c.create_text(gut_r, yy, text="ATTACK ANGLE", fill=theme.TEXT_3,
+    if aoa_present:
+        c.create_text(gut_r, yy, text=("ATTACK ANGLE · " + _status(app, "attack_angle") if source_aware else "ATTACK ANGLE"), fill=theme.TEXT_3,
                       font=cap_f, anchor="ne")
         c.create_text(gut_r, yy + int(16 * fs), text=f"{aoa:.1f}°",
                       fill=theme.TEXT, font=val_f, anchor="ne")
@@ -234,20 +279,26 @@ def polish_club_page(app, avail_w, h, club_path, face_to_target, face_to_path,
                                 q3_cx, spin_cy, axis_rad)
     ax2, ay2 = app.rotate_point(q3_cx, spin_cy - spin_len,
                                 q3_cx, spin_cy, axis_rad)
-    c.create_line(ax1, ay1, ax2, ay2, fill=theme.ACCENT_LINE,
-                  width=max(3, int(4 * scale)), arrow="last",
-                  arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
+    if not source_aware or _metric(app, "spin_axis") is not None:
+        c.create_line(ax1, ay1, ax2, ay2, fill=theme.ACCENT_LINE,
+                      width=max(3, int(4 * scale)), arrow="last",
+                      arrowshape=(int(12 * scale), int(15 * scale), int(5 * scale)))
 
     info_y = q3_cy + int(36 * fs)
     c.create_text(gut_l3, info_y, text="SPIN AXIS", fill=theme.TEXT_3,
                   font=cap_f, anchor="nw")
     c.create_text(gut_l3, info_y + int(16 * fs),
-                  text=f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}",
+                  text=(("--" if _metric(app, "spin_axis") is None else f"{spin_axis:.1f}°")
+                        + " · " + _status(app, "spin_axis") if source_aware else
+                        f"{abs(spin_axis):.1f}° {'right' if spin_axis > 0 else 'left'}"),
                   fill=theme.TEXT, font=val_f, anchor="nw")
     c.create_text(gut_r3, info_y, text="TOTAL / BACKSPIN", fill=theme.TEXT_3,
                   font=cap_f, anchor="ne")
     c.create_text(gut_r3, info_y + int(16 * fs),
-                  text=f"{int(total_spin)} / {int(backspin)} rpm",
+                  text=(("--" if _metric(app, "spin") is None else f"{total_spin:.0f}") + " / "
+                        + ("--" if _metric(app, "backspin") is None else f"{backspin:.0f}")
+                        + " rpm · " + _status(app, "backspin") if source_aware else
+                        f"{int(total_spin)} / {int(backspin)} rpm"),
                   fill=theme.TEXT, font=val_f, anchor="ne")
 
     # Q4 is owned by the shared production contact painter. Do not repaint it.
