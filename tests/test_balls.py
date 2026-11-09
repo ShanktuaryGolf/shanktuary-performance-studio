@@ -178,10 +178,20 @@ def test_redesigned_dispersion_offers_split_and_colours_series(tmp_path, monkeyp
         labels = [t for t in texts if t.startswith("7 Iron · ")]
         assert {t.split("  ")[0] for t in labels} == {"7 Iron · Pro V1", "7 Iron · Chrome Soft", "7 Iron · no ball"}
         # Series must be told apart by colour, not only by label.
+        expected = {"7 Iron · Pro V1", "7 Iron · Chrome Soft", "7 Iron · no ball"}
         fills = {a.canvas.itemcget(i, "fill") for i in a.canvas.find_all()
-                 if a.canvas.type(i) == "text" and a.canvas.itemcget(i, "text").startswith("7 Iron · ")
-                 and a.canvas.itemcget(i, "text").endswith("y")}   # chart labels "club · ball  150y"
+                 if a.canvas.type(i) == "text" and a.canvas.itemcget(i, "text") in expected}
         assert len(fills) == 3
+        # The summary key and rendered landing series must agree, so a
+        # multi-coloured legend cannot hide same-coloured plot points.
+        point_fills = {a.canvas.itemcget(i, "fill") for i in a.canvas.find_all()
+                       if a.canvas.type(i) == "oval" and a.canvas.itemcget(i, "fill") in fills}
+        assert point_fills == fills
+        assert a.dispersion_dot_rects, "landing plot must remain interactive"
+        px, py, shot_index = a.dispersion_dot_rects[0]
+        a.handle_mouse_press(type("E", (), {"x": px, "y": py, "num": 1})())
+        assert a.selected_shot_index == shot_index
+        assert a.current_shot is a.session_shots[shot_index]
     finally:
         root.destroy()
 

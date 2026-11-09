@@ -1,0 +1,247 @@
+/* Studio browser material system. Color roles are generated from theme.py. */
+body.studio-browser {
+  --studio-panel: linear-gradient(135deg, color-mix(in srgb, var(--surface) 96%, transparent), color-mix(in srgb, var(--bg) 96%, transparent));
+  --studio-active: linear-gradient(125deg, var(--accent-deep), var(--surface-2));
+  --studio-shadow: 0 12px 30px rgb(0 0 0 / 20%), inset 0 1px 0 rgb(255 255 255 / 4%);
+  font-family: var(--ui-font);
+  font-variant-numeric: tabular-nums;
+}
+.studio-browser :is(button, a, input, select):focus-visible {
+  outline: 2px solid var(--gold, var(--warn)); outline-offset: 4px;
+}
+.studio-browser button { font-family: inherit; }
+.studio-browser:not(.mode-projector) .widget {
+  background: var(--studio-panel);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  box-shadow: var(--studio-shadow);
+}
+.studio-browser:not(.mode-projector) .widget.visual-card { border: 1px solid var(--hairline); }
+.studio-browser:not(.mode-projector) .metric-value { letter-spacing: -.025em; }
+.studio-browser:not(.mode-projector) .metric-label { text-transform: none; font-size: 15px; letter-spacing: 0; color: var(--text-2); }
+.studio-browser:not(.mode-projector) .widget.metric-unavailable { border-color: var(--guide); }
+.studio-browser:not(.mode-projector) .visual-title { font-size: 17px; letter-spacing: 0; text-transform: none; color: var(--text); }
+body.studio-browser.edit-mode {
+  background-color: var(--bg) !important;
+  background-image: conic-gradient(var(--surface) 25%, transparent 0 50%, var(--surface) 0 75%, transparent 0) !important;
+  background-size: 24px 24px !important;
+}
+.studio-browser .edit-toolbar {
+  background: var(--studio-panel); border-color: var(--hairline); min-height: 66px;
+  height: auto; flex-wrap: wrap; padding: 10px 18px; box-shadow: var(--studio-shadow);
+}
+.studio-browser .edit-toolbar-title { color: var(--text); font-size: 16px; }
+.studio-browser .edit-toolbar :is(button, select), .studio-browser .calib-controls {
+  border-radius: 9px; background: var(--surface); color: var(--text); border: 1px solid var(--hairline);
+}
+.studio-browser .edit-toolbar .btn-save-layout { background: var(--studio-active) !important; color: var(--text) !important; border: 1px solid var(--accent) !important; }
+.studio-browser .edit-toolbar .btn-config-page { background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--hairline) !important; }
+.studio-browser.edit-mode .widget.widget-selected { border-color: var(--accent-line) !important; box-shadow: 0 0 0 2px var(--accent-line); }
+/* Never compromise the physical projector's dark background / bright tiles. */
+.studio-browser.mode-projector .widget { border-radius: 18px; }
+
+/* Configurator: a persistent working preview and a real, scrollable widget rail. */
+body.studio-config { padding: 0; background: var(--bg); min-height: 100vh; }
+.studio-config .studio-brand { display: flex; gap: 13px; align-items: center; }
+.studio-config .studio-brand img { width: 42px; height: 48px; object-fit: contain; }
+.studio-config .studio-brand strong { display: block; letter-spacing: .04em; font-size: 21px; }
+.studio-config .studio-brand small { font-size: 9px; letter-spacing: .25em; }
+.studio-config .studio-rail { position: fixed; inset: 0 auto 0 0; width: 242px; padding: 30px 20px; border-right: 1px solid var(--guide); background: var(--bg); }
+.studio-config .studio-rail nav { display: grid; gap: 9px; margin-top: 54px; }
+.studio-config .studio-rail nav small { color: var(--text-3); letter-spacing: .12em; margin: 18px 10px 4px; }
+.studio-config .studio-rail a { display: flex; align-items: center; gap: 14px; text-decoration: none; color: var(--text); border: 1px solid transparent; padding: 13px 14px; border-radius: 10px; font-size: 17px; }
+.studio-config .studio-rail a[aria-current] { background: var(--studio-active); border-color: var(--accent); }
+.studio-config .studio-rail a:hover { border-color: var(--hairline); }
+.studio-config .studio-rail svg { width: 23px; height: 23px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+.studio-config .studio-main { margin-left: 242px; padding: 28px; }
+.studio-config .studio-page-header { padding-bottom: 24px; }
+.studio-config .studio-page-header h1 { font-size: clamp(28px, 3vw, 44px); letter-spacing: -.03em; color: var(--text); margin: 0 0 6px; }
+.studio-config .studio-page-header p { color: var(--text-2); font-size: 18px; }
+.studio-config .studio-status { display: flex; align-items: center; gap: 10px; border: 1px solid var(--hairline); background: var(--studio-panel); border-radius: 10px; padding: 11px 17px; margin-bottom: 22px; color: var(--text-2); font-size: 14px; }
+.studio-config .studio-status::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); }
+.studio-config .studio-status[data-state=ready]::before { background: var(--accent); }
+.studio-config .studio-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.studio-config .studio-preview-panel, .studio-config .container { background: var(--studio-panel); border: 1px solid var(--hairline); border-radius: 16px; box-shadow: var(--studio-shadow); padding: 18px; margin: 0; max-width: none; }
+.studio-config .studio-preview-panel { position: sticky; top: 20px; }
+.studio-config .studio-preview-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.studio-config .studio-preview-toolbar strong { flex: 1; font-size: 18px; }
+.studio-config .studio-button { display: inline-flex; align-items: center; justify-content: center; padding: 10px 15px; border: 1px solid var(--hairline); border-radius: 9px; background: var(--surface); color: var(--text); text-decoration: none; font: 600 13px var(--ui-font); cursor: pointer; }
+.studio-config .studio-button.primary { border-color: var(--accent); background: var(--studio-active); }
+.studio-config .studio-preview { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--hairline); background: repeating-conic-gradient(var(--surface) 0 25%, var(--bg) 0 50%) 0 / 24px 24px; }
+.studio-config .studio-preview iframe { width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; position: absolute; left: 0; top: 0; pointer-events: none; }
+.studio-config .studio-preview-note { color: var(--text-2); font-size: 13px; padding-top: 16px; line-height: 1.5; }
+.studio-config .container > h1 { font-size: 23px; color: var(--text); }
+.studio-config .container > p.subtitle { font-size: 13px; color: var(--text-2); margin-bottom: 12px; }
+.studio-config .section-title { color: var(--text-2); text-transform: none; font-size: 16px; letter-spacing: 0; border-color: var(--guide); }
+.studio-config .grid { grid-template-columns: 1fr; gap: 6px; }
+.studio-config .toggle-card { background: color-mix(in srgb, var(--surface) 70%, transparent); padding: 11px 12px; border-color: var(--guide); }
+.studio-config .toggle-card:has(input:checked) { border-color: var(--hairline); background: var(--studio-active); }
+.studio-config .toggle-label { color: var(--text); font-weight: 500; }
+.studio-config .btn-save { position: sticky; bottom: 12px; background: var(--studio-active); border: 1px solid var(--accent); color: var(--text); box-shadow: var(--studio-shadow); }
+.studio-config .status-success { background: var(--accent-deep); color: var(--text); }
+@media (max-width: 1150px) { .studio-config .studio-rail { width: 200px; padding: 24px 12px; } .studio-config .studio-main { margin-left: 200px; padding: 20px; } .studio-config .studio-layout { grid-template-columns: 1fr; } .studio-config .studio-preview-panel { position: static; } .studio-config .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .studio-config .studio-brand strong { font-size: 17px; } }
+@media (max-width: 650px) { .studio-config .studio-rail { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--guide); } .studio-config .studio-rail nav { display: flex; flex-wrap: wrap; margin-top: 16px; gap: 2px; } .studio-config .studio-rail nav small { display: none; } .studio-config .studio-rail a { font-size: 13px; padding: 8px; gap: 6px; } .studio-config .studio-rail svg { width: 18px; } .studio-config .studio-main { margin-left: 0; padding: 14px; } .studio-config .grid { grid-template-columns: 1fr; } }
+
+/* 3D range: retain the real full-viewport renderer and every HUD control. */
+.studio-range { --glass: color-mix(in srgb, var(--surface) 88%, transparent); --glass-2: var(--surface-2); --glass-line: var(--hairline); --mono: var(--ui-font); }
+.studio-range .glass { background: var(--studio-panel); border-color: var(--hairline); box-shadow: var(--studio-shadow); border-radius: 14px; }
+.studio-range #nav { height: 60px; background: linear-gradient(var(--bg), color-mix(in srgb,var(--bg) 90%,transparent)); border-bottom: 1px solid var(--guide); }
+.studio-range .nav-tab { border: 1px solid transparent; border-radius: 8px; padding: 8px 16px; }
+.studio-range .nav-tab.active { background: var(--studio-active); border-color: var(--accent); }
+.studio-range .lm-status-pill { color: var(--text); }
+.studio-range :is(.sl-title,.widget-title) { font-size: 16px; letter-spacing: 0; text-transform: none; }
+.studio-range .sl-head { padding-top: 14px; padding-bottom: 14px; }
+.studio-range #game-modes-drawer { width: min(1180px, calc(100vw - 64px)); padding: 26px; background: var(--bg); }
+.studio-range #game-mode-grid { gap: 13px; }
+.studio-range #game-modes-drawer > .drawer-section-title { font-size: 26px; text-transform: none; letter-spacing: -.02em; color: var(--text); }
+.studio-range .game-mode-card { min-height: 185px; padding: 16px 18px 76px; border-radius: 15px; border-color: var(--hairline); background-color: var(--surface); background-image: url('/assets/range/studio-mode-landscape.svg'); background-size: cover; background-position: bottom; position: relative; }
+.studio-range .game-mode-card.active { border: 2px solid var(--gold); padding: 15px 17px 75px; }
+.studio-range .game-mode-card:hover { border-color: var(--accent-line); filter: brightness(1.1); }
+.studio-range .game-mode-title { font-size: clamp(16px, 1.5vw, 23px); letter-spacing: -.02em; }
+.studio-range .game-mode-desc { font-size: 12px; color: var(--text-2); max-width: 95%; }
+.studio-range .game-mode-tag { color: var(--gold); background: var(--bg); border-color: var(--gold); font-size: 9px; }
+.studio-range .game-mode-art { position: absolute; inset: auto 18px 6px; width: calc(100% - 36px); height: 62px; stroke: var(--accent-line); fill: none; stroke-width: 2; pointer-events: none; }
+.studio-range .game-mode-art .gold { stroke: var(--gold); }
+.studio-range #drawer-scrim.open { background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(9px); }
+@media (max-width: 760px) { .studio-range #game-modes-drawer { padding: 16px; width: calc(100vw - 24px); max-width: calc(100vw - 24px); } .studio-range .game-mode-card { min-height: 190px; padding: 12px 12px 72px; } .studio-range .game-mode-card.active { padding: 11px 11px 71px; } .studio-range .nav-tab { padding: 6px; } .studio-range #nav { gap: 8px; padding: 0 10px; } }
+@media (prefers-reduced-motion: reduce) { .studio-browser * { scroll-behavior: auto !important; transition: none !important; } }
+.studio-range .game-mode-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; }
+.studio-config .studio-page-header {
+  background-image: url('/assets/studio-topography.svg');
+  background-repeat: no-repeat; background-position: right top; background-size: 75% 100%;
+}
+.studio-config .projection-field { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: var(--text); font-size: 16px; }
+.studio-config .projection-field input { margin-left: auto; width: 112px; padding: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--hairline); border-radius: 9px; font: 600 20px var(--ui-font); text-align: right; }
+.studio-config .projection-field output { margin-left: auto; font-size: 22px; color: var(--gold); }
+.studio-config .projection-controls input[type=range] { width: 100%; accent-color: var(--accent); }
+.studio-config .projection-controls .studio-button { width: 100%; margin-top: 24px; }
+.studio-config .projection-controls .btn-save { position: static; margin-top: 12px; }
+.studio-config .projection-controls .btn-save:disabled { opacity: .4; cursor: not-allowed; }
+.studio-config .container[hidden] { display: none; }
+/* The canvas keeps its persisted 1920×1080 coordinates. A compact single-row
+   toolbar must never cover a second row of saved widgets on smaller screens. */
+.studio-browser .edit-toolbar { min-height: 52px; flex-wrap: nowrap; overflow-x: auto; padding: 8px 14px; }
+.studio-browser .edit-toolbar > * { flex-shrink: 0; }
+.studio-range .sl-head { flex-wrap: wrap; gap: 8px; }
+.studio-range .sl-title { white-space: nowrap; }
+.studio-range .sl-head-actions { margin-left: auto; }
+/* Fidelity pass: larger typography and the approved illustrative mode artwork. */
+@media (min-width: 1151px) {
+ .studio-config .studio-rail { width: 272px; padding: 30px 20px; }
+ .studio-config .studio-main { margin-left: 272px; padding: 24px; }
+ .studio-config .studio-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+ .studio-config .studio-page-header h1 { font-size: 46px; }
+ .studio-config .studio-page-header p { font-size: 23px; }
+ .studio-config .studio-status { font-size: 17px; }
+ .studio-config .studio-preview-toolbar strong { font-size: 22px; }
+ .studio-config .studio-button { font-size: 16px; padding: 11px 18px; }
+ .studio-config .container > h1 { font-size: 27px; }
+ .studio-config .toggle-label { font-size: 15px; }
+}
+.studio-presets { margin: 16px 0; padding: 12px; border: 1px solid var(--hairline); border-radius: 10px; }
+.studio-presets summary { cursor: pointer; font-weight: 600; }
+.studio-presets p { margin: 10px 0; font-size: 13px; color: var(--text-2); }
+.studio-presets .studio-button { width: 100%; margin: 5px 0; }
+.studio-presets [hidden] { display: none; }
+.studio-browser .widget { container-type: size; }
+.studio-browser:not(.mode-projector) .widget .metric-val { font-size: clamp(27px, 20cqw, 140px); font-weight: 700; }
+.studio-browser:not(.mode-projector) .widget .metric-label { font-size: clamp(15px, 7cqw, 48px); margin-bottom: 16px; }
+.studio-browser:not(.mode-projector) .widget .metric-unit { font-size: .45em; }
+.studio-browser:not(.mode-projector) .widget:not(.visual-card) { justify-content: center; padding: 18px 28px; }
+.studio-browser:not(.mode-projector) .widget .visual-title { font-size: clamp(17px, 3.5cqw, 38px); }
+.studio-range #game-modes-drawer { width: min(1290px, calc(100vw - 48px)); padding: 24px; }
+.studio-range #game-mode-grid { gap: 14px; }
+.studio-range .game-mode-card { min-height: 210px; padding: 16px 18px 125px; overflow: hidden; isolation: isolate; background-image: none; }
+.studio-range .game-mode-card.active { padding: 15px 17px 124px; }
+.studio-range .game-mode-title { font-size: clamp(18px, 2vw, 31px); }
+.studio-range .game-mode-desc { font-size: 15px; line-height: 1.35; }
+.studio-range .game-mode-art { display: none; }
+/* Source is the user's approved concept artwork, shown only as decorative
+   cropped background through CSS. No concept labels or sample data appear. */
+.studio-range .game-mode-card::before { content: ''; position: absolute; z-index: -1; inset: auto 0 0; height: 115px; background-image: url('/assets/range/studio-mode-reference.png'); background-size: 386.83% 862.6%; background-repeat: no-repeat; }
+.studio-range [data-mode=practice]::before { background-position: 25.1% 38.4%; }
+.studio-range [data-mode=challenge]::before { background-position: 61.8% 38.4%; }
+.studio-range [data-mode=target_practice]::before { background-position: 98.6% 38.4%; }
+.studio-range [data-mode=ladder]::before { background-position: 25.1% 61.2%; }
+.studio-range [data-mode=closest-pin]::before { background-position: 61.8% 61.2%; }
+.studio-range [data-mode=long-drive]::before { background-position: 98.6% 61.2%; }
+.studio-range [data-mode=grid]::before { background-position: 25.1% 85.6%; }
+.studio-range [data-mode=grid_custom]::before { background-position: 61.8% 85.6%; }
+.studio-range [data-mode=combine]::before { background-position: 98.6% 85.6%; }
+@media (max-width: 760px) { .studio-range .game-mode-desc { font-size: 12px; } .studio-range .game-mode-card { min-height: 220px; } }
+.studio-browser:not(.mode-projector) .widget:not(.visual-card) { padding: 12px 16px; }
+@container (max-height: 120px) {
+ .studio-browser:not(.mode-projector) .widget .metric-label { font-size: 12px; margin-bottom: 5px; }
+ .studio-browser:not(.mode-projector) .widget .metric-val { font-size: 27px; }
+}
+.studio-browser.mode-projector .widget .metric-val { font-size: clamp(27px, 18cqw, 120px); }
+.studio-browser.mode-projector .widget .metric-label { font-size: clamp(9px, 5cqw, 38px); }
+@container (max-height: 120px) {
+ .studio-browser.mode-projector .widget .metric-val { font-size: 27px; }
+ .studio-browser.mode-projector .widget .metric-label { font-size: 9px; }
+}
+.studio-range .ms-label { font-size: clamp(8px, 10cqw, 15px); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-2); }
+.studio-range .ms-value { font-size: clamp(16px, 24cqw, 32px); font-weight: 700; letter-spacing: -.025em; }
+.studio-range .ms-unit { font-size: 11px; text-transform: none; }
+.studio-range .widget-title { font-size: 20px; }
+.studio-theme-picker { margin: 18px 0; padding-bottom: 18px; border-bottom: 1px solid var(--guide); }
+.studio-theme-picker h2 { font-size: 20px; margin-bottom: 12px; }
+.studio-theme-picker > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.studio-theme-picker .theme-swatch { border: 0; color: var(--text); background: transparent; font-size: 10px; cursor: pointer; }
+.studio-theme-picker .theme-swatch span { display: block; height: 46px; border: 1px solid var(--hairline); border-radius: 9px; background: linear-gradient(155deg,var(--surface-2),var(--bg)); margin-bottom: 7px; }
+.studio-theme-picker [data-overlay-theme=broadcast-dark] span { filter: saturate(.25); }
+.studio-theme-picker [data-overlay-theme=clean-light] span { background: linear-gradient(155deg,var(--text),var(--text-3)); }
+.studio-theme-picker [aria-pressed=true] span { outline: 2px solid var(--accent); }
+/* Keep the concept's original card borders outside the decorative crop. */
+.studio-range .game-mode-card::before { background-size: 396.5% 862.6%; mask-image: linear-gradient(transparent, black 16px); }
+.studio-range :is([data-mode=practice],[data-mode=ladder],[data-mode=grid])::before { background-position-x: 25.13%; }
+.studio-range :is([data-mode=challenge],[data-mode=closest-pin],[data-mode=grid_custom])::before { background-position-x: 61.72%; }
+.studio-range :is([data-mode=target_practice],[data-mode=long-drive],[data-mode=combine])::before { background-position-x: 98.23%; }
+.studio-browser:not(.mode-projector) .widget .visual-title { font-size: clamp(17px, 8cqw, 60px); font-weight: 600; }
+.studio-browser #w_wbb_balance_bar .metric-val { font-size: clamp(16px, 7cqw, 48px) !important; }
+.studio-browser #w_wbb_balance_bar .metric-label { font-size: 12px; margin-bottom: 0; }
+
+/* Integrated editor: the output stays an untouched 1920×1080 rendering;
+   an independently scaled hit layer owns draft-only geometry gestures. */
+.studio-config .studio-geometry { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; border: 0; border-top: 1px solid var(--guide); padding: 14px 0 18px; min-width: 0; }
+.studio-config .studio-geometry label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+.studio-config :is(.studio-geometry input:not([type=checkbox]),.studio-geometry select,.studio-presets select,.studio-presets input,.projection-widget-rotation input) { background: var(--bg); border: 1px solid var(--hairline); border-radius: 8px; padding: 8px; color: var(--text); font: 500 14px var(--ui-font); min-width: 0; }
+.studio-config .studio-geometry input:not([type=checkbox]) { width: 77px; }
+.studio-config .studio-geometry .studio-widget-select { flex: 1 1 260px; }
+.studio-config .studio-widget-select select { flex: 1; max-width: 330px; }
+.studio-config .studio-snap { white-space: nowrap; }
+.studio-config input[type=checkbox] { accent-color: var(--accent); }
+.studio-config .studio-geometry:disabled { opacity: .5; }
+.studio-config #studioSelectionScale { position: absolute; inset: 0 auto auto 0; width: 1920px; height: 1080px; transform-origin: 0 0; pointer-events: none; }
+.studio-config #studioSelectionCanvas { position: absolute; inset: 0; transform-origin: 960px 540px; }
+.studio-config .studio-widget-hit { position: absolute; pointer-events: auto; touch-action: none; border: 3px solid transparent; cursor: move; }
+.studio-config .studio-widget-hit:hover { border-color: var(--hairline); }
+.studio-config .studio-widget-hit.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-deep); }
+.studio-config .studio-widget-hit.selected::before,.studio-config .studio-widget-hit.selected::after,.studio-config .studio-resize-handle { content: ''; position: absolute; width: 18px; height: 18px; background: var(--text); border: 2px solid var(--accent); }
+.studio-config .studio-widget-hit.selected::before { left: -9px; top: -9px; }
+.studio-config .studio-widget-hit.selected::after { right: -9px; top: -9px; }
+.studio-config .studio-resize-handle { right: -12px; bottom: -12px; width: 26px; height: 26px; cursor: nwse-resize; }
+.studio-config .studio-presets { border: 0; border-bottom: 1px solid var(--guide); border-radius: 0; padding: 0 0 14px; }
+.studio-config .studio-presets h2 { font-size: 20px; margin-bottom: 10px; }
+.studio-config .studio-presets select { width: 100%; }
+.studio-config .studio-presets details { margin-top: 10px; }
+.studio-config .studio-presets details input { width: 100%; margin-top: 10px; }
+.studio-config .studio-presets summary { font-size: 13px; color: var(--text-2); }
+.studio-config .studio-layout-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.studio-config .studio-layout-actions .primary { width: 100%; }
+.studio-config .studio-layout-actions button { flex: 1 1 auto; }
+.studio-config :is(button,input,select):disabled { cursor: not-allowed; opacity: .45; }
+.studio-config .studio-status[data-state=draft]::before { background: var(--gold); }
+.studio-config .studio-status[data-state=error]::before { background: var(--danger); }
+.studio-config .projection-widget-rotation { display: flex; gap: 8px; }
+.studio-config .projection-widget-rotation input { width: 95px; flex: 1; text-align: center; }
+.studio-config .projection-widget-rotation .studio-button { width: auto; margin: 0; padding: 12px 10px; }
+.studio-config .projection-range-labels { display: flex; justify-content: space-between; color: var(--text-2); font-size: 13px; margin-bottom: 10px; }
+.studio-config .projection-divot-tilt { border-top: 1px solid var(--guide); margin-top: 22px; padding-top: 18px; }
+.studio-config .projection-divot-tilt summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
+.studio-config .projection-controls .studio-layout-actions .studio-button { width: auto; margin: 0; }
+.studio-config .projection-controls .studio-layout-actions .primary { width: 100%; }
+.studio-config .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.studio-config .studio-widget-hit.selected { z-index: 2; }
+.studio-config .studio-resize-handle { width: 64px; height: 64px; right: -32px; bottom: -32px; background: transparent; border: 0; }
+.studio-config .studio-resize-handle::after { content: ''; position: absolute; width: 22px; height: 22px; left: 21px; top: 21px; background: var(--text); border: 2px solid var(--accent); pointer-events: none; }

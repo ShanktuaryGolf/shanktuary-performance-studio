@@ -71,11 +71,13 @@ def smoke_test():
         if callback_errors:
             _, error, traceback = callback_errors[0]
             raise error.with_traceback(traceback)
-        # This image is created by the actual sidebar renderer with ImageTk,
-        # not by a smoke-only import that could hide a missing PyInstaller hook.
-        image = getattr(app, "_brand_header_v17_img", None)
+        # The concept shell is vector-rendered; verify the real navigation and
+        # the contact artwork's lazily loaded native Tk image bridge separately.
+        if set(app.design_mode_rects) != {12, 1, 4, 5, 2, 3, 6, 7, 8, 11, 10}:
+            raise RuntimeError("Desktop navigation was not rendered")
+        image = app.get_scaled_club_asset(studio.FACE_PATH, 100, mirror=False)
         if image is None or image.width() <= 0 or image.height() <= 0:
-            raise RuntimeError("Sidebar ImageTk image was not rendered")
+            raise RuntimeError("Contact ImageTk artwork was not rendered")
         if not app.canvas.find_all():
             raise RuntimeError("Desktop canvas was not rendered")
         print("SPS_SMOKE_TEST_OK: desktop and sidebar rendered", flush=True)

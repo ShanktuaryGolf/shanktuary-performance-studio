@@ -550,7 +550,57 @@
         /* ---------- HUD scale ----------
            Wrapper around every HUD panel so the whole overlay can be scaled up
            for projector / across-the-room viewing. Deliberately NOT applied to
-           <html> or <body>: that scales the 3D canvas too, blowing its backing
+           <html> or <body class="studio-browser studio-range" data-range-view="picker" data-range-mode="practice">
+    <aside class="range-sidebar" aria-label="Studio workspaces">
+        <div class="range-brand"><img src="/assets/studio_brand_mark.png" alt=""><div><strong>SHANKTUARY</strong><small>PERFORMANCE STUDIO</small></div></div>
+        <nav>
+            <div class="range-nav-heading">SESSION</div>
+            <button data-desktop-workspace="Overview"><span data-range-icon="home"></span>Overview</button>
+            <button data-desktop-workspace="Club"><span data-range-icon="club"></span>Club</button>
+            <button data-desktop-workspace="Table"><span data-range-icon="table"></span>Table</button>
+            <button id="range-nav-numbers"><span data-range-icon="numbers"></span>Numbers</button>
+            <div class="range-nav-heading">PRACTICE</div>
+            <button id="range-nav-range" aria-current="page"><span data-range-icon="target"></span>Range</button>
+            <button data-desktop-workspace="Index"><span data-range-icon="flag"></span>Index</button>
+            <div class="range-nav-heading">TOOLS</div>
+            <button id="range-nav-dispersion"><span data-range-icon="dispersion"></span>Dispersion</button>
+            <button id="range-nav-bag"><span data-range-icon="bag"></span>Bag</button>
+            <button data-desktop-workspace="Fit"><span data-range-icon="sliders"></span>Fit</button>
+            <button data-desktop-workspace="Lab"><span data-range-icon="lab"></span>Lab</button>
+            <button id="range-nav-setup"><span data-range-icon="settings"></span>Setup</button>
+        </nav>
+        <div class="range-sidebar-footer"><span data-range-icon="garage"></span><div>Garage studio<small>Local browser range</small></div></div>
+    </aside>
+    <main class="range-studio-main">
+        <header class="range-page-header">
+            <div><h1 id="range-page-title">3D Range</h1><p id="range-page-subtitle">Practice mode selection</p></div>
+            <span class="range-renderer-label" id="range-engine-label">3D range · Loading</span>
+        </header>
+        <div class="range-source-bar"><span id="range-source-status"><i></i>Boards <em>Awaiting pressure data</em></span><span><i class="hollow"></i>PurePlay <em>Connection not reported</em></span><span id="range-connection-slot"></span></div>
+        <section id="range-picker" aria-label="Practice mode selection">
+            <div class="range-picker-toolbar"><h2><span data-range-icon="camera"></span>Cameras</h2><div class="range-camera-buttons">
+                <button data-range-camera="1"><span data-range-icon="camera"></span>Follow</button><button data-range-camera="2"><span data-range-icon="tower"></span>TV tower</button><button data-range-camera="0"><span data-range-icon="person"></span>Behind</button>
+            </div></div>
+            <div id="range-picker-mount"></div>
+            <div class="range-start-row"><p id="range-selection-detail">Hit freely with full shot feedback.</p><button class="range-primary" id="range-start-mode" disabled><span data-range-icon="play"></span>Start mode</button><button id="range-resume" hidden>Back to range</button></div>
+            <p class="range-note" id="range-picker-note">Illustrated mode previews · Live shots appear after you start</p>
+        </section>
+        <section id="range-workspace" aria-label="3D range workspace" hidden>
+            <div class="range-workspace-toolbar"><div class="range-tabs"><button id="range-practice-tab">Practice</button><button id="range-combine-tab">Combine</button></div><div id="range-nav-mount"></div></div>
+            <div class="range-workspace-grid">
+                <div class="range-center">
+                    <div id="range-metrics-mount"></div>
+                    <section class="range-scene-card" aria-label="Live driving range">
+                        <div id="range-scene"><div id="range-renderer-error" role="status" hidden><span data-range-icon="camera"></span><h2>3D graphics are unavailable</h2><p>This browser could not start WebGL. Enable hardware acceleration or open this range in a WebGL-enabled browser, then reload.</p><p>Mode controls and live telemetry remain available. No rendered shot is shown.</p><button id="range-retry-renderer">Reload range</button></div><div id="range-scene-controls"></div></div>
+                        <div class="range-camera-toolbar"><strong>Cameras</strong><div class="range-camera-buttons"><button data-range-camera="1"><span data-range-icon="camera"></span>Follow</button><button data-range-camera="2"><span data-range-icon="tower"></span>TV tower</button><button data-range-camera="0"><span data-range-icon="person"></span>Behind</button></div><select id="range-extra-camera" aria-label="Additional camera views"><option value="">More views</option><option value="3">Target green</option><option value="4">Top-down blimp</option></select></div>
+                    </section>
+                </div>
+                <aside id="range-session-rail" aria-label="Practice progress"></aside>
+            </div>
+            <p class="range-note">Rendered flight is a simulation · Metric badges identify source data and derived values</p>
+        </section>
+        <div id="range-desktop-notice" role="status" hidden><span id="range-desktop-message"></span><button id="range-dismiss-notice" aria-label="Dismiss">×</button></div>
+    </main>: that scales the 3D canvas too, blowing its backing
            store past the viewport. Only the overlay scales; the range render
            stays at native resolution.
 
@@ -1423,8 +1473,60 @@
     </script>
     <script src="/range/js/three.min.js"></script>
     <script src="/range/js/GLTFLoader.js"></script>
+  <link rel="stylesheet" href="/assets/studio-browser.css">
+  <link rel="stylesheet" href="/range/studio-range.css">
 </head>
-<body>
+<body class="studio-browser studio-range" data-range-view="picker" data-range-mode="practice">
+    <aside class="range-sidebar" aria-label="Studio workspaces">
+        <div class="range-brand"><img src="/assets/studio_brand_mark.png" alt=""><div><strong>SHANKTUARY</strong><small>PERFORMANCE STUDIO</small></div></div>
+        <nav>
+            <div class="range-nav-heading">SESSION</div>
+            <button data-desktop-workspace="Overview"><span data-range-icon="home"></span>Overview</button>
+            <button data-desktop-workspace="Club"><span data-range-icon="club"></span>Club</button>
+            <button data-desktop-workspace="Table"><span data-range-icon="table"></span>Table</button>
+            <button id="range-nav-numbers"><span data-range-icon="numbers"></span>Numbers</button>
+            <div class="range-nav-heading">PRACTICE</div>
+            <button id="range-nav-range" aria-current="page"><span data-range-icon="target"></span>Range</button>
+            <button data-desktop-workspace="Index"><span data-range-icon="flag"></span>Index</button>
+            <div class="range-nav-heading">TOOLS</div>
+            <button id="range-nav-dispersion"><span data-range-icon="dispersion"></span>Dispersion</button>
+            <button id="range-nav-bag"><span data-range-icon="bag"></span>Bag</button>
+            <button data-desktop-workspace="Fit"><span data-range-icon="sliders"></span>Fit</button>
+            <button data-desktop-workspace="Lab"><span data-range-icon="lab"></span>Lab</button>
+            <button id="range-nav-setup"><span data-range-icon="settings"></span>Setup</button>
+        </nav>
+        <div class="range-sidebar-footer"><span data-range-icon="garage"></span><div>Garage studio<small>Local browser range</small></div></div>
+    </aside>
+    <main class="range-studio-main">
+        <header class="range-page-header">
+            <div><h1 id="range-page-title">3D Range</h1><p id="range-page-subtitle">Practice mode selection</p></div>
+            <span class="range-renderer-label" id="range-engine-label">3D range · Loading</span>
+        </header>
+        <div class="range-source-bar"><span id="range-source-status"><i></i>Boards <em>Awaiting pressure data</em></span><span><i class="hollow"></i>PurePlay <em>Connection not reported</em></span><span id="range-connection-slot"></span></div>
+        <section id="range-picker" aria-label="Practice mode selection">
+            <div class="range-picker-toolbar"><h2><span data-range-icon="camera"></span>Cameras</h2><div class="range-camera-buttons">
+                <button data-range-camera="1"><span data-range-icon="camera"></span>Follow</button><button data-range-camera="2"><span data-range-icon="tower"></span>TV tower</button><button data-range-camera="0"><span data-range-icon="person"></span>Behind</button>
+            </div></div>
+            <div id="range-picker-mount"></div>
+            <div class="range-start-row"><p id="range-selection-detail">Hit freely with full shot feedback.</p><button class="range-primary" id="range-start-mode" disabled><span data-range-icon="play"></span>Start mode</button><button id="range-resume" hidden>Back to range</button></div>
+            <p class="range-note" id="range-picker-note">Illustrated mode previews · Live shots appear after you start</p>
+        </section>
+        <section id="range-workspace" aria-label="3D range workspace" hidden>
+            <div class="range-workspace-toolbar"><div class="range-tabs"><button id="range-practice-tab">Practice</button><button id="range-combine-tab">Combine</button></div><div id="range-nav-mount"></div></div>
+            <div class="range-workspace-grid">
+                <div class="range-center">
+                    <div id="range-metrics-mount"></div>
+                    <section class="range-scene-card" aria-label="Live driving range">
+                        <div id="range-scene"><div id="range-renderer-error" role="status" hidden><span data-range-icon="camera"></span><h2>3D graphics are unavailable</h2><p>This browser could not start WebGL. Enable hardware acceleration or open this range in a WebGL-enabled browser, then reload.</p><p>Mode controls and live telemetry remain available. No rendered shot is shown.</p><button id="range-retry-renderer">Reload range</button></div><div id="range-scene-controls"></div></div>
+                        <div class="range-camera-toolbar"><strong>Cameras</strong><div class="range-camera-buttons"><button data-range-camera="1"><span data-range-icon="camera"></span>Follow</button><button data-range-camera="2"><span data-range-icon="tower"></span>TV tower</button><button data-range-camera="0"><span data-range-icon="person"></span>Behind</button></div><select id="range-extra-camera" aria-label="Additional camera views"><option value="">More views</option><option value="3">Target green</option><option value="4">Top-down blimp</option></select></div>
+                    </section>
+                </div>
+                <aside id="range-session-rail" aria-label="Practice progress"></aside>
+            </div>
+            <p class="range-note">Rendered flight is a simulation · Metric badges identify source data and derived values</p>
+        </section>
+        <div id="range-desktop-notice" role="status" hidden><span id="range-desktop-message"></span><button id="range-dismiss-notice" aria-label="Dismiss">×</button></div>
+    </main>
     <canvas id="three-canvas"></canvas>
 
     <!-- ================= Top navigation ================= -->
@@ -1516,7 +1618,7 @@
     <!-- Metric picker for the bottom strip -->
     <div class="glass" id="strip-menu">
         <div class="sm-head">
-            <span>Bottom Strip</span>
+            <span>Top metrics</span>
             <button id="sm-reset" type="button" title="Restore the default eight metrics">Reset</button>
         </div>
         <div class="sm-hint" id="sm-hint">Choose 3-10 metrics</div>
@@ -1646,11 +1748,15 @@
 
         <div class="widget glass" id="combine-scorecard" style="display:none;">
             <div class="widget-head">
-                <div class="widget-title">🏅 Combine</div>
+                <div class="widget-title">Combine</div>
                 <div class="widget-note" id="combine-score-headline">--</div>
             </div>
-            <div id="combine-score-result">Select a station club to begin</div>
+            <p class="range-combine-subtitle">Multi-club performance test</p>
             <div id="combine-score-stats" class="combine-stations"></div>
+            <div class="range-combine-score"><strong>Combine score</strong><output id="range-combine-value">—</output></div>
+            <p id="range-combine-progress">No run started</p>
+            <div id="combine-score-result">Select a station club to begin</div>
+            <div class="range-combine-actions"><button class="range-primary" id="range-start-combine" disabled><span data-range-icon="play"></span>Start combine</button><button id="range-end-combine" disabled><span data-range-icon="stop"></span>End run</button></div>
             <div class="combine-history" id="combine-history">No combine recorded yet</div>
         </div>
 
@@ -1704,70 +1810,70 @@
     <!-- ================= Game modes drawer ================= -->
     <div class="glass" id="game-modes-drawer">
         <div class="drawer-section-title">
-            <span>Range Game Modes</span>
+            <span>Choose your practice</span>
             <button class="icon-btn" id="btn-close-game-modes"
                     style="width:24px;height:24px;font-size:0.75rem;border-radius:6px;">✕</button>
         </div>
         <div id="game-mode-grid">
-        <div class="game-mode-card active" data-mode="practice">
+        <div class="game-mode-card active" role="button" tabindex="0" data-mode="practice">
             <div class="game-mode-header">
-                <div class="game-mode-title">⛳ Free Practice</div>
+                <div class="game-mode-title">Free Practice</div>
                 <span class="game-mode-tag" id="tag-practice">Active</span>
             </div>
             <div class="game-mode-desc">Standard open driving range with full telemetry, custom target distance &amp; fairway corridors. No game scoring rules.</div>
         </div>
-        <div class="game-mode-card" data-mode="challenge">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="challenge">
             <div class="game-mode-header">
-                <div class="game-mode-title">🎯 Target Challenge</div>
+                <div class="game-mode-title">Target Challenge</div>
                 <span class="game-mode-tag" id="tag-challenge" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">10-shot / 75-point precision game. Hit concentric rings on the target green to score points and earn proximity awards.</div>
         </div>
-        <div class="game-mode-card" data-mode="target_practice">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="target_practice">
             <div class="game-mode-header">
-                <div class="game-mode-title">🎯 Target Practice</div>
+                <div class="game-mode-title">Target Practice</div>
                 <span class="game-mode-tag" id="tag-target-practice" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Hit / near / miss against the pin at a chosen distance. Tracks hits, streak, and average deviation. Not the same game as Target Challenge.</div>
         </div>
-        <div class="game-mode-card" data-mode="ladder">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="ladder">
             <div class="game-mode-header">
-                <div class="game-mode-title">🪜 Distance Ladder</div>
+                <div class="game-mode-title">Distance Ladder</div>
                 <span class="game-mode-tag" id="tag-ladder" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Starts at 20 yards. Hit the green to climb the ladder as the pin moves back by a random 10 to 20 yards on every successful shot!</div>
         </div>
-        <div class="game-mode-card" data-mode="closest-pin">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="closest-pin">
             <div class="game-mode-header">
-                <div class="game-mode-title">📍 Closest to Pin</div>
+                <div class="game-mode-title">Closest to Pin</div>
                 <span class="game-mode-tag" id="tag-closest-pin" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">3-shot shootout measuring closest distance to the pin in feet. Test your approach accuracy.</div>
         </div>
-        <div class="game-mode-card" data-mode="long-drive">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="long-drive">
             <div class="game-mode-header">
-                <div class="game-mode-title">💥 Long Drive</div>
+                <div class="game-mode-title">Long Drive</div>
                 <span class="game-mode-tag" id="tag-long-drive" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Max distance shootout. Only shots that finish within the fairway boundary corridor qualify.</div>
         </div>
-        <div class="game-mode-card" data-mode="grid">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="grid">
             <div class="game-mode-header">
-                <div class="game-mode-title">📐 Classic Grid</div>
+                <div class="game-mode-title">Classic Grid</div>
                 <span class="game-mode-tag" id="tag-grid" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Standard 180 to 280 yard grid in 10-yard zones. Pick your opening zone, then land each random zone in the fewest balls.</div>
         </div>
-        <div class="game-mode-card" data-mode="grid_custom">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="grid_custom">
             <div class="game-mode-header">
-                <div class="game-mode-title">📐 Custom Grid</div>
+                <div class="game-mode-title">Custom Grid</div>
                 <span class="game-mode-tag" id="tag-grid-custom" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Choose a custom start distance in even 10-yard increments (e.g. 50, 60, 70y). Generates 10 consecutive 10-yard zones.</div>
         </div>
-        <div class="game-mode-card" data-mode="combine">
+        <div class="game-mode-card" role="button" tabindex="0" data-mode="combine">
             <div class="game-mode-header">
-                <div class="game-mode-title">🏅 Combine</div>
+                <div class="game-mode-title">Combine</div>
                 <span class="game-mode-tag" id="tag-combine" style="display:none;">Active</span>
             </div>
             <div class="game-mode-desc">Three stations from your bag (wedge, mid iron, long club), 10 swings each, scored by the Shanktuary Index. Your first ten valid swings count — extra swings never do.</div>
@@ -1876,5 +1982,6 @@
     </div>
 
     <script type="module" src="/range/js/main.js"></script>
+<script src="/assets/range/studio-mode-art.js"></script>
 </body>
 </html>

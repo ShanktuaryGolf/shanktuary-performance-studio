@@ -93,3 +93,19 @@ NAV_ITEMS = [
     (8, "Lab",      "Swing lab / pressure"),
     (11, "Index",   "Shanktuary Index score"),
 ]
+
+
+# Browser Studio redesign. Scoped separately from compatibility desktop tokens.
+BROWSER_STUDIO = {
+    "bg": "#031723", "surface": "#062D35", "surface-2": "#0B454B",
+    "hairline": "#4D8088", "text": "#F4F8FA", "text-2": "#CBDBE0",
+    "text-3": "#92AFB7", "accent-deep": "#075D5C", "accent": "#00D6BC",
+    "accent-line": "#24F1D7", "accent-text": "#8CF7E9", "gold": "#FFD16A",
+    "guide": "#46757D", "warn": "#FFD16A", "danger": "#F27575",
+}
+
+# Explicit overlay presets. The projector always keeps inverted polarity.
+BROWSER_OVERLAY_THEMES = {
+    "broadcast-dark": {"bg": "#091119", "surface": "#15212B", "surface-2": "#22343E", "hairline": "#66808A", "text": "#F4F8FA", "text-2": "#C6D3D9", "text-3": "#9AADB5"},
+    "clean-light": {"bg": "#E4F0F4", "surface": "#F2F8FA", "surface-2": "#D1E6EB", "hairline": "#5D8792", "text": "#092630", "text-2": "#244D59", "text-3": "#426A75", "accent": "#007E78", "accent-line": "#008D83", "accent-text": "#006F67"},
+}

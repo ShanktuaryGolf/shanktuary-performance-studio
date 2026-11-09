@@ -50,8 +50,8 @@ def app(tmp_path, monkeypatch):
         pytest.skip("no display available")
     root.geometry("1915x1111")
     application = ShanktuaryDesktopApp(root)
-    application.view_mode = 10
-    application.draw_screen()
+    from concept_gui_helpers import open_setup_details
+    open_setup_details(application)
     root.update()
 
     yield root, application, pm, tmp_path
@@ -174,3 +174,26 @@ def test_guided_setup_skips_board_assignment_for_openfp(app):
     application.start_guided_setup()
     assert application.setup_flow_steps[0] == "assign"
     application.show_board_assign_modal = False
+
+
+@pytest.mark.parametrize('mode', ['single', 'dual'])
+def test_openfp_can_switch_back_via_visible_board_mode(app, mode):
+    root, application, pm, tmp_path = app
+    address = pm.openfp_url
+    _click(root, application, _source_rect(application, 'openfp'))
+    application.draw_screen()
+    root.update()
+    _click(root, application, application.board_workspace_rects['switch_wbb_' + mode])
+    assert pm.pressure_source == 'wbb'
+    assert pm.board_mode == mode
+    assert pm.openfp_url == address
+    application.draw_screen()
+    root.update()
+    assert application.setup_mode_1_rect and application.setup_mode_2_rect
+    # Repeated navigation preserves the deliberate choice.
+    application.set_mode(0)
+    application.set_mode(10)
+    assert pm.pressure_source == 'wbb'
+    assert pm.board_mode == mode
+    import json
+    assert json.loads((tmp_path / 'cal.json').read_text())['pressure_source'] == 'wbb'

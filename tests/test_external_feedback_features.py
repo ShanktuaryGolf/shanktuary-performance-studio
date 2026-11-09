@@ -130,14 +130,20 @@ def test_delete_last_shot_clears_selection(app, monkeypatch):
     assert application.current_shot is None
 
 
-def test_draw_screen_registers_shot_delete_rects(app):
+def test_draw_screen_registers_selected_shot_delete_action(app):
     _root, application = app
-    application.draw_screen()
-    assert isinstance(application.shot_delete_btn_rects, list)
-    # 3 fixture shots should each have a registered delete hitbox.
-    assert len(application.shot_delete_btn_rects) == 3
-    for x1, y1, x2, y2, idx in application.shot_delete_btn_rects:
-        assert 0 <= idx < 3
+    # Compact Recent Shots exposes deletion for the selected shot. Every
+    # history entry becomes deletable when selected, rather than showing three
+    # permanently visible trash buttons in the retired global drawer.
+    for index in range(3):
+        application.selected_shot_index = index
+        application.current_shot = application.session_shots[index]
+        application.set_mode(9)
+        actions = [(rect, arg) for rect, action, arg in application.concept_session_rects
+                   if action == "delete"]
+        assert len(actions) == 1 and actions[0][1] == index
+        rect = actions[0][0]
+        assert rect[2] > rect[0] and rect[3] > rect[1]
 
 
 # ---- Club notes -------------------------------------------------------

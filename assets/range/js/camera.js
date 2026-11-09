@@ -1,3 +1,5 @@
+import { studioShell } from './studio_shell.js';
+
 // Multi-Mode 3D Camera System with Up-Close Golf Ball Framing
 
 export const CameraModes = {
@@ -14,9 +16,9 @@ export class CameraController {
         const savedMode = parseInt(localStorage.getItem('sps_range_camera_mode') || '0', 10);
         this.mode = (savedMode >= 0 && savedMode <= 4) ? savedMode : CameraModes.GOLFER;
         
-        this.target = new THREE.Vector3(0, 1.10, -70);
-        this.currentPosition = new THREE.Vector3(0, 1.75, 4.6);
-        this.desiredPosition = new THREE.Vector3(0, 1.75, 4.6);
+        this.target = new THREE.Vector3(0, 0.5, -9);
+        this.currentPosition = new THREE.Vector3(0, 2.4, 5.8);
+        this.desiredPosition = new THREE.Vector3(0, 2.4, 5.8);
         
         this.ballPosition = new THREE.Vector3(0, 0.085, 0);
         this.landingPosition = new THREE.Vector3(0, 0.05, -150);
@@ -27,6 +29,7 @@ export class CameraController {
     
     setupEventListeners() {
         window.addEventListener('keydown', (e) => {
+            if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
             if (e.key === 'v' || e.key === 'V') {
                 this.cycleMode();
             }
@@ -57,6 +60,7 @@ export class CameraController {
     }
     
     updateModeUI() {
+        studioShell?.setCamera(this.mode);
         const modeNames = ["Golfer View", "Follow-Cam", "Broadcast Tower", "Target Green", "Top-Down Blimp"];
         const modeLabel = document.getElementById('camera-mode-label');
         if (modeLabel) {
@@ -77,18 +81,26 @@ export class CameraController {
         
         switch (this.mode) {
             case CameraModes.GOLFER:
-                this.desiredPosition.set(0, 1.75, 4.6); // Elevated and pulled back for natural golfer perspective
-                this.target.set(0, 1.10, -70);
+                this.desiredPosition.set(0, 2.4, 5.8); // Elevated and pulled back for natural golfer perspective
+                this.target.set(0, 0.5, -9);
                 break;
                 
             case CameraModes.FOLLOW:
-                this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 0.8, this.ballPosition.z + 2.5);
-                this.target.copy(this.ballPosition);
+                if (this.ballPosition.z > -4 && this.ballPosition.y < 1) {
+                    // At address, show the bay and downrange view. During a
+                    // real flight this remains the original following camera.
+                    this.desiredPosition.set(0, 2.4, 5.8);
+                    this.target.set(0, 0.5, -9);
+                } else {
+                    this.desiredPosition.set(this.ballPosition.x, this.ballPosition.y + 0.8, this.ballPosition.z + 2.5);
+                    this.target.copy(this.ballPosition);
+                }
                 break;
                 
             case CameraModes.BROADCAST:
                 this.desiredPosition.set(25, 12, -20);
-                this.target.copy(this.ballPosition);
+                if (this.ballPosition.z > -4 && this.ballPosition.y < 1) this.target.set(0, 0, -120);
+                else this.target.copy(this.ballPosition);
                 break;
                 
             case CameraModes.LANDING:

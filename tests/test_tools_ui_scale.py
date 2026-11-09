@@ -25,13 +25,15 @@ def test_tools_scale_controls(initial_scale, tmp_path, monkeypatch):
         root.update()
         assert not hasattr(app, "design_scale_rect")
         assert not hasattr(app, "show_ui_scale")
-        # Open the actual top-bar Tools dropdown through its scaled binding.
+        # Open Tools, then its preserved More commands menu through scaled bindings.
         def click(rect):
             x = round((rect[0] + rect[2]) / 2 * app.ui_scale - app.canvas.canvasx(0))
             y = round((rect[1] + rect[3]) / 2 * app.ui_scale - app.canvas.canvasy(0))
             app.canvas.event_generate("<Button-1>", x=x, y=y)
             root.update()
         click(app.design_tools_btn_rect)
+        assert app.view_mode == 14
+        click(next(rect for rect, action in app.concept_tools_rects if action == "legacy_tools"))
         assert app.show_tools_menu
         for _ in range(6):
             click(app.ui_scale_controls["minus"])

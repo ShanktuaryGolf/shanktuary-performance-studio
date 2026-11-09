@@ -81,136 +81,67 @@ def _quad_app(tmp_path, monkeypatch, geometry="1600x950", contact=None):
         raise
 
 
-# A shape this large is the panel background or a full-quadrant wash, not a
-# decorative graphic. Panels are painted before their own labels, so counting
-# them produces a false positive on every string in the panel.
-_PANEL_FILL_W = 500
-_PANEL_FILL_H = 320
+def _overlap(a, b):
+    return min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
 
 
-def _panel_items(app):
-    """(kind, z, bbox, text) for the bottom-right quadrant only."""
-    ids = list(app.canvas.find_all())
-    out = []
-    for item in ids:
-        box = app.canvas.bbox(item)
-        if not box or box[0] < 900 or box[1] < 500:
-            continue
-        kind = app.canvas.type(item)
-        text = app.canvas.itemcget(item, "text") if kind == "text" else ""
-        out.append((kind, ids.index(item), box, text))
-    return out
-
-
-def _occluders(items):
-    """Graphics that could plausibly hide a label -- backgrounds excluded."""
-    out = []
-    for kind, z, b, _ in items:
-        if kind not in ("rectangle", "image"):
-            continue
-        if (b[2] - b[0]) >= _PANEL_FILL_W and (b[3] - b[1]) >= _PANEL_FILL_H:
-            continue  # panel background
-        out.append((z, b))
-    return out
-
-
-# The face artwork is 290x220 drawn at ~90px high, so ~118px wide. It used
-# to be padded to a 158px square, which is what the old >150 threshold
-# matched -- and that transparent padding was what buried the badge row.
-_FACE_MIN_W = 100
+def _tag_box(app, tag):
+    items = app.canvas.find_withtag(tag)
+    assert len(items) == 1, f"expected one {tag}, got {items}"
+    return app.canvas.bbox(items[0])
 
 
 def test_only_one_clubface_is_drawn(tmp_path, monkeypatch):
-    """Production's face plus the redesign's is what forced the opaque cover
-    in the first place. Suppressing the asset should leave exactly one."""
     root, app = _quad_app(tmp_path, monkeypatch)
     try:
-        faces = [b for kind, _, b, _ in _panel_items(app)
-                 if kind == "image" and (b[2] - b[0]) > _FACE_MIN_W]
-        assert len(faces) == 1, f"expected 1 clubface, found {len(faces)}: {faces}"
+        _tag_box(app, "contact-artwork")
     finally:
         root.destroy()
 
 
 def test_the_clubface_clears_the_contact_status(tmp_path, monkeypatch):
-    """The contact status is above the artwork and must remain unobscured."""
     root, app = _quad_app(tmp_path, monkeypatch)
     try:
-        items = _panel_items(app)
-        faces = [b for kind, _, b, _ in items
-                 if kind == "image" and (b[2] - b[0]) > _FACE_MIN_W]
-        assert faces, "no clubface image in the panel"
-        # The current panel stacks its contact status above the face instead
-        # of keeping the old VERTICAL/HORIZONTAL readout beside it.
-        face_top = min(b[1] for b in faces)
-        readout = [(b, t) for kind, _, b, t in items
-                   if kind == "text" and "Approximate strike" in t]
-        assert readout, "contact status label not found"
-        assert all(b[3] <= face_top for b, _ in readout), (
-            f"clubface overlaps the contact status: {readout}; face top={face_top}"
-        )
+        # Concept stacks status BELOW artwork, retaining the no-occlusion rule.
+        assert not _overlap(_tag_box(app, "contact-artwork"), _tag_box(app, "contact-heading"))
     finally:
         root.destroy()
 
 
 def test_the_footer_disclaimer_is_never_covered(tmp_path, monkeypatch):
-    """'Nova measures ball flight, not face contact' is an honesty label about
-    estimated data. Decoration must never be what hides it."""
     root, app = _quad_app(tmp_path, monkeypatch)
     try:
-        items = _panel_items(app)
-        footer = [(z, b) for kind, z, b, t in items
-                  if kind == "text" and "Nova measures" in t]
-        assert footer, "the Nova disclaimer is missing from the Quad view"
-
-        for tz, tb in footer:
-            for z, cb in _occluders(items):
-                if z <= tz:
-                    continue
-                ox = min(tb[2], cb[2]) - max(tb[0], cb[0])
-                oy = min(tb[3], cb[3]) - max(tb[1], cb[1])
-                assert not (ox > 40 and oy > 8), f"disclaimer covered by {cb}"
+        c = app.canvas
+        footers = [i for i in c.find_all() if c.type(i) == "text"
+                   and "Nova measures" in c.itemcget(i, "text")]
+        assert len(footers) == 1
+        assert not _overlap(c.bbox(footers[0]), _tag_box(app, "contact-artwork"))
     finally:
         root.destroy()
 
 
 def test_the_credibility_badge_does_not_sit_on_the_caption(tmp_path, monkeypatch):
-    """The current credibility badge must clear the impact caption."""
     root, app = _quad_app(tmp_path, monkeypatch)
     try:
-        items = _panel_items(app)
-        caption = next((b for kind, _, b, t in items
-                        if kind == "text" and t == "IMPACT LOCATION"), None)
-        badge = next((b for kind, _, b, t in items
-                      if kind == "text" and t == "UNAVAILABLE"),
-                     None)
-        assert caption is not None, "impact caption missing"
-        assert badge is not None, "native ball-flight-only shot must say UNAVAILABLE"
-        assert badge[0] >= caption[2], (
-            f"badge starts x{badge[0]} but caption runs to x{caption[2]}"
-        )
+        heading = _tag_box(app, "contact-heading")
+        credibility = _tag_box(app, "contact-credibility")
+        assert not _overlap(heading, credibility)
+        c = app.canvas
+        assert c.itemcget(c.find_withtag("contact-heading")[0], "text") == "Impact unavailable"
+        assert c.itemcget(c.find_withtag("contact-credibility")[0], "text") == "No face-contact measurement"
     finally:
         root.destroy()
 
 
 def test_no_panel_label_is_substantially_covered(tmp_path, monkeypatch):
-    """Catch-all: nothing drawn later may bury a label in this panel."""
     root, app = _quad_app(tmp_path, monkeypatch)
     try:
-        items = _panel_items(app)
-        texts = [(z, b, t) for kind, z, b, t in items
-                 if kind == "text" and t]
-        covers = _occluders(items)
-
-        buried = []
-        for tz, tb, label in texts:
-            for cz, cb in covers:
-                if cz <= tz:
-                    continue
-                ox = min(tb[2], cb[2]) - max(tb[0], cb[0])
-                oy = min(tb[3], cb[3]) - max(tb[1], cb[1])
-                if ox > (tb[2] - tb[0]) * 0.5 and oy > (tb[3] - tb[1]) * 0.5:
-                    buried.append(f"{label[:28]!r} under {cb}")
-        assert not buried, "panel text is covered: " + "; ".join(buried)
+        c = app.canvas
+        art = _tag_box(app, "contact-artwork")
+        # Image transparent margins are part of the allocation: no text may
+        # rely on transparency to survive an artwork replacement.
+        for item in c.find_all():
+            if c.type(item) == "text":
+                assert not _overlap(c.bbox(item), art), c.itemcget(item, "text")
     finally:
         root.destroy()

@@ -1,146 +1,166 @@
-"""The Setup (mode 10) page must agree with the tools menu about connection.
+"""Connections retains source selection and actual link status before a shot.
 
-Reported as "Setup says Nova offline / Not connected but the tools menu shows
-Nova online". Root cause: draw_setup_viewport() read self.nova_connected, an
-attribute that is only set when a SHOT arrives — not a link flag. So on a live
-link with no shots yet, Setup said "Not connected" while the tools menu (which
-reads nova_status) correctly showed it online.
-
-Also: a user who never wants the splash screen still needs a way to switch the
-shot source from Nova to GSPro. The SHOT SOURCE card exposes Nova/GSPro/Both
-buttons that persist via apply_shot_source().
+Board setup is now its own workspace. These assertions exercise the shipped
+Connections page and real connection wizard/controller, rather than the
+removed legacy shot-source card inside board details.
 """
-
-import os
-import sys
+import queue
+from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-tk = pytest.importorskip("tkinter")
+tk = pytest.importorskip('tkinter')
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("SPS_SHOT_SOURCE_FILE", str(tmp_path / "s.json"))
-    monkeypatch.setenv("SPS_SKIP_SPLASH", "1")
     import shanktuary_performance_studio as studio
-
-    # Isolate session history so the test never touches the user's real data.
-    hist = tmp_path / "hist.json"
-    if os.path.exists("/home/sean/sps/shanktuary_session_history.json"):
-        import shutil
-        shutil.copy2(
-            "/home/sean/sps/shanktuary_session_history.json", str(hist)
-        )
-    else:
-        hist.write_text("{}")
-    monkeypatch.setattr(studio, "SESSION_LOG_PATH", str(hist))
-
+    from src.connections.controller import SourceConnections
     from src.ui import ShanktuaryDesktopApp
 
+    monkeypatch.setenv('SPS_SHOT_SOURCE_FILE', str(tmp_path/'source.json'))
+    monkeypatch.setenv('SPS_SKIP_SPLASH', '1')
+    monkeypatch.setenv('SPS_UI_PREVIEW', '1')
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    monkeypatch.delenv('SPS_SHOT_SOURCE', raising=False)
+    # The settings cache is process-wide, not keyed by SPS_SHOT_SOURCE_FILE.
+    # A new temp path alone leaves the previous parametrization's source live.
+    # Restore the caller's cache on teardown while starting this test empty.
+    monkeypatch.setattr(studio.gspro_settings, '_cache', None)
+    assert studio.gspro_settings.load_settings(refresh=True)['source'] == 'nova'
+    assert not (tmp_path/'source.json').exists()
+    monkeypatch.setattr(studio, 'SESSION_LOG_PATH', str(tmp_path/'history.json'))
+    monkeypatch.setattr(studio, 'source_connections', SourceConnections(queue.Queue()))
+    monkeypatch.setattr(studio, 'nova_status', {'connected': False, 'host': ''})
+    monkeypatch.setattr(studio, 'gspro_status', {'connected': False})
     try:
         root = tk.Tk()
     except tk.TclError:
-        pytest.skip("no display available")
-    root.geometry("1915x1111")
-
-    nova_before = dict(studio.nova_status)
-    gspro_before = dict(studio.gspro_status)
-    studio.nova_status.update({"connected": False, "host": ""})
-    studio.gspro_status.clear()
-
+        pytest.skip('graphical display required')
+    root.geometry('1600x1000')
     application = ShanktuaryDesktopApp(root)
     root.update()
-
+    application.set_mode(10)
+    assert getattr(application, 'concept_setup_page', 'overview') == 'overview'
     yield root, application, studio
-
-    try:
-        root.destroy()
-    except tk.TclError:
-        pass
-    studio.nova_status.clear()
-    studio.nova_status.update(nova_before)
-    studio.gspro_status.clear()
-    studio.gspro_status.update(gspro_before)
+    studio.source_connections.stop()
+    root.destroy()
 
 
 def _texts(app):
-    c = app.canvas
-    return [c.itemcget(i, "text") for i in c.find_all() if c.type(i) == "text"]
+    return [app.canvas.itemcget(i, 'text') for i in app.canvas.find_all() if app.canvas.type(i) == 'text']
+
+
+def _click(app, rect):
+    app.handle_mouse_press(SimpleNamespace(x=(rect[0]+rect[2])/2, y=(rect[1]+rect[3])/2))
+
+
+def _wizard_click(wizard, action, payload=None):
+    targets = [r for r in wizard._hit_rects if r[4] == action and (payload is None or r[5] == payload)]
+    assert targets, f'No {action}/{payload} control on {wizard.page}'
+    x0, y0, x1, y1, _, _ = targets[-1]
+    wizard._on_click(SimpleNamespace(x=(x0+x1)/2, y=(y0+y1)/2))
 
 
 def test_setup_shows_connected_when_nova_link_is_up_but_no_shot_arrived(app):
-    """The reported bug: live link, zero shots -> Setup said 'Not connected'."""
     root, application, studio = app
-    # Nova IS connected but no shot has arrived yet. The stale attribute the
-    # page used to read is therefore False — exactly the contradictory state.
-    studio.nova_status.update({"connected": True, "host": "192.168.40.249:2920"})
-    application.nova_connected = False
-
-    application.view_mode = 10
+    controller = studio.connection_setup_controller()
+    controller.start('nova')
+    studio.nova_status.update(connected=True, host='192.168.40.249:2920')
+    application.nova_connected = False  # stale shot-arrival flag must not win
     application.draw_screen()
-    for _ in range(5):
-        root.update()
-
+    root.update()
     texts = _texts(application)
-    assert "Nova connected" in texts, (
-        f"Setup should say 'Nova connected' on a live link; got: {texts}"
-    )
-    # The old wrong strings must be gone.
-    assert "Not connected" not in texts, "stale 'Not connected' still shown"
-    assert "Nova offline" not in texts, "stale 'Nova offline' still shown"
+    assert 'Connected. Hit a test shot.' in texts, texts
+    assert not controller.snapshot()['shot_received']
+    assert controller.snapshot()['state'] == 'connected'
+    assert 'Connecting…' not in texts
+    assert 'No shot source connected' not in texts
+    assert 'Ready to play' not in texts
 
 
 def test_setup_shows_offline_when_nova_link_is_down(app):
     root, application, studio = app
-    studio.nova_status.update({"connected": False, "host": ""})
-    application.view_mode = 10
+    controller = studio.connection_setup_controller()
+    controller.start('nova')
+    studio.nova_status.update(connected=False, last_message='Nova offline')
     application.draw_screen()
-    for _ in range(5):
-        root.update()
+    root.update()
+    assert 'Nova offline' in _texts(application)
+    assert 'Connected. Hit a test shot.' not in _texts(application)
+    assert controller.snapshot()['state'] != 'ready'
 
-    texts = _texts(application)
-    assert "Nova offline" in texts or "Not connected" in texts
 
-
-def test_setup_exposes_gspro_switcher(app):
-    """A user who skips the splash can still pick GSPro from Setup."""
+def test_setup_exposes_source_picker_and_preserves_both_choice(app, monkeypatch):
     root, application, studio = app
-    application.view_mode = 10
-    application.draw_screen()
-    for _ in range(5):
-        root.update()
+    from src.ui.connection_wizard import ConnectionWizard
 
-    keys = [r[4] for r in application.setup_source_btn_rects]
-    assert "nova" in keys and "gspro" in keys and "both" in keys, (
-        f"SHOT SOURCE card must offer nova/gspro/both; got {keys}"
-    )
+    assert {'source_nova', 'source_gspro', 'source_open_connect', 'source_pureplay'} <= application.concept_setup_actions.keys()
+    opened = []
+    def inspect_picker(wizard):
+        offered = {r[5] for r in wizard._hit_rects if r[4] == 'source'}
+        assert {'nova', 'gspro', 'pureplay', 'open_connect'} <= offered
+        if not wizard.advanced:
+            _wizard_click(wizard, 'advanced')
+        offered = {r[5] for r in wizard._hit_rects if r[4] == 'source'}
+        assert {'both', 'cgp'} <= offered
+        _wizard_click(wizard, 'source', 'both')
+        assert wizard.source == 'both'
+        assert studio.source_connections.snapshot()['source'] == 'both'
+        assert studio.gspro_settings.effective_source() == 'nova', 'Selection alone must not start/persist a connection'
+        opened.append(True)
+        wizard._on_close()
+    monkeypatch.setattr(ConnectionWizard, 'run', inspect_picker)
+    _click(application, application.concept_setup_actions['source_configure'])
+    assert opened == [True]
 
 
-def test_clicking_gspro_on_setup_persists_the_switch(app):
+@pytest.mark.parametrize('source', ['gspro', 'both'])
+def test_clicking_source_on_setup_persists_only_after_explicit_connect(app, monkeypatch, source):
     root, application, studio = app
-    from src.gspro import settings as gspro_settings
+    from src.ui.connection_wizard import ConnectionWizard
 
-    application.view_mode = 10
+    completed = []
+    def connect_picker(wizard):
+        if source == 'both' and not wizard.advanced:
+            _wizard_click(wizard, 'advanced')
+        _wizard_click(wizard, 'source', source)
+        _wizard_click(wizard, 'continue')
+        assert studio.gspro_settings.effective_source() == 'nova'
+        _wizard_click(wizard, 'connect')
+        assert studio.gspro_settings.effective_source() == source
+        assert studio.source_connections.active_for('gspro')
+        assert studio.source_connections.active_for('nova') == (source == 'both')
+        # A live GSPro link must be recognized even with Nova down in Both mode.
+        studio.gspro_status.update(connected=True, db_found=True)
+        assert wizard.controller.snapshot()['state'] == 'connected'
+        assert not wizard.controller.snapshot()['shot_received']
+        completed.append(True)
+        wizard._on_close()
+    monkeypatch.setattr(ConnectionWizard, 'run', connect_picker)
+    _click(application, application.concept_setup_actions['source_gspro'])
+    root.update()
+    assert completed == [True]
+    assert studio.gspro_settings.effective_source() == source
+    assert 'GSPro' in _texts(application)
+
+
+@pytest.mark.parametrize('scale', ['100%', '150%', '200%'])
+def test_setup_uses_shipped_logos_in_source_order_inside_cards(app, scale):
+    root, application, studio = app
+    application.set_ui_scale(scale, persist=False)
     application.draw_screen()
-    for _ in range(5):
-        root.update()
-
-    rect = [r for r in application.setup_source_btn_rects if r[4] == "gspro"]
-    assert rect, "no GSPro button to click"
-    gx0, gy0, gx1, gy1, _ = rect[0]
-
-    ev = tk.Event()
-    ev.x, ev.y = (gx0 + gx1) // 2, (gy0 + gy1) // 2
-    application.handle_mouse_press(ev)
-    for _ in range(5):
-        root.update()
-
-    assert gspro_settings.effective_source() == "gspro", (
-        "clicking GSPro on Setup did not persist the source switch"
-    )
-    # The card should now present GSPro as the device.
-    texts = _texts(application)
-    assert "GSPro" in texts
+    root.update()
+    keys = ['source_nova', 'source_gspro', 'source_pureplay', 'source_open_connect']
+    rects = [application.concept_setup_actions[key] for key in keys]
+    assert [rect[0] for rect in rects] == sorted(rect[0] for rect in rects)
+    canvas = application.canvas
+    images = canvas.find_withtag('setup-source-logo')
+    assert len(images) == 3
+    # Native image bounds must include viewport translation and exactly one DPI scale.
+    for item, rect in zip(images, rects):
+        x0, y0, x1, y1 = tk.Canvas.bbox(canvas, item)
+        factor = canvas.ui_scale
+        assert rect[0] * factor <= x0 < x1 <= rect[2] * factor
+        assert rect[1] * factor <= y0 < y1 <= rect[3] * factor
+    assert {key[0] for key in canvas._setup_source_logos} == {'nova', 'gspro', 'pureplay'}

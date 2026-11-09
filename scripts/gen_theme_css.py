@@ -108,6 +108,16 @@ def main():
         lines.append(f"  --{css_name}:{'':<{max(1, 14 - len(css_name))}}{val};\n")
     lines.append(PROJECTOR)
     lines.append(FOOTER)
+    lines.append("\n/* Approved Studio browser palette; preserve projector polarity. */\nbody.studio-browser:not(.mode-projector) {\n")
+    for name, value in theme.BROWSER_STUDIO.items():
+        lines.append(f"  --{name}: {value};\n")
+    lines.append("}\n")
+
+    for name, values in theme.BROWSER_OVERLAY_THEMES.items():
+        lines.append(f'\nbody.studio-browser:not(.mode-projector)[data-studio-theme="{name}"] {{\n')
+        for key, value in values.items():
+            lines.append(f"  --{key}: {value};\n")
+        lines.append("}\n")
 
     out = REPO / "assets" / "theme.css"
     out.write_text("".join(lines))

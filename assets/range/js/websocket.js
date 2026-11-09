@@ -1,5 +1,6 @@
 // WebSocket Telemetry, Proximity, Real-time Fairway Width Slider & Minimap Radar
 
+import { studioShell, rangeIcon } from './studio_shell.js';
 import { setTargetDistance, setTargetGreenVisible, setRangeDecorVisible } from './environment.js';
 import { setFairwayWidth, getFairwayWidth } from './foliage.js';
 import { PressureTileRenderer } from './pressure_tiles.js';
@@ -33,7 +34,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     const HUD_SCALE_MAX = 200;
 
     (function buildHudScaleWrapper() {
-        if (document.getElementById('hud-scale')) return;
+        if (studioShell || document.getElementById('hud-scale')) return;
         const ids = [
             'nav', 'dist-readout', 'shot-list', 'club-chip',
             'metric-strip', 'btn-strip-config', 'strip-menu',
@@ -78,6 +79,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     function maxUsableHudScale() {
         // shot list (18 + 216 + 16 gutter) + rail (292 + 18 + 12 gutter)
         // + a minimum readable strip width.
+        if (studioShell) return 100; // Studio grid reflows; do not zoom the inset scene.
         const SIDES_W = (18 + 216 + 16) + (292 + 18 + 12);
         const MIN_STRIP_W = 300;
         // nav + strip + the gaps above and below it
@@ -473,6 +475,8 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     // --- Combine: the desktop app owns stamping + scoring; the range starts/
     // ends the run and mirrors GET /api/combine. Never scored in the browser.
     let combineStatus = null;
+    let combineBusy = false;
+    let combineError = null;
 
     function shortClub(name) {
         const m = /^(\d)\s+(Hybrid|Wood)$/.exec(String(name || ''));
@@ -486,6 +490,14 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         const result = document.getElementById('combine-score-result');
         const stats = document.getElementById('combine-score-stats');
         const history = document.getElementById('combine-history');
+        const startButton = document.getElementById('range-start-combine');
+        const endButton = document.getElementById('range-end-combine');
+        const scoreValue = document.getElementById('range-combine-value');
+        const progressLabel = document.getElementById('range-combine-progress');
+        if (startButton) startButton.disabled = combineBusy || !status || !!status.active || !status.protocol?.stations?.length;
+        if (endButton) endButton.disabled = combineBusy || !status?.active;
+        if (scoreValue) scoreValue.textContent = '—';
+        if (progressLabel) progressLabel.textContent = status ? 'No run started' : 'Combine status unavailable';
         if (!status) {
             if (headline) headline.innerText = '--';
             if (result) { result.innerText = 'Combine unavailable'; result.classList.remove('live'); }
@@ -494,7 +506,15 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
         const r = status.result;
         const stations = (r && r.stations) || ((status.protocol && status.protocol.stations) || []).map(
-            s => ({ ...s, counted: 0, needed: 10, complete: false, score: null }));
+            s => ({ ...s, counted: 0, needed: status.protocol.shots_per_station, complete: false, score: null }));
+        const totalCounted = stations.reduce((total, st) => total + st.counted, 0);
+        const totalNeeded = stations.reduce((total, st) => total + st.needed, 0);
+        if (scoreValue && r && typeof r.score === 'number') scoreValue.textContent = r.score.toFixed(1);
+        if (progressLabel) progressLabel.textContent = !stations.length
+            ? 'Set up station clubs in My Bag'
+            : r?.status === 'complete'
+            ? `Complete (${totalCounted} of ${totalNeeded} valid swings)`
+            : `${status.active ? 'Not yet complete' : 'Ready when you are'} (${totalCounted} of ${totalNeeded} valid swings)`;
         const clubName = manualClub ? manualClub.name : null;
         if (stats) {
             stats.innerHTML = '';
@@ -508,7 +528,19 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                 const val = document.createElement('div');
                 val.className = 'target-stat-value';
                 val.textContent = `${st.counted}/${st.needed}${st.complete ? ' ✓' : ''}`;
-                cell.appendChild(label); cell.appendChild(val);
+                const icon = document.createElement('span');
+                icon.innerHTML = rangeIcon('club');
+                const track = document.createElement('div');
+                track.className = 'range-station-track';
+                track.setAttribute('role', 'progressbar');
+                track.setAttribute('aria-label', `${st.club} valid swings`);
+                track.setAttribute('aria-valuemin', '0');
+                track.setAttribute('aria-valuemax', String(st.needed));
+                track.setAttribute('aria-valuenow', String(st.counted));
+                const fill = document.createElement('span');
+                fill.style.width = `${Math.min(100, st.needed > 0 ? st.counted / st.needed * 100 : 0)}%`;
+                track.appendChild(fill);
+                cell.appendChild(icon); cell.appendChild(label); cell.appendChild(val); cell.appendChild(track);
                 stats.appendChild(cell);
             });
         }
@@ -520,7 +552,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             result.classList.toggle('live', !!status.active);
             if (!status.active) {
                 result.innerText = status.protocol && status.protocol.stations.length
-                    ? 'Pick Combine in Modes to start' : (status.protocol && status.protocol.reason) || 'Bag too thin';
+                    ? 'Start a combine, then choose each station club from the club picker.' : (status.protocol && status.protocol.reason) || 'Bag too thin';
             } else if (r && r.status === 'complete') {
                 result.innerText = 'Complete — recorded on the Index';
             } else {
@@ -531,6 +563,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     : 'Scoring…';
             }
         }
+        if (result && combineError) result.innerText = combineError;
         if (history) {
             const h = status.history;
             history.innerText = h
@@ -549,19 +582,25 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }
 
     async function postCombine(action) {
+        // One request at a time. Repeated clicks cannot reset an active run.
+        if (combineBusy || (action === 'start' && combineStatus?.active)) return;
+        combineBusy = true;
+        combineError = null;
+        renderCombine(combineStatus);
         try {
             const res = await fetch('/api/combine', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action }),
             });
             const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                showBanner('🏅', 'COMBINE', body.message || `HTTP ${res.status}`);
-            }
+            if (!res.ok) combineError = body.message || `Combine request failed (HTTP ${res.status}).`;
         } catch (e) {
+            combineError = 'Could not confirm the combine change. Reconnect to Studio and check the current run before retrying.';
             console.warn('[!] /api/combine failed:', e);
+        } finally {
+            combineBusy = false;
+            await loadCombine();
         }
-        loadCombine();
     }
 
     let currentTargetYards = 150;
@@ -726,7 +765,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             if (challengeProxContainer) challengeProxContainer.style.display = 'none';
             if (targetScoringLegend) targetScoringLegend.style.display = 'none';
             showBanner('🏅', 'COMBINE', '3 stations × 10 swings, scored by the Index. Select each station club as you go.');
-            postCombine('start');
+            loadCombine(); // Enter the workspace; explicit Start combine begins a run.
         } else if (mode === 'target_practice') {
             resetTargetScore();
             if (rangeModeTitle) rangeModeTitle.innerText = 'Target Practice';
@@ -940,6 +979,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     // One helper owns "open exactly one of them" so the pair can never both be
     // open and a tab's active state can never drift from its drawer.
     function setDrawer(which) {
+        if (studioShell && which === 'modes') {
+            studioShell.showPicker();
+            which = null;
+        }
         const drawers = [
             { el: gameModesDrawer, tab: tabModes, key: 'modes' },
             { el: settingsDrawer, tab: tabSettings, key: 'settings' },
@@ -947,7 +990,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         let anyOpen = false;
         for (const d of drawers) {
             if (!d.el) continue;
-            const open = d.key === which;
+            const open = d.key === which && !(studioShell && d.key === 'modes');
             d.el.classList.toggle('open', open);
             if (d.tab) d.tab.classList.toggle('active', open);
             if (open) anyOpen = true;
@@ -979,8 +1022,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     gameModeCards.forEach(card => {
         card.addEventListener('click', () => {
             const mode = card.getAttribute('data-mode');
-            setGameMode(mode);
-            setDrawer(null);
+            if (!studioShell) {
+                setGameMode(mode);
+                setDrawer(null);
+            }
         });
     });
 
@@ -1213,6 +1258,15 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         // fallbacks above -- an untagged estimate is a lie to the user.
         const has = (v) => v !== undefined && v !== null;
         const derived = {
+            carry: !has(carryYds),
+            offline: !has(offlineYds),
+            launch: !(has(raw.vertical_launch_angle_degrees) || has(us.vert_launch_angle_deg) || has(raw.launch_angle)),
+            hla: !(has(raw.horizontal_launch_angle_degrees) || has(us.horiz_launch_angle_deg) || has(raw.hla)),
+            totalSpin: !(has(raw.total_spin_rpm) || has(ogc.total_spin_rpm) || has(us.total_spin_rpm) || has(raw.total_spin)),
+            spinAxis: !(has(raw.spin_axis_degrees) || has(ogc.spin_axis_degrees) || has(us.spin_axis_deg) || has(raw.spin_axis)),
+            smash: !(has(ogc.smash_factor) || has(raw.smash_factor) || has(raw.smash)),
+            clubPath: !(has(handed(ogc.club_path_degrees, null)) || has(raw.club_path) || has(raw.club_path_degrees)),
+            faceToPath: !(has(handed(ogc.club_face_to_path_degrees, null)) || has(raw.face_to_path) || has(raw.face_angle)),
             clubSpeed: !(has(us.club_speed_mph) || has(raw.club_speed_mph) || has(raw.club_speed)),
             attackAngle: !(has(handed(ogc.angle_of_attack_degrees, null))
                            || has(raw.angle_of_attack_degrees) || has(raw.attack_angle)),
@@ -1235,6 +1289,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         return {
             shotId,
+            source: raw._source || 'nova',
             club: shotClub,
             clubColor: clubColor,
             derived,
@@ -1293,11 +1348,18 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             unit.textContent = def.unit || '';
 
             cell.appendChild(label);
-            cell.appendChild(value);
-            cell.appendChild(unit);
+            const valueRow = document.createElement('div');
+            valueRow.className = 'ms-value-row';
+            valueRow.appendChild(value); valueRow.appendChild(unit);
+            cell.appendChild(valueRow);
+            const provenance = document.createElement('span');
+            provenance.className = 'ms-provenance';
+            provenance.textContent = 'Unavailable';
+            provenance.dataset.source = 'unavailable';
+            cell.appendChild(provenance);
             metricStrip.appendChild(cell);
 
-            stripCells.set(key, { cell, label, value, unit });
+            stripCells.set(key, { cell, label, value, unit, provenance });
         }
         fitStripLabels();
         // Repaint immediately so a layout change doesn't blank the strip until
@@ -1377,16 +1439,21 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
             nodes.value.classList.toggle('muted', !!r.muted);
             nodes.value.title = r.title || '';
             nodes.unit.textContent = r.unit || '';
+            if (nodes.provenance) {
+                nodes.provenance.textContent = r.sourceLabel;
+                nodes.provenance.dataset.source = r.sourceLabel.toLowerCase();
+                nodes.provenance.title = r.title || r.sourceLabel;
+            }
 
             // EST tag: the value came from a model/constant, not the Nova.
             const hasTag = !!nodes.label.querySelector('.est-tag');
-            if (r.est && !hasTag) {
+            if (!studioShell && r.est && !hasTag) {
                 const tag = document.createElement('span');
                 tag.className = 'est-tag';
                 tag.textContent = 'EST';
                 tag.title = 'Derived from a model, not measured by the launch monitor.';
                 nodes.label.appendChild(tag);
-            } else if (!r.est && hasTag) {
+            } else if ((!r.est || studioShell) && hasTag) {
                 nodes.label.querySelector('.est-tag').remove();
             }
         }
@@ -2431,8 +2498,9 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         return {
             shotId: `demo_${Date.now()}`,
+            source: 'demo',
             club: "7 Iron",
-            clubColor: "#00E5FF",
+            clubColor: getComputedStyle(document.body).getPropertyValue('--gold').trim(),
             ballSpeed: speed + (Math.random() * 2.0 - 1.0),
             clubSpeed: demoClubSpeed,
             smash: demoSmash,
@@ -2705,7 +2773,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         if (def.fixed) {
             const el = document.getElementById(def.element);
-            if (el) el.style.display = 'none';
+            if (el) {
+                el.classList.remove('range-dispersion-overlay');
+                el.style.display = 'none';
+            }
         } else {
             const rec = activeWidgets.get(key);
             if (rec) {
@@ -2775,7 +2846,10 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
     }, true);   // capture phase: runs before the button's own handler, so a
                 // click on the button never opens-then-immediately-closes
     window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeWidgetMenu();
+        if (e.key === 'Escape') {
+            closeWidgetMenu();
+            document.getElementById('minimap-container')?.classList.remove('range-dispersion-overlay');
+        }
     });
 
     updateAddButtonState();
@@ -2807,7 +2881,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         ws.onopen = () => {
             console.log('[✓] Connected to Shanktuary WebSocket server');
-            if (lmStatusText) setLmStatus('Nova Connected', true);
+            if (lmStatusText) setLmStatus('Studio connected', true);
         };
 
         ws.onmessage = (event) => {
@@ -2830,6 +2904,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
                     loadCombine();
                 } else if (msg.type === 'pressure' && msg.data) {
                     const p = msg.data;
+                    studioShell?.setPressureLive(true);
                     pressureRenderer.pushSample(p);
                     if (rangePressureTile && rangePressureTile.style.display !== 'none') {
                         if (hudPressurePhase) {
@@ -2885,6 +2960,7 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
 
         ws.onclose = () => {
             if (lmStatusText) setLmStatus('Reconnecting...', false);
+            studioShell?.setPressureLive(false);
             setTimeout(connectWS, 2000);
         };
     }
@@ -2938,6 +3014,23 @@ export function setupWebSocketAndUI(scene, physicsEngine, ball, cameraController
         }
     }).catch(() => {});
 
+    studioShell?.bind({
+        startMode: setGameMode,
+        camera: mode => cameraController.setMode(mode),
+        combine: postCombine,
+        metrics: () => setAllMetricsOpen(true),
+        bag: openClubSheet,
+        dispersion: () => {
+            addWidget('dispersion');
+            document.getElementById('minimap-container')?.classList.add('range-dispersion-overlay');
+            requestAnimationFrame(drawMinimap);
+        },
+        settings: () => setDrawer('settings'),
+    });
+    // The old HUD scaling setting does not apply to the responsive studio shell.
+    if (studioShell && hudScaleSlider) {
+        hudScaleSlider.closest('.slider-container')?.setAttribute('hidden', '');
+    }
     loadRangeIndex();
     loadCombine();
     connectWS();

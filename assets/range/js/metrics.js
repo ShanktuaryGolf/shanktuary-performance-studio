@@ -175,8 +175,8 @@ export const MIN_STRIP = 3;
 export const MAX_STRIP = 10;
 
 export const DEFAULT_STRIP = [
-    'carry', 'total', 'offline', 'ballSpeed',
-    'smash', 'launch', 'totalSpin', 'apex',
+    'carry', 'total', 'ballSpeed', 'launch',
+    'totalSpin', 'apex', 'descent', 'smash',
 ];
 
 /** Putt-mode default. Separate storage so entering putting cannot wipe the full-swing strip. */
@@ -244,6 +244,7 @@ export function readMetric(key, telemetry, ctx) {
         text: DASH,
         html: null,
         title: '',
+        sourceLabel: 'Unavailable',
     };
 
     if (!telemetry) return { ...base, muted: true, text: DASH };
@@ -261,11 +262,18 @@ export function readMetric(key, telemetry, ctx) {
     const derivedMap = telemetry.derived || {};
     const provenance = telemetry.metricProvenance?.[key];
     const estimated = ['modelled', 'modeled', 'source_estimated', 'estimated', 'speculative'].includes(provenance);
-    const est = estimated || !!def.est || (def.estIfDerived ? !!derivedMap[def.estIfDerived] : false);
+    const est = estimated || !!def.est || !!derivedMap[key] || (def.estIfDerived ? !!derivedMap[def.estIfDerived] : false);
+    const sourceLabel = out.muted ? 'Unavailable'
+        : telemetry.source === 'demo' ? 'Sample'
+        : ['modelled', 'modeled', 'speculative'].includes(provenance) ? 'Modelled'
+        : ['source_estimated', 'estimated'].includes(provenance) ? 'Estimate'
+        : (est || provenance === 'derived') ? 'Derived'
+        : telemetry.external ? 'Reported' : 'Native';
 
     return {
         ...base,
         ...out,
+        sourceLabel,
         est: out.muted ? false : est,   // an unavailable value isn't an estimate
         unit: out.unit || def.unit,
         title: out.title || (estimated ? (provenance === 'modelled' ? 'Modelled, not measured' : 'Source estimate, not measured') : ''),

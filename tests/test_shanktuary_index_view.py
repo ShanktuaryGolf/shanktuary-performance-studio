@@ -208,15 +208,15 @@ def test_view_does_not_write_any_app_attributes(tk_root):
 # about. Mode 11 was invisible and unclickable in the real shell until it
 # was also added there -- these two tests pin that it stays registered.
 
-def test_desktop_subclass_has_palette_wrapped_index_viewport():
-    """ShanktuaryDesktopApp must wrap draw_shanktuary_index_viewport with legacy_palette."""
+def test_desktop_subclass_routes_to_current_index_composition():
+    """The stable adapter must route Index to the current source-aware painter."""
     import inspect
 
     from src.ui.desktop import ShanktuaryDesktopApp
 
     src = inspect.getsource(ShanktuaryDesktopApp.draw_shanktuary_index_viewport)
-    assert "legacy_palette.draw_production_page" in src
-    assert "draw_shanktuary_index_viewport" in src
+    assert "concept_workspaces import draw_index" in src
+    assert "return draw_index(self, avail_w, h, offset_x)" in src
 
 
 def test_desktop_subclass_registers_and_navigates_mode_11(tk_root, tmp_path, monkeypatch):
@@ -246,8 +246,9 @@ def test_desktop_subclass_registers_and_navigates_mode_11(tk_root, tmp_path, mon
 
     # Verify that draw_screen rendered the Index viewport elements
     texts = [t for t, _bb in _texts(app.canvas)]
-    assert any("SHANKTUARY INDEX" in t for t in texts)
-    assert any("OVERALL SCORE" in t for t in texts)
+    assert any("Shanktuary Index" in t for t in texts)
+    assert "Game-area breakdown" in texts
+    assert any("not a validated handicap" in t for t in texts)
 
 
 def test_nav_icon_scorecard_draws(tk_root):

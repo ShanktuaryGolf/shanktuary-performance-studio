@@ -143,14 +143,48 @@
       color: var(--accent);
     }
   </style>
+  <link rel="stylesheet" href="/assets/studio-browser.css">
 </head>
-<body>
+<body class="studio-browser studio-config">
+  <aside class="studio-rail">
+    <div class="studio-brand"><img src="/assets/studio_brand_mark.png" alt=""><div><strong>SHANKTUARY</strong><small>PERFORMANCE STUDIO</small></div></div>
+    <nav aria-label="Browser workspaces">
+      <small>PRACTICE</small>
+      <a href="/range"><svg viewBox="0 0 24 24"><path d="M6 22V2l13 6-13 5M2 22h10"/></svg>3D Range</a>
+      <small>STUDIO TOOLS</small>
+      <a href="/config" aria-current="page"><svg viewBox="0 0 24 24"><path d="m12 2 10 6-10 6L2 8Zm-10 12 10 6 10-6M2 18l10 6 10-6"/></svg>Overlay</a>
+
+      <a href="/?edit=true" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM8 3v18M3 8h18"/></svg>Canvas editor</a>
+      <a href="/config?view=projection" data-projection-link><svg viewBox="0 0 24 24"><path d="M2 3h20v14H2zM12 17v5M7 22h10"/></svg>Floor projection</a>
+    </nav>
+  </aside>
+  <main class="studio-main">
+    <header class="studio-page-header"><h1>Overlay configurator</h1><p>Configure OBS overlay widgets independently from floor projection</p></header>
+    <div class="studio-status" id="studioStatus" role="status">Loading your saved layout…</div>
+    <div class="studio-layout">
+      <section class="studio-preview-panel" aria-label="Live overlay preview">
+        <div class="studio-preview-toolbar" id="studioCanvasHeader"><strong>Canvas <small>(16:9)</small></strong><a class="studio-button" href="/" target="_blank" rel="noopener">Clean preview ↗</a></div>
+        <fieldset class="studio-geometry" id="studioGeometry" disabled aria-label="Selected widget geometry">
+          <label class="studio-widget-select">Widget <select id="studioWidgetSelect" aria-label="Selected widget"></select></label>
+          <label class="studio-snap"><input id="studioSnap" type="checkbox" checked> Snap 40 px</label>
+          <label>X <input id="studioX" type="number" step="1" aria-label="Widget X position"><span>px</span></label>
+          <label>Y <input id="studioY" type="number" step="1" aria-label="Widget Y position"><span>px</span></label>
+          <label>Width <input id="studioWidth" type="number" min="100" step="1" aria-label="Widget width"><span>px</span></label>
+          <label>Height <input id="studioHeight" type="number" min="50" step="1" aria-label="Widget height"><span>px</span></label>
+          <label>Rotate <input id="studioRotation" type="number" step="1" aria-label="Widget rotation"><span>°</span></label>
+        </fieldset>
+        <div class="studio-preview" id="studioPreview"><iframe src="/" title="Live OBS overlay output" id="studioPreviewFrame"></iframe><div id="studioSelectionScale"><div id="studioSelectionCanvas" aria-label="Select, drag or resize widgets"></div></div></div>
+        <p class="studio-preview-note">Until the first shot arrives, the overlay shows sample data. Click a widget to move or resize it, or enter exact canvas pixels above. Changes are preview-only until you save. Cancel restores the saved layout.</p>
+        <div class="studio-preview-toolbar" style="margin-top:18px;margin-bottom:0"><a class="studio-button" href="/divot" target="_blank" rel="noopener">Preview divot ↗</a><a class="studio-button" href="/tiles" target="_blank" rel="noopener">Preview metric tiles ↗</a><a class="studio-button" href="/?mode=projector&amp;edit=true" target="_blank" rel="noopener">Projection alignment ↗</a></div>
+      </section>
 
   <div class="container">
-    <h1>⚙️ OBS Overlay Layout Configurator</h1>
-    <p class="subtitle">Customize which metrics, divot projectors, and Quad Studio visual widgets appear in your OBS Studio Browser Source (http://localhost:9321)</p>
+    <h1>Widgets</h1>
+    <section class="studio-presets" aria-label="Saved presets"><h2>Saved presets</h2><label class="sr-only" for="studioPreset">Layout preset</label><select id="studioPreset"><option value="saved">Current saved layout</option><option value="studio-broadcast">Studio Broadcast · built in</option></select><details><summary>Name this layout</summary><label class="sr-only" for="studioPresetName">Preset name</label><input id="studioPresetName" type="text" maxlength="60" required placeholder="Preset name"><button class="studio-button" id="studioNamePreset" type="button">Keep as preset</button></details><p>Preset changes are preview-only until you save.</p></section>
+    <div class="studio-layout-actions"><button class="studio-button primary" id="studioSave" type="button" disabled>Save layout</button><button class="studio-button" id="studioCancel" type="button" disabled>Cancel changes</button><button class="studio-button" id="studioReset" type="button" disabled>Reset selected widget</button></div>
+    <section class="studio-theme-picker" aria-label="Overlay theme"><h2>Themes</h2><div><button class="theme-swatch" data-overlay-theme="studio-teal" type="button"><span></span>Studio Teal</button><button class="theme-swatch" data-overlay-theme="broadcast-dark" type="button"><span></span>Broadcast Dark</button><button class="theme-swatch" data-overlay-theme="clean-light" type="button"><span></span>Clean Light</button></div></section>
+    <p class="subtitle">Choose what appears in your browser source.</p>
     
-    <a href="/?edit=true" target="_blank" style="display: block; text-align: center; background: rgba(0, 229, 255, 0.15); border: 1px solid var(--accent-line); color: var(--accent-line); padding: 12px; border-radius: 8px; font-weight: 700; text-decoration: none; margin-bottom: 25px;">✏️ LAUNCH INTERACTIVE DRAG & DROP CANVAS EDITOR</a>
 
     <!-- 4 Quad Studio Visual Widgets Section -->
     <div class="section-title">🎯 Quad Studio Visual Widgets</div>
@@ -232,9 +266,11 @@
       <label class="toggle-card"><span class="toggle-label">Dynamic Loft</span><span class="switch"><input type="checkbox" id="m_dynamic_loft"><span class="slider"></span></span></label>
     </div>
 
-    <button class="btn-save" onclick="saveLayout()">💾 SAVE LAYOUT & UPDATE OBS LIVE</button>
+
     <div class="status-banner status-success" id="statusMsg">✓ Layout saved! OBS Browser Source updated instantly in real-time.</div>
   </div>
+
+  </div></main>
 
   <script>
     const visualsList = ['divot', 'face_impact', 'overhead_path', 'side_launch', 'spin_axis_3d', 'shanktuary_index', 'wbb_heatmap', 'wbb_cop_dot', 'wbb_force_curve'];
@@ -244,63 +280,10 @@
       'club_speed', 'smash', 'club_path', 'face_angle', 'closure_rate', 'face_to_path', 'attack_angle', 'dynamic_loft'
     ];
 
-    let currentLayout = null;
-
-    function loadSavedLayout() {
-      fetch('/api/layout')
-        .then(r => r.json())
-        .then(layout => {
-          currentLayout = layout;
-          const widgets = layout.widgets || {};
-          
-          visualsList.forEach(v => {
-            const el = document.getElementById(`v_${v}`);
-            const cfg = widgets[v] || (layout.visuals ? layout.visuals[v] : null);
-            if (el) el.checked = cfg ? cfg.visible !== false : true;
-          });
-
-          metricsList.forEach(m => {
-            const el = document.getElementById(`m_${m}`);
-            const cfg = widgets[m] || (layout.metrics ? layout.metrics[m] : null);
-            if (el) el.checked = cfg ? cfg.visible !== false : true;
-          });
-        })
-        .catch(e => console.error('Error loading layout:', e));
-    }
-
-    function saveLayout() {
-      if (!currentLayout) currentLayout = { widgets: {}, styling: {} };
-      if (!currentLayout.widgets) currentLayout.widgets = {};
-
-      visualsList.forEach(v => {
-        const el = document.getElementById(`v_${v}`);
-        if (!currentLayout.widgets[v]) currentLayout.widgets[v] = { x: 30, y: 30 };
-        currentLayout.widgets[v].visible = el ? el.checked : true;
-      });
-
-      metricsList.forEach(m => {
-        const el = document.getElementById(`m_${m}`);
-        if (!currentLayout.widgets[m]) currentLayout.widgets[m] = { x: 30, y: 970 };
-        currentLayout.widgets[m].visible = el ? el.checked : true;
-      });
-
-      fetch('/api/layout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentLayout)
-      })
-      .then(r => r.json())
-      .then(res => {
-        if (res.status === 'ok') {
-          const banner = document.getElementById('statusMsg');
-          banner.style.display = 'block';
-          setTimeout(() => banner.style.display = 'none', 4000);
-        }
-      })
-      .catch(e => alert('Error saving layout: ' + e));
-    }
-
-    loadSavedLayout();
   </script>
+<script src="/assets/studio-layout-model.js"></script>
+<script src="/assets/studio-editor.js"></script>
+<script src="/assets/studio-layout-presets.js"></script>
+<script src="/assets/studio-projection.js"></script>
 </body>
 </html>

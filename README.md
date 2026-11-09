@@ -233,3 +233,11 @@ metrics and impact coordinates are retained in raw metadata only because their
 default values and measurement semantics are not independently verified. Live save
 and ingestion were checked with Nova feeding PurePlay on Windows; spin/launch
 direction signs and other hardware still need independent verification. It does not import saved history or create a network listener.
+
+## Isolated Windows Wii board test
+
+After updating your source checkout, run `Start-Board-Test.cmd` on Windows x64
+with Python 3.12 x64 installed. See [WINDOWS-BOARD-TEST.md](WINDOWS-BOARD-TEST.md)
+for setup, one/two-board selection, optional system-wide Bluetooth pairing,
+calibration limitations and separate demo mode. This is a source test, not a
+release or installer; real Windows board operation still needs laptop testing.

@@ -6,25 +6,25 @@ import roles from here instead of inventing colors.
 """
 
 # Brand / emphasis
-GOLD = "#D4A24F"
-GOLD_LIGHT = "#E3BC70"
+GOLD = "#F6CE69"
+GOLD_LIGHT = "#FFDF85"
 BRONZE = "#A7793A"
 
 # Analytical / technical
-TEAL = "#32979A"
-TEAL_LINE = "#58B7B4"
-TEAL_TEXT = "#78C4C1"
+TEAL = "#00BFAE"
+TEAL_LINE = "#13DFCA"
+TEAL_TEXT = "#91E9DF"
 TEAL_SOFT = "#698E96"
 
 # Structure
-PAGE_BG = "#0A2029"
-RAIL_BG = "#081923"
-SIDEBAR_BG = "#091B24"
-SURFACE = "#0D2731"
-SURFACE_2 = "#15333D"
-ACTIVE_BG = "#18313A"
-SECTION_BG = "#173B42"
-HAIRLINE = "#2A4C55"
+PAGE_BG = "#041823"
+RAIL_BG = "#03151F"
+SIDEBAR_BG = "#061E28"
+SURFACE = "#04232D"
+SURFACE_2 = "#0B4148"
+ACTIVE_BG = "#075750"
+SECTION_BG = "#073B42"
+HAIRLINE = "#37616B"
 GUIDE = "#456D76"
 
 # Typography
@@ -37,7 +37,7 @@ SUCCESS = "#39A879"
 DANGER = "#E34A4A"
 
 # Persistent shell geometry
-NAV_RAIL_W = 64
+NAV_RAIL_W = 272
 COLLAPSED_GUTTER_W = 28
 
 

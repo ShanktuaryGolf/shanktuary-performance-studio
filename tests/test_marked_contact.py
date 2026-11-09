@@ -197,8 +197,16 @@ def test_quad_face_is_large_and_shows_the_usual_spot_ring_until_marked(tmp_path,
         x1, y1, x2, y2 = a.contact_face_rect
         # The face owns the panel: at least 200px tall (was 90), so a mark
         # lands within ~0.3mm of the cursor instead of ~0.8mm.
-        assert y2 - y1 >= 200, (y2 - y1)
-        assert a.contact_face_geometry.size >= 200
+        # Size follows the new quadrant; verify precision by round-tripping
+        # the actual visible geometry rather than an obsolete 200px minimum.
+        assert y2 - y1 >= 90, (y2 - y1)
+        g = a.contact_face_geometry
+        for horizontal, vertical in ((-10, 5), (0, 0), (10, -5)):
+            px, py = g.mm_to_px(horizontal, vertical)
+            actual = g.px_to_mm(round(px), round(py))
+            assert actual is not None
+            assert abs(actual[0] - horizontal) <= .6
+            assert abs(actual[1] - vertical) <= .6
         # One other 7-iron mark exists -> a ring at that spot, labelled EST.
         rings = _items(a, "contact-estimate")
         assert len(rings) == 1 and a.canvas.type(rings[0]) == "oval"
@@ -232,7 +240,7 @@ def test_quad_panel_has_no_median_table_and_no_text_collisions(tmp_path, monkeyp
                  if a.canvas.type(i) == "text" and a.canvas.bbox(i)]
         panel = [(b, t) for b, t in items if b[0] > w * .58 and b[1] > h * .55]
         assert not any("SESSION MEDIAN" in t for _, t in panel)
-        assert any(t == "IMPACT LOCATION" for _, t in panel)
+        assert any(t.casefold() == "impact location" for _, t in panel)
         ov = [(t, u) for j, (b, t) in enumerate(panel) for d, u in panel[j + 1:]
               if min(b[2], d[2]) > max(b[0], d[0]) and min(b[3], d[3]) > max(b[1], d[1])]
         assert ov == []
@@ -244,13 +252,15 @@ def test_quad_panel_has_no_median_table_and_no_text_collisions(tmp_path, monkeyp
         root.destroy()
 
 
-def test_no_marks_at_all_gives_a_sweet_spot_ring_labelled_no_marks(tmp_path, monkeypatch):
+def test_no_marks_at_all_does_not_fabricate_a_sweet_spot(tmp_path, monkeypatch):
     root, a = _tk_app(tmp_path, monkeypatch)
     try:
         del a.sessions[0]["shots"][1]["marked_contact"]
         a.set_mode(1); root.update_idletasks()
-        assert len(_items(a, "contact-estimate")) == 1
+        assert not _items(a, "contact-estimate")
+        assert not _items(a, "contact-marker")
         texts = [a.canvas.itemcget(i, "text") for i in a.canvas.find_all() if a.canvas.type(i) == "text"]
-        assert any("no marks yet" in t for t in texts)
+        assert "Impact unavailable" in texts
+        assert "No face-contact measurement" in texts
     finally:
         root.destroy()

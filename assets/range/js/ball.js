@@ -1,3 +1,5 @@
+import { studioColor } from './studio_decor.js';
+
 // 3D Golf Ball with Real Turf Pitch Mark / Divot Indentations
 
 export class GolfBall {
@@ -54,7 +56,7 @@ export class GolfBall {
     const ringGeo = new THREE.RingGeometry(0.5, 1.0, 32);
     ringGeo.rotateX(-Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x00FF66,
+      color: studioColor('--accent-line', 'turquoise'),
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.85,
@@ -168,7 +170,7 @@ export class GolfBall {
     this.elapsedTime = 0;
     this.lastBounces = 0;
     
-    const baseColor = new THREE.Color(customColorHex || '#00E5FF');
+    const baseColor = new THREE.Color(customColorHex || studioColor('--gold', 'gold'));
     this.tracerBaseR = baseColor.r !== undefined ? baseColor.r : 0.0;
     this.tracerBaseG = baseColor.g !== undefined ? baseColor.g : 0.9;
     this.tracerBaseB = baseColor.b !== undefined ? baseColor.b : 1.0;

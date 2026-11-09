@@ -32,7 +32,7 @@ def _metric(app, shot, x, y, key, label, unit="", size=19):
     digits = 0 if key in ("spin", "backspin", "sidespin") else 2 if key == "smash" else 1
     display = "--" if value is None else f"{value:.{digits}f} {unit}".strip()
     _text(app.canvas, x, y + 19, display, size, GOLD if key == "carry" else theme.TEXT)
-    _text(app.canvas, x, y + 50, status, 8, TEAL)
+    _text(app.canvas, x, y + 54, status, 8, TEAL)
 
 
 def _section(app, x, y, title, note=None, width=240):
@@ -160,7 +160,7 @@ def _draw_shot(app, shot, width, height, offset_x):
     c = app.canvas
     x, right = offset_x + 24, offset_x + width - 24
     usable = right - x
-    ribbon_y, ribbon_h = 66, 142
+    ribbon_y, ribbon_h = 66, 160
     c.create_rectangle(x, ribbon_y, right, ribbon_y+ribbon_h, fill=RIBBON, outline="")
     c.create_rectangle(x, ribbon_y, x+4, ribbon_y+ribbon_h, fill=GOLD, outline="")
     club = shot.get("club") or getattr(app, "current_club", "")
@@ -179,7 +179,7 @@ def _draw_shot(app, shot, width, height, offset_x):
         xx = x+identity+i*step
         c.create_line(xx-8, ribbon_y+14, xx-8, ribbon_y+ribbon_h-14, fill=LINE)
         for row, (key, label, unit) in enumerate(pair):
-            _metric(app, shot, xx, ribbon_y+12+row*64, key, label, unit, 16)
+            _metric(app, shot, xx, ribbon_y+12+row*74, key, label, unit, 16)
     top = ribbon_y+ribbon_h+24
     session_h = 165 if height >= 800 else 125
     bottom = max(top+240, height-session_h-38)

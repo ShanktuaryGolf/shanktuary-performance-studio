@@ -73,6 +73,7 @@ def test_real_shared_desktop_club_path_preserves_artwork_and_unknowns():
     root.withdraw()
     try:
         app = object.__new__(ShanktuaryDesktopApp)
+        app.root = root
         app.canvas = tk.Canvas(root, width=1200, height=950)
         app.current_shot = {"_source": "pureplay", "club": "7 Iron"}
         app.current_club = "7 Iron"
@@ -86,9 +87,10 @@ def test_real_shared_desktop_club_path_preserves_artwork_and_unknowns():
         app.draw_4_quadrant_studio(1200, 950, *([999]*13), "Straight", "A", 999)
         labels = [app.canvas.itemcget(i,"text") for i in app.canvas.find_all()
                   if app.canvas.type(i) == "text"]
-        assert "overhead" in assets and len(assets) >= 3
-        assert "IMPACT LOCATION" in labels
-        assert "Shape not reported" in labels
+        assert "overhead" in assets and len(assets) >= 2
+        assert "impact location" in [label.casefold() for label in labels]
+        assert "Impact unavailable" in labels
+        assert "Unavailable" in labels
         assert not any("999" in t or t == "Straight" for t in labels)
         assert not app.canvas.find_withtag("contact-estimate")
         assert all(app.canvas.itemcget(i,"smooth") in ("0", "false", "") for i in app.canvas.find_all()

@@ -1608,8 +1608,8 @@ class ShanktuaryApp:
             return self._cache_image(key, ImageTk.PhotoImage(img))
         return None
 
-    def get_rotated_overhead_asset(self, target_h, face_angle, mirror=False):
-        raw_key = (OVERHEAD_PATH, target_h, mirror, round(face_angle, 1))
+    def get_rotated_overhead_asset(self, target_h, face_angle, mirror=False, max_extent=None):
+        raw_key = (OVERHEAD_PATH, target_h, mirror, round(face_angle, 1), max_extent)
         hit = self._cached_image(raw_key)
         if hit is not None:
             return hit
@@ -1632,6 +1632,9 @@ class ShanktuaryApp:
                 # For RH, -face_angle; For LH, +face_angle
                 rot_deg = -face_angle if not mirror else face_angle
                 rotated = canvas_img.rotate(rot_deg, resample=Image.BICUBIC, expand=True)
+                if max_extent is not None:
+                    limit = max(1, int(max_extent))
+                    rotated.thumbnail((limit, limit), Image.LANCZOS)
                 return self._cache_image(raw_key, ImageTk.PhotoImage(rotated))
             except Exception as e:
                 print(f"[!] Error creating overhead asset: {e}")
@@ -2158,6 +2161,7 @@ class ShanktuaryApp:
         self.show_session_dropdown = False
         self.show_filter_dropdown = False
         self.custom_club_input_text = ""
+        self.custom_club_scope = "session"
         self.show_custom_club_modal = True
         self.draw_screen()
 
@@ -2167,7 +2171,7 @@ class ShanktuaryApp:
 
         # 2. Centered Modal Box
         modal_w = 480
-        modal_h = 220
+        modal_h = 300
         cx = w // 2
         cy = h // 2
         x1 = cx - modal_w // 2
@@ -2182,7 +2186,7 @@ class ShanktuaryApp:
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.ACCENT_TEXT, width=2)
 
         # Header
-        self.canvas.create_text(cx, y1 + 28, text="🏌️ ADD CUSTOM CLUB TO BAG", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 12, "bold"))
+        self.canvas.create_text(cx, y1 + 28, text="NEW CLUB", fill=theme.ACCENT_TEXT, font=(theme.ui_font(), 12, "bold"))
         self.canvas.create_text(cx, y1 + 52, text="Type custom club name (e.g. 2 Hybrid, 7 Wood, 64° Wedge):", fill=theme.TEXT_2, font=(theme.ui_font(), 9))
 
         # Input Text Box
@@ -2198,8 +2202,23 @@ class ShanktuaryApp:
         else:
             self.canvas.create_text(cx, (in_y1 + in_y2) // 2, text="Type club name here... |", fill=theme.TEXT_3, font=(theme.ui_font(), 12, "italic"))
 
+        # Explicit destination. Enter always uses the safe session-only default
+        # until the user deliberately chooses permanent bag membership.
+        self.custom_club_scope_rects = []
+        for index, (scope, label) in enumerate((
+                ("session", "This session only"),
+                ("bag", "Permanently add to My Bag"))):
+            sy = in_y2 + 12 + index * 32
+            rect = (x1 + 25, sy, x2 - 25, sy + 28)
+            self.custom_club_scope_rects.append((*rect, scope))
+            selected = getattr(self, "custom_club_scope", "session") == scope
+            self.canvas.create_rectangle(*rect, fill=theme.ACCENT_DEEP if selected else theme.SURFACE,
+                                         outline=theme.ACCENT_TEXT if selected else theme.HAIRLINE)
+            self.canvas.create_text(x1 + 38, sy + 14, anchor="w",
+                                    text=("●  " if selected else "○  ") + label,
+                                    fill=theme.TEXT, font=(theme.ui_font(), 10))
         # Buttons
-        btn_y1 = in_y2 + 20
+        btn_y1 = in_y2 + 86
         btn_y2 = btn_y1 + 32
         btn_w = 140
 
@@ -2218,7 +2237,7 @@ class ShanktuaryApp:
         self.canvas.create_text((can_x1 + can_x2) // 2, (btn_y1 + btn_y2) // 2, text="Cancel (<Esc>)", fill=theme.TEXT_2, font=(theme.ui_font(), 9, "bold"))
 
         # Footer shortcut hint
-        self.canvas.create_text(cx, y2 - 12, text="Press <Enter> to confirm  •  <Esc> to cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
+        self.canvas.create_text(cx, y2 - 12, text="Tab: change destination  •  Enter: confirm  •  Esc: cancel", fill=theme.TEXT_3, font=(theme.ui_font(), 8))
 
     def handle_key_press(self, event):
         # The step-on prompt owns the keyboard while it is up. Escape must
@@ -2355,9 +2374,13 @@ class ShanktuaryApp:
                 val = self.custom_club_input_text.strip()
                 self.show_custom_club_modal = False
                 if val:
-                    self.add_custom_club(val)
+                    self.add_custom_club(val, persist_to_bag=getattr(self, "custom_club_scope", "session") == "bag")
                 else:
                     self.draw_screen()
+                return "break"
+            elif event.keysym == "Tab":
+                self.custom_club_scope = "bag" if getattr(self, "custom_club_scope", "session") == "session" else "session"
+                self.draw_screen()
                 return "break"
             elif event.keysym == "BackSpace":
                 self.custom_club_input_text = self.custom_club_input_text[:-1]
@@ -2409,12 +2432,27 @@ class ShanktuaryApp:
         elif event.char in ("c", "C"):
             self.clear_session()
 
-    def add_custom_club(self, club_name=None):
+    def add_custom_club(self, club_name=None, *, persist_to_bag=False):
         if not club_name:
             self.open_custom_club_modal()
             return
         clean_name = club_name.strip()
         if clean_name:
+            if not persist_to_bag:
+                session = self.get_active_session()
+                if session is not None:
+                    candidates = session.setdefault("fitting_clubs", [])
+                    if clean_name not in candidates:
+                        candidates.append(clean_name)
+                self.current_club = clean_name
+                self.concept_fit_test_club = clean_name
+                self.show_club_menu = False
+                self.show_custom_club_modal = False
+                self.save_session_to_file()
+                self.copy_feedback = f"Selected '{clean_name}' for this session only"
+                self.root.after(2500, self.clear_copy_feedback)
+                self.draw_screen()
+                return
             if clean_name not in self.clubs:
                 self.clubs.append(clean_name)
             # Also add it to the bag. Appending to self.clubs alone only
@@ -2425,6 +2463,7 @@ class ShanktuaryApp:
             if is_new_to_bag:
                 self.add_club_to_bag(clean_name)
             self.current_club = clean_name
+            self.concept_fit_test_club = clean_name
             self.show_club_menu = False
             self.show_custom_club_modal = False
             self.save_session_to_file()
@@ -3336,10 +3375,11 @@ class ShanktuaryApp:
         if self.current_shot:
             stored = self.get_pressure_trace(self.current_shot)
 
-        # Deliberate review of an older shot always wins -- that is the whole
-        # point of clicking back through the shot list.
-        if stored and self.is_reviewing_past_shot():
-            return stored, True
+        # Deliberate review always stays on that shot, even when its trace
+        # is missing. Falling through would relabel unrelated live data as
+        # historical pressure in the CoP and force/transfer panels.
+        if self.is_reviewing_past_shot():
+            return stored or [], True
         # Otherwise live data wins whenever the boards are actually running.
         if self.board_is_streaming() and len(live) > 1:
             return live, False
@@ -3803,11 +3843,16 @@ class ShanktuaryApp:
 
         # 0b. In-Canvas Custom Club Modal Click Handling
         if self.show_custom_club_modal:
+            for x1, y1, x2, y2, scope in getattr(self, "custom_club_scope_rects", []):
+                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                    self.custom_club_scope = scope
+                    self.draw_screen()
+                    return
             if self.custom_club_modal_add_rect and self.custom_club_modal_add_rect[0] <= event.x <= self.custom_club_modal_add_rect[2] and self.custom_club_modal_add_rect[1] <= event.y <= self.custom_club_modal_add_rect[3]:
                 val = self.custom_club_input_text.strip()
                 self.show_custom_club_modal = False
                 if val:
-                    self.add_custom_club(val)
+                    self.add_custom_club(val, persist_to_bag=getattr(self, "custom_club_scope", "session") == "bag")
                 else:
                     self.draw_screen()
                 return
@@ -4233,8 +4278,9 @@ class ShanktuaryApp:
             if _h(self.setup_tare_rect):
                 try:
                     if pm and hasattr(pm, "tare"):
-                        pm.tare()
-                        self.copy_feedback = "✓ Boards tared"
+                        tared = pm.tare()
+                        self.copy_feedback = ("✓ Boards tared" if tared else
+                                              "No pressure data available to tare")
                         self.root.after(2000, self.clear_copy_feedback)
                 except Exception as e:
                     print(f"[!] Tare failed: {e}")
@@ -5503,11 +5549,20 @@ class ShanktuaryApp:
         # 3. Workspace View Routing
         if self.current_shot and self.current_shot.get("_source") in ("cgp", "open_connect", "gspro") and self.view_mode in (0, 1, 9):
             from src.connections.metric_view import draw_connection_metrics
-            draw_connection_metrics(self, avail_w, h, offset_x)
+            if hasattr(self, "draw_connection_workspace"):
+                self.draw_connection_workspace(avail_w, h, offset_x)
+            else:
+                draw_connection_metrics(self, avail_w, h, offset_x)
+        elif self.view_mode == 13 and hasattr(self, "draw_session_history"):
+            self.draw_session_history(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 14 and hasattr(self, "draw_tools_workspace"):
+            self.draw_tools_workspace(avail_w, h, offset_x=offset_x)
+        elif self.view_mode == 12 and hasattr(self, "draw_session_overview"):
+            self.draw_session_overview(avail_w, h, offset_x=offset_x)
         elif self.view_mode == 1:
             # Mode 1: Delivery (4-Quadrant Studio)
             self.draw_top_metric_toolbar(avail_w, ball_speed_mph, club_speed_mph, smash, carry_yds, total_yds, offline_yds, hang_time, eff_pct, offset_x=offset_x, smash_clamped=smash_clamped)
-            if self.current_shot:
+            if self.current_shot or getattr(self, "concept_ui", False):
                 self.draw_4_quadrant_studio(avail_w, h, club_path, face_to_target, face_to_path, vert_launch, horiz_launch, sidespin, backspin, total_spin, spin_axis, peak_height_yds, descent_angle, optimal_max_yds, eff_pct, shot_name, shot_rank, smash, ball_speed=ball_speed_mph, offset_x=offset_x, top_bar_h=top_bar_h, club_path_known=club_path_known, face_to_path_known=face_to_path_known, face_to_target_known=face_to_target_known)
             else:
                 self.canvas.create_text(offset_x + avail_w // 2, (h + top_bar_h) // 2, text="READY FOR SHOT", fill="#282C38", font=(theme.ui_font(), 32, "bold"))
@@ -5544,7 +5599,7 @@ class ShanktuaryApp:
             # No shared metric toolbar here: Overview draws its own primary
             # metric row, and rendering both showed the same numbers twice
             # while eating the vertical space the bottom band needs.
-            if self.current_shot:
+            if self.current_shot or getattr(self, "concept_ui", False):
                 self.draw_overview_viewport(
                     avail_w, h, carry_yds, total_yds, ball_speed_mph,
                     club_speed_mph, smash, vert_launch, total_spin,
@@ -7612,7 +7667,7 @@ class ShanktuaryApp:
                 self.canvas.create_text(bx + 4 + badge_w // 2, mid_y, text=step["status_text"], fill=step["color"], font=(theme.ui_font(), 7, "bold"), anchor="center")
 
     def get_fitting_clubs(self):
-        """Returns list of distinct club names present in the active session, or current club + bag."""
+        """Return every session, current, and bag club without duplicate names."""
         sess_clubs = []
         for s in self.session_shots:
             c = s.get("club")
@@ -7620,10 +7675,14 @@ class ShanktuaryApp:
                 sess_clubs.append(c)
         if self.current_club not in sess_clubs:
             sess_clubs.append(self.current_club)
-        # If still only 1 club, offer some candidate bag clubs so user can immediately compare
+        session = self.get_active_session()
+        for name in (session or {}).get("fitting_clubs", []):
+            if name and name not in sess_clubs:
+                sess_clubs.append(name)
+        # Every bag club is selectable, including clubs without shots yet.
         for b_c in self.bag:
             bn = b_c.get("name")
-            if bn and bn not in sess_clubs and len(sess_clubs) < 5:
+            if bn and bn not in sess_clubs:
                 sess_clubs.append(bn)
         return sess_clubs
 
@@ -8550,11 +8609,11 @@ class ShanktuaryApp:
         # Get latest pressure sample. Reviewing an older shot shows THAT
         # shot's values; otherwise live board data wins.
         latest = None
-        if self.is_reviewing_past_shot() and self.current_shot:
-            trace = self.get_pressure_trace(self.current_shot)
+        if self.is_reviewing_past_shot():
+            trace = self.get_pressure_trace(self.current_shot) if self.current_shot else None
             if trace:
                 latest = trace[-1]
-        if latest is None:
+        else:
             if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
                 latest = obs_server.pressure_manager.latest_frame
             if not latest and self.current_shot:
@@ -8742,83 +8801,57 @@ class ShanktuaryApp:
                                         bot_y - bot_y1 - 28, series="force")
 
     def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
+        """Show the two recorded board zones on this side, not a foot map.
+
+        raw_cells contains [TL, TR, BL, BR] in kg. Dual-board backends may
+        combine physical cells into those zones, so neither toe/heel anatomy
+        nor extra per-foot sensors can be inferred from this four-value frame.
+        The legacy method name is retained for existing callers.
+        """
         x2, y2 = x1 + w, y1 + h
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE, width=1)
-        if self.is_left_handed:
-            foot_label = "TRAIL FOOT (LEFT)" if is_left else "LEAD FOOT (RIGHT)"
-        else:
-            foot_label = "LEAD FOOT (LEFT)" if is_left else "TRAIL FOOT (RIGHT)"
-        self.canvas.create_text((x1 + x2) // 2, y1 + 14, text=foot_label, fill=theme.TEXT_2, font=(theme.ui_font(), 8))
+        side = "LEFT" if is_left else "RIGHT"
+        role = "LEAD" if is_left != self.is_left_handed else "TRAIL"
+        cx = (x1 + x2) / 2
+        self.canvas.create_text(cx, y1 + 14, text=f"{role} SIDE ({side})", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
+        self.canvas.create_text(cx, y1 + 31, text="Board zones, not foot pressure", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # Foot Outline
-        cx = (x1 + x2) // 2
-        f_top = y1 + 28
-        f_bot = y2 - 28
-        f_half_w = (w - 24) // 2
+        def measured(value):
+            if isinstance(value, bool):
+                return None
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+            return value if math.isfinite(value) and value >= 0 else None
 
-        # Draw anatomical shoe/foot contour
-        pts = [
-            cx - f_half_w * 0.7, f_top + 15,
-            cx, f_top + 4,
-            cx + f_half_w * 0.7, f_top + 15,
-            cx + f_half_w * 0.85, f_top + int(h * 0.35),
-            cx + f_half_w * 0.55, f_top + int(h * 0.60),
-            cx + f_half_w * 0.65, f_bot - 10,
-            cx, f_bot,
-            cx - f_half_w * 0.65, f_bot - 10,
-            cx - f_half_w * 0.55, f_top + int(h * 0.60),
-            cx - f_half_w * 0.85, f_top + int(h * 0.35),
-        ]
-        self.canvas.create_polygon(pts, fill=theme.BG, outline=theme.HAIRLINE, width=2)
+        frame = latest if isinstance(latest, dict) else {}
+        raw = frame.get("raw_cells")
+        # Never infer absent cells from total load or a fixed anatomical split.
+        if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+            raw = [None] * 4
+        zones = ((0, "Front (TL)"), (2, "Back (BL)")) if is_left else ((1, "Front (TR)"), (3, "Back (BR)"))
+        loads = [(label, measured(raw[index])) for index, label in zones]
+        row_h = max(0, (h - 88) / 2)
+        for row, (label, kg) in enumerate(loads):
+            yy = y1 + 48 + row * row_h
+            self.canvas.create_rectangle(x1 + 10, yy, x2 - 10, yy + row_h - 6, fill=theme.BG, outline=theme.HAIRLINE)
+            self.canvas.create_text(x1 + 20, yy + row_h / 2 - 3, text=label, fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
+            self.canvas.create_text(x2 - 20, yy + row_h / 2 - 3,
+                                    text=f"{kg:.1f} kg" if kg is not None else "--",
+                                    fill=theme.TEXT if kg is not None else theme.TEXT_3,
+                                    font=(theme.ui_font(), 11 if w < 200 else 13), anchor="e")
+        if all(kg is None for _, kg in loads):
+            self.canvas.create_text(cx, y2 - 34, text="Per-cell data unavailable", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
 
-        # 4 Load Sensors for this foot
-        raw = latest.get("raw_cells", [20.0, 20.0, 20.0, 20.0]) if latest else [20.0, 20.0, 20.0, 20.0]
-        # raw_cells: [TL, TR, BL, BR]
-        if is_left:
-            tl_kg, tr_kg = raw[0] * 0.55, raw[0] * 0.45
-            bl_kg, br_kg = raw[2] * 0.55, raw[2] * 0.45
-            tot_foot = latest.get("pct_left", 50.0) if latest else 50.0
-        else:
-            tl_kg, tr_kg = raw[1] * 0.45, raw[1] * 0.55
-            bl_kg, br_kg = raw[3] * 0.45, raw[3] * 0.55
-            tot_foot = latest.get("pct_right", 50.0) if latest else 50.0
-
-        sensors = [
-            (cx - f_half_w * 0.45, f_top + int(h * 0.25), tl_kg, "Toe In"),
-            (cx + f_half_w * 0.45, f_top + int(h * 0.25), tr_kg, "Toe Out"),
-            (cx - f_half_w * 0.35, f_bot - int(h * 0.20), bl_kg, "Heel In"),
-            (cx + f_half_w * 0.35, f_bot - int(h * 0.20), br_kg, "Heel Out"),
-        ]
-
-        for sx, sy, kg, name in sensors:
-            # Color based on load intensity
-            intensity = min(1.0, max(0.05, kg / 35.0))
-            rad = int(14 + intensity * 22)
-            
-            # Draw gradient rings
-            # Load ramp: quiet at rest, accent as weight arrives, warn only
-            # at genuine peak. The previous version mapped the bottom two
-            # bands to the same colour, so half the range read identically.
-            if intensity > 0.75:
-                glow_col = theme.WARN
-            elif intensity > 0.5:
-                glow_col = theme.ACCENT_TEXT
-            elif intensity > 0.25:
-                glow_col = theme.ACCENT_LINE
-            else:
-                glow_col = theme.ACCENT_DEEP
-            self.canvas.create_oval(sx - rad, sy - rad, sx + rad, sy + rad, fill="", outline=glow_col, width=2)
-            self.canvas.create_oval(sx - rad // 2, sy - rad // 2, sx + rad // 2, sy + rad // 2, fill=glow_col, outline="")
-            self.canvas.create_text(sx, sy + rad + 9,
-                                    text=f"{kg:.1f}kg" if latest else "--",
-                                    fill=theme.TEXT_2 if latest else theme.TEXT_3,
-                                    font=(theme.ui_font(), 7))
-
-        # Foot Total Badge
+        # A reported side percentage remains useful even without raw cells.
+        total = measured(frame.get("pct_left" if is_left else "pct_right"))
+        if total is not None and total > 100:
+            total = None
         self.canvas.create_rectangle(x1 + 10, y2 - 24, x2 - 10, y2 - 6, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text((x1 + x2) // 2, y2 - 15,
-                                text=f"Total: {int(tot_foot)}%" if latest else "Total: --",
-                                fill=theme.TEXT_2 if latest else theme.TEXT_3,
+        self.canvas.create_text(cx, y2 - 15,
+                                text=f"Share of load: {total:.0f}%" if total is not None else "Share of load: --",
+                                fill=theme.TEXT_2 if total is not None else theme.TEXT_3,
                                 font=(theme.ui_font(), 8))
 
     def draw_cop_trajectory_canvas(self, x1, y1, w, h, latest=None):
@@ -8887,7 +8920,7 @@ class ShanktuaryApp:
 
         if len(trail) < 2:
             self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2,
-                                    text="No swing captured yet",
+                                    text="No pressure trace captured for this shot" if _stored else "No swing captured yet",
                                     fill=theme.TEXT_3,
                                     font=(theme.ui_font(), 9))
             return
@@ -8997,7 +9030,10 @@ class ShanktuaryApp:
                 steps.append("assign")
             steps += ["align", "width"]
 
+        if getattr(self, "show_board_assign_modal", False):
+            self._cancel_setup_flow()
         self.setup_flow_steps = list(steps)
+        self.setup_flow_skipped = []
         self.setup_flow_index = 0
         self.setup_flow_error = ""
         self.setup_flow_done = False
@@ -9040,10 +9076,12 @@ class ShanktuaryApp:
         """Abandon the whole flow, stopping whatever step is mid-run."""
         pm = getattr(obs_server, "pressure_manager", None)
         if pm:
-            for call in ("reset_assignment_wizard",
+            for call in ("reset_assignment_wizard", "cancel_stance_alignment",
                          "cancel_stance_width_calibration"):
                 try:
-                    getattr(pm, call)()
+                    callback = getattr(pm, call, None)
+                    if callback:
+                        callback()
                 except Exception as e:
                     print(f"[!] {call} failed: {e}")
         self.setup_flow_steps = []
@@ -9058,10 +9096,16 @@ class ShanktuaryApp:
         try:
             if pm and step == "assign":
                 pm.reset_assignment_wizard()
+            elif pm and step == "align" and hasattr(pm, "cancel_stance_alignment"):
+                pm.cancel_stance_alignment()
             elif pm and step == "width":
                 pm.cancel_stance_width_calibration()
         except Exception:
             pass
+        skipped = getattr(self, "setup_flow_skipped", [])
+        if step and step not in skipped:
+            skipped.append(step)
+        self.setup_flow_skipped = skipped
         self._advance_setup_flow()
 
     def _advance_setup_flow(self):

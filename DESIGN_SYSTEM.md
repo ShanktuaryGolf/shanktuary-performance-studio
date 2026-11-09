@@ -1,161 +1,115 @@
-# Shanktuary Desktop Design System
+# Shanktuary Performance Studio design system
 
-This document is the durable visual and implementation guide for the Shanktuary Performance Studio desktop app.
+The desktop is a premium golf-analysis workspace with a deep navy foundation,
+illuminated teal panels, aqua analytical geometry and warm gold emphasis. The
+November 2026 full-studio concept set supersedes the earlier compact icon-rail
+layout. It does not authorize fabricated measurements or connection states.
 
 ## Architecture
 
-The production data/hardware implementation remains in `shanktuary_performance_studio.py`.
-The redesigned desktop entry point is `shanktuary_app.py`, which instantiates `src.ui.ShanktuaryDesktopApp`.
+`shanktuary_app.py` instantiates `src.ui.desktop.ShanktuaryDesktopApp`, a visual
+adapter over the production `ShanktuaryApp`. Production code continues to own
+shot-source connections, history, aim calibration, pressure, exports and device
+workflows. Native incoming payloads are never changed by a painter.
 
-The UI layer deliberately subclasses the production app instead of copying launch-monitor, persistence, OpenGolfCoach, aim-calibration, pressure, or browser-server logic. This keeps future production fixes available to the redesigned desktop automatically.
+The current UI modules are:
 
-Public UI files:
+- `concept_shell.py`: labeled navigation, title, session/club controls and actual
+  connection status.
+- `concept_canvas.py`: the 124px header translation and public hit-coordinate
+  conversion. Public hit rectangles describe visible, unscaled canvas pixels.
+  Local painter geometry is restored before each frame to prevent drift.
+- `concept_session.py`: Shot and Club; live metric provenance, trajectory,
+  dispersion, trends, shape mix, contact and shot-history controls.
+- `concept_overview.py`: Session Overview landing page; latest shot, pressure/balance and session summary.
+- `concept_metrics.py`: Numbers and desktop Range.
+- `concept_workspaces.py`: Bag, Fit, Lab, Index, Setup and Dispersion. Detailed
+  production Fit and Setup controls remain reachable from their overview pages.
+- `concept_art.py`: cached decorative scenery.
+- `concept_boards.py`: the shared Pair / Assign / 50–50 / Stance width / Ready
+  board workspace, including the guided flow. Pairing, source selection, manual
+  assignment, calibration and tare use production actions. Readiness requires
+  fresh hardware data and successful calibration for the current configuration.
+- `connection_wizard.py`: source choice and connection setup. Existing explicit
+  connection actions and test-shot readiness gates are unchanged. The supported
+  Nova + GSPro mode remains available under Advanced connections.
+- `tokens.py`: desktop color roles.
 
-- `src/ui/desktop.py` — production desktop adapter and interaction seam
-- `src/ui/tokens.py` — approved palette roles
-- `DESIGN_SYSTEM.md` — this guide
-- `assets/shanktuary_shield.png` — app/header icon
-- `assets/shanktuary_lockup.png` — approved gold brand lockup source
+`_legacy/` remains private compatibility implementation for retained detailed
+views. New code should use the public desktop adapter and current modules.
 
-`src/ui/_legacy/` contains the frozen renderer snapshot produced during the iterative redesign. It is private implementation detail. New product code should **not** import those versioned files directly. Consolidate them behind the stable methods in `ShanktuaryDesktopApp` as those views are naturally revisited.
+## Visual roles
 
-## Brand direction
+- Page and navigation: deep navy, `PAGE_BG` and `RAIL_BG`.
+- Grouping: subtle illuminated surfaces, rounded 12px corners and quiet teal
+  borders. Use `concept_shell.panel` for shared material and bounded caching.
+- Aqua: active navigation, analysis, chart geometry, primary setup controls.
+- Gold: current shot/landing point, Carry emphasis, selected table row and
+  section labels. Do not use gold to imply measured or ready state.
+- White: primary text. Slate: captions and unavailable values.
+- Green/red: actual success/error only.
 
-Shanktuary is a premium golf-performance product: technical, modern, calm, and data-forward.
+Use token roles, not ad-hoc colors, for new UI work. Browser tokens live in
+`theme.BROWSER_STUDIO`; regenerate `assets/theme.css` using
+`python scripts/gen_theme_css.py`. `assets/studio-browser.css` consumes those
+scoped roles without recoloring unrelated compatibility surfaces.
 
-Avoid church/sanctuary imagery, crosses, heraldry, fantasy styling, neon/gamer effects, electric blue, loud orange, excessive glow, and decorative cards with no information hierarchy.
+## Navigation and composition
 
-## Color system
+SESSION: Overview (landing), Shot, Club, Table, Numbers.
+PRACTICE: Range, Index.
+TOOLS: Dispersion, Bag, Fit, Lab, Setup.
 
-Use roles from `src/ui/tokens.py` rather than choosing new colors ad hoc.
+The labeled rail is 272 logical pixels. A larger workspace header holds the
+page title, session picker, current-club picker, New Session and true source
+status. The Shot workspace contains Recent Shots rather than a second global
+rail. Previous/next history navigation, deletion confirmation, per-shot contact
+marking and session tools remain available.
 
-| Role | Hex | Use |
-| --- | --- | --- |
-| Antique Gold | `#D4A24F` | current, active, selected, hero metric, primary action |
-| Light Gold | `#E3BC70` | active icons and small high-contrast highlights |
-| Core Teal | `#32979A` | supporting analytical accent |
-| Teal Line | `#58B7B4` | paths, chart strokes, confidence geometry |
-| Teal Text | `#78C4C1` | analytical labels and takeaways |
-| Soft Teal | `#698E96` | secondary analytical detail |
-| Page Navy | `#0A2029` | general workspace material |
-| Rail Navy | `#081923` | persistent navigation |
-| Sidebar Navy | `#091B24` | Recent Shots drawer |
-| Surface | `#0D2731` | local grouping surface |
-| Raised Surface | `#15333D` | selected/raised state |
-| Deep Teal | `#173B42` | section bands / structural emphasis |
-| Hairline | `#2A4C55` | separators and quiet borders |
-| Guide | `#456D76` | targets/reference lines |
-| Primary Text | `#F3F6FA` | titles and primary values |
-| Secondary Text | `#B3BEC2` | labels/context |
-| Muted Text | `#70868C` | units/captions/unavailable |
-| Success | `#39A879` | true ready/success state only |
-| Danger | `#E34A4A` | true error/danger state only |
+Shot reads RESULT → SHAPE → CAUSE, then Session Trends and Shot Shape Mix.
+Club keeps four quadrants. Numbers keeps a 4×4 grid with Carry emphasized.
+Range scenery is decorative; live flight curves and landing positions are
+separate, calculated from available shot data. The downrange camera projects
+distance into depth, lateral offline across the scene, and elevation vertically.
+Target rings share that camera. Carry, apex and offline are required; a missing
+metric never creates a made-up flight. Shot/Overview use explicitly labeled
+side-profile charts on a flat chart field, not a perspective range grid.
 
-### Color-role rules
+## Data credibility
 
-1. **Gold = current / primary / active.** Do not use it as generic decoration.
-2. **Teal = analysis / data / geometry.** Use it for paths, charts, target geometry and technical labels.
-3. **White = structure.** Major headings and primary values generally stay white.
-4. **Slate = context.** Units, captions, inactive controls and historical points stay muted.
-5. **Green/red are semantic only.** They should communicate success or danger, not brand personality.
-6. Do not reintroduce electric blue (`#1E6CFF`, `#40A3FF`, `#78BAFF`) or loud orange (`#F47A32`) into redesigned desktop UI.
-7. Prefer one composed workspace with spacing and hairlines over a grid of unnecessary cards.
+Use `src.connections.presentation.metric_value` and `metric_status` for
+source-aware display. Distinguish Reported/Native, Derived, Estimate/Modelled and
+Unavailable. A measured zero must not become missing, and missing data must not
+be rendered as zero. Do not display the concept artwork's sample numbers or
+proposed remote links as live information.
 
-## Navigation hierarchy
+Aim correction belongs at the read/display boundary. Never persist corrected
+copies. Contact markers need actual supplied or user-marked coordinates;
+history-backed estimates remain clearly labeled and visually distinct.
 
-**SESSION**
-- Shot
-- Club
-- Table
-- Numbers
+## Verification
 
-**PRACTICE**
-- Range
+Run `python -m pytest tests/ -v` with an actual graphical display for UI coverage.
+Headless runs skip graphical tests and are not a full UI pass. Run scoped lint,
+the packaged-startup smoke check and native interaction tests at multiple UI
+scales. Test repeated navigation, menus, Close/Cancel, source readiness, shot
+selection, contact marking and modal ownership. Record any obsolete visual
+assertions separately from actual behavioral failures.
 
-**TOOLS**
-- Dispersion
-- Bag
-- Fit
-- Lab
-- Setup
+`scripts/preview_concept.py` runs the real app with explicitly labeled sample
+fixtures in isolated user-data directories. Its canvas exports are render
+artifacts, not proof of a live launch monitor or pressure-board connection.
 
-Persistent shell behavior:
+## Visual verification runtime
 
-- active nav = gold left rail, light-gold icon, white label
-- inactive nav = cool teal/slate
-- selected Recent Shot = raised navy/teal with gold current marker
-- New Session = dark outlined gold `+`, not a solid gold block
-- collapsed Recent Shots uses a dedicated 28px gutter; never overlap the nav
-- header uses the standalone S icon, gold SHANKTUARY wordmark, live `PERFORMANCE GOLF STUDIO` text, and faint full-width topo contours
+On the Linux cloud QA host, use the system Python with Tk 8.6/Xft for native
+antialiased Canvas text. The bundled Tk 9 build exposes bitmap X11 fonts only
+and is not a representative typography preview. This changes the QA runtime,
+not application text rendering or saved settings. Continue testing click
+geometry, clipping and exports with the actual native font metrics.
 
-## Page guidance
-
-### Shot
-
-Reading order is **RESULT → SHAPE → CAUSE**.
-
-Top-level metrics include Carry, Total, Ball Speed, Club Speed, VLA/HLA, Spin, Apex and Offline. Spin remains a top-level metric.
-
-- current shot / movement = gold
-- analytical geometry / confidence = teal
-- historical dispersion = muted teal/slate
-- target line is visually stronger than horizontal grid
-- Session Trends alternate teal and gold intentionally
-- Shot Shape Mix uses Draw teal, Straight slate, Fade gold
-
-### Club
-
-Four quadrants remain:
-
-- Club Path & Face
-- Spin
-- Launch & Loft
-- Impact Location
-
-Impact credibility states are product requirements:
-
-- **Measured**
-- **Estimate**
-- **Direction Estimate**
-- **Unavailable**
-
-Never plot a precise-looking impact marker when location is unavailable. Estimated impact uses the same lens + gold ring + gold dot visual language as Shot → Strike.
-
-### Table
-
-Keep it dense. Current/selected row gets restrained gold emphasis. Reduce row-border noise and keep two-line labels/units legible.
-
-### Numbers
-
-Keep the 4×4 structure. Carry is the hero gold metric; technical status/data uses teal; unavailable values are visibly subdued.
-
-### Range
-
-The desktop range is intentionally simple: a continuous dark-green field below the metric ribbon, a subtly distinct center corridor, teal reference geometry, muted historical flights, and a gold current flight/landing point.
-
-### Dispersion / Bag / Fit / Lab / Setup
-
-Preserve production functionality. Palette adaptation should not replace current upstream product logic. Setup in particular owns current aim-calibration behavior and must stay on the latest production implementation.
-
-## Data credibility and aim correction
-
-Visual work must not change source-of-truth data behavior.
-
-- Native Nova payloads remain stored/forwarded unchanged.
-- Aim calibration is applied at read/display boundaries.
-- The desktop UI adapter temporarily exposes aim-corrected copies only to historical renderers that predate the aim-calibration feature, then restores native session data immediately.
-- Never persist those corrected display copies.
-- Preserve Measured / Derived / Estimated / Direction Estimate / Unavailable distinctions.
-- Do not style unavailable data like measurements.
-
-## Change checklist
-
-When changing desktop UI:
-
-1. Decide the element role before choosing color: current, analytical, structural, secondary, success, or danger.
-2. Use `src/ui/tokens.py` for new work.
-3. Keep business/data logic in production modules; keep visual adaptation in `src/ui/`.
-4. Preserve hit geometry whenever controls move.
-5. Verify Shot, Club, Table, Numbers, Range, Dispersion, Bag, Fit, Lab, Setup, expanded/collapsed Recent Shots, and header controls.
-6. Verify aim calibration still changes every affected display without changing stored native payloads.
-7. Run the full test suite and cross-platform build before merging.
+The concept images differ in header height and represent illustrative data.
+The integrated desktop keeps one stable shared header across workspaces;
+pressure imagery must remain truthful to available board-load measurements.
+Existing saved browser overlays are preserved; concept presets require an
+explicit selection before saving. No visual fidelity pass authorizes releases.

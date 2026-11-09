@@ -357,8 +357,9 @@
     .btn-save-layout { background: var(--accent) !important; color: var(--bg) !important; border: none !important; }
     .btn-config-page { background: var(--accent-line) !important; color: var(--bg) !important; border: none !important; }
   </style>
+  <link rel="stylesheet" href="/assets/studio-browser.css">
 </head>
-<body>
+<body class="studio-browser">
 
   <!-- Edit Mode Top Toolbar -->
   <div class="edit-toolbar">
@@ -448,7 +449,7 @@
       <span class="edit-label">Quad: Launch Arc</span>
       <button class="widget-close-btn" onclick="hideWidget('side_launch')" title="Hide Widget">✕</button>
     </div>
-    <div class="visual-title">TRAJECTORY LAUNCH ARC</div>
+    <div class="visual-title">Trajectory · illustrative</div>
     <div class="canvas-wrapper"><canvas id="sideCanvas"></canvas></div>
     <div class="resize-handle">◢</div>
   </div>
@@ -484,7 +485,7 @@
       <span class="edit-label">Swing Lab: Pressure Heatmap</span>
       <button class="widget-close-btn" onclick="hideWidget('wbb_heatmap')" title="Hide Widget">✕</button>
     </div>
-    <div class="visual-title">SWING LAB: DUAL HEATMAP</div>
+    <div class="visual-title">Pressure</div>
     <div class="canvas-wrapper"><canvas id="obsHeatmapCanvas" width="236" height="200"></canvas></div>
     <div class="resize-handle">◢</div>
   </div>
@@ -526,7 +527,7 @@
 
   <div class="widget accent-yellow" id="w_carry" style="left: 330px; top: 970px; width: 140px; height: 70px;">
     <div class="widget-edit-header"><span class="edit-label">Carry</span><button class="widget-close-btn" onclick="hideWidget('carry')">✕</button></div>
-    <div class="metric-label">CARRY</div><div class="metric-val" id="v_carry">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
+    <div class="metric-label">Carry</div><div class="metric-val" id="v_carry">--<span class="metric-unit">YDS</span></div><div class="resize-handle">◢</div>
   </div>
 
   <div class="widget" id="w_total" style="left: 480px; top: 970px; width: 140px; height: 70px;">
@@ -551,7 +552,7 @@
 
   <div class="widget" id="w_total_spin" style="left: 1080px; top: 970px; width: 140px; height: 70px;">
     <div class="widget-edit-header"><span class="edit-label">Total Spin</span><button class="widget-close-btn" onclick="hideWidget('total_spin')">✕</button></div>
-    <div class="metric-label">TOTAL SPIN</div><div class="metric-val" id="v_total_spin">--<span class="metric-unit">RPM</span></div><div class="resize-handle">◢</div>
+    <div class="metric-label">Spin</div><div class="metric-val" id="v_total_spin">--<span class="metric-unit">RPM</span></div><div class="resize-handle">◢</div>
   </div>
 
   <div class="widget" id="w_sidespin" style="left: 1230px; top: 970px; width: 140px; height: 70px;">
@@ -617,6 +618,7 @@
   <script>
     let layoutConfig = null;
     let latestShot = null;
+    let studioPreviewLayout = false;
     let isEditMode = false;
     let draggedWidget = null;
     let resizingWidget = null;
@@ -1056,17 +1058,18 @@
           // round-trips, but read defensively -- layouts saved before this
           // existed simply have no key and default to 0.
           const rot = parseFloat(el.getAttribute('data-rotation')) || 0;
-          layoutConfig.widgets[id] = { x, y, w, h, visible: vis, rotation: rot };
+          layoutConfig.widgets[id] = { ...layoutConfig.widgets[id], x, y, w, h, visible: vis, rotation: rot };
         }
       });
 
       layoutConfig.divot_calibration = {
+        ...layoutConfig.divot_calibration,
         offset_x: calibOffsetX,
         offset_y: calibOffsetY,
         tilt_deg: calibTiltDeg
       };
 
-      fetch('/api/layout', {
+      fetch('/api/layout?output=' + (document.body.classList.contains('mode-projector') ? 'projection' : 'overlay'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(layoutConfig)
@@ -1142,8 +1145,10 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'init' || msg.type === 'layout_update') {
-            if (msg.layout) {
-              layoutConfig = msg.layout;
+            if (msg.layout && !studioPreviewLayout) {
+              const output = document.body.classList.contains('mode-projector') ? 'projection' : 'overlay';
+              if (msg.type === 'layout_update' && (msg.output || 'overlay') !== output) return;
+              layoutConfig = msg.type === 'init' && output === 'projection' ? (msg.projection_layout || msg.layout) : msg.layout;
               applyLayoutConfig();
             }
             if (msg.data) {
@@ -1167,8 +1172,38 @@
       ws.onclose = () => setTimeout(initWebSocket, 2000);
     }
 
+    if (window.parent !== window) {
+      window.parent.postMessage({type:'studio-preview-ready'},window.location.origin);
+    }
+    // Only an embedding same-origin configurator may preview a layout.
+    // This changes in-memory rendering, never the server or saved positions.
+    window.addEventListener('message', event => {
+      if (event.origin !== window.location.origin || event.source !== window.parent || window.parent === window) return;
+      if (event.data?.type !== 'studio-layout-preview' || !event.data.layout?.widgets) return;
+      studioPreviewLayout = true;
+      layoutConfig = event.data.layout;
+      applyLayoutConfig();
+    });
+
     function applyLayoutConfig() {
+      const selectedTheme = layoutConfig?.styling?.theme;
+      document.body.dataset.studioTheme = ['broadcast-dark', 'clean-light'].includes(selectedTheme) ? selectedTheme : 'studio-teal';
       if (!layoutConfig) return;
+      spsResolveTokens();
+      // Rotate the complete physical output around the 1920×1080 canvas
+      // center, independently of each widget's own saved rotation.
+      if (document.body.classList.contains('mode-projector')) {
+        let projectionLayer = document.getElementById('studioProjectionLayout');
+        if (!projectionLayer) {
+          projectionLayer = document.createElement('div');
+          projectionLayer.id = 'studioProjectionLayout';
+          Object.assign(projectionLayer.style, {position:'absolute',left:'0',top:'0',width:'1920px',height:'1080px',transformOrigin:'960px 540px'});
+          document.body.appendChild(projectionLayer);
+          document.querySelectorAll('.widget').forEach(widget => projectionLayer.appendChild(widget));
+        }
+        const rotation = Number(layoutConfig.projection?.rotation_deg) || 0;
+        projectionLayer.style.transform = `rotate(${rotation}deg)`;
+      }
       const widgets = layoutConfig.widgets || layoutConfig;
 
       if (layoutConfig.divot_calibration) {
@@ -1211,31 +1246,12 @@
     }
 
     function renderShotData() {
-      // Fallback sample shot telemetry so widgets render immediately on launch
-      const sampleShot = {
-        vertical_launch_angle_degrees: 20.9,
-        horizontal_launch_angle_degrees: -4.5,
-        shot_name: 'Pure Draw',
-        shot_rank: 'A',
-        open_golf_coach: {
-          smash_factor: 1.24,
-          total_spin_rpm: 2990,
-          sidespin_rpm: -299,
-          spin_axis_degrees: -5.8,
-          club_path_degrees: { right_handed: -4.5 },
-          club_face_to_target_degrees: { right_handed: -7.9 },
-          club_face_to_path_degrees: { right_handed: -3.4 },
-          us_customary_units: {
-            ball_speed_mph: 62.0,
-            club_speed_mph: 50.1,
-            carry_distance_yards: 53.8,
-            total_distance_yards: 59.4,
-            offline_distance_yards: -7.2
-          }
-        }
-      };
-
-      const shotToRender = latestShot || sampleShot;
+      // No shot received: show missing data rather than fictional telemetry.
+      if (!latestShot) {
+        document.querySelectorAll('[id^="v_"]').forEach(el => { el.textContent = '—'; });
+        return;
+      }
+      const shotToRender = latestShot;
       const ogc = shotToRender.open_golf_coach || {};
       const us = ogc.us_customary_units || {};
 

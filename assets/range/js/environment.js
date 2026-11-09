@@ -1,37 +1,33 @@
+import { createStudioTurf, createStudioSky, createStudioMountains } from './studio_environment.js';
+import { createStudioRangeDecor, studioColor } from './studio_decor.js';
+import { createStudioGolfFlag } from './studio_flag.js';
+
 // High-Fidelity PGA Driving Range Environment with Concentric Target Greens & Dashed Centerline
 
 let activeTargetGreen = null;
+let targetFlag = null;
+
+export function updateEnvironmentWind(seconds) {
+    targetFlag?.update(seconds);
+}
 let signContext = null;
 let signTexture = null;
 let teeBoxGroup = null;
 let fairwayCenterline = null;
+let studioDistanceGuides = null;
 
 export function setupEnvironment(scene, initialTargetYards = 150) {
     const textureLoader = new THREE.TextureLoader();
     
     // 1. Sky and Atmospheric Fog
-    scene.background = new THREE.Color(0x8ecae6);
-    scene.fog = new THREE.FogExp2(0xbde0fe, 0.0010);
+    createStudioSky(scene);
     
     // 2. High-Res Fairway Turf with immediate vibrant green base
     const terrainGeo = new THREE.PlaneGeometry(450, 800, 64, 64);
     terrainGeo.rotateX(-Math.PI / 2);
     
-    const terrainMat = new THREE.MeshStandardMaterial({
-        color: 0x3d7e2e,
-        roughness: 0.82,
-        metalness: 0.05
-    });
-    
-    textureLoader.load('/range/textures/gen_fairway_tex.png', (tex) => {
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(30, 60);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        terrainMat.map = tex;
-        terrainMat.needsUpdate = true;
-    });
-    
+    const terrainMat = createStudioTurf(textureLoader);
+
     const terrain = new THREE.Mesh(terrainGeo, terrainMat);
     terrain.name = 'range-fairway';
     terrain.position.set(0, 0, -250);
@@ -42,13 +38,15 @@ export function setupEnvironment(scene, initialTargetYards = 150) {
     createTeeBoxMat(scene);
     
     // 4. Dashed Fairway Centerline (Matching Reference Image)
+    // Keep a subtle aiming reference rather than the former runway-wide stripe.
     createDashedFairwayCenterline(scene);
     
     // 5. Concentric Bullseye Target Green (Outer White, Middle Blue, Inner Navy)
     createConcentricTargetGreen(scene, initialTargetYards);
     
     // 6. Realistic 3D Mountain Panorama Backdrop
-    createMountainPanorama(scene);
+    createStudioMountains(scene);
+    studioDistanceGuides = createStudioRangeDecor(scene, teeBoxGroup);
 }
 
 function createTeeBoxMat(scene) {
@@ -57,27 +55,12 @@ function createTeeBoxMat(scene) {
     teeBoxGroup = teeGroup;
     const textureLoader = new THREE.TextureLoader();
 
-    // 1. Manicured Natural Tee Deck (Blends naturally with organic fairway grass)
-    const teeGeo = new THREE.CylinderGeometry(3.6, 3.8, 0.02, 32);
-    const teeMat = new THREE.MeshStandardMaterial({
-        color: 0x336d28,
-        roughness: 0.88,
-        metalness: 0.02
-    });
-
-    textureLoader.load('/range/textures/gen_fairway_tex.png', (tex) => {
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(4, 4);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        teeMat.map = tex;
-        teeMat.needsUpdate = true;
-    });
-
-    const teeDeck = new THREE.Mesh(teeGeo, teeMat);
-    teeDeck.position.set(0, 0.01, 0.0);
-    teeDeck.receiveShadow = true;
-    teeGroup.add(teeDeck);
+    // A raised, rectangular hitting mat and stone apron ground the tee bay.
+    const surround = new THREE.Mesh(new THREE.BoxGeometry(7.2,.10,4.8),
+        new THREE.MeshStandardMaterial({color:0x79776b,roughness:.98}));
+    surround.position.set(0,-.045,.3); surround.receiveShadow=true; teeGroup.add(surround);
+    const teeDeck = new THREE.Mesh(new THREE.BoxGeometry(4.8,.075,3.8), createStudioTurf(textureLoader,{tee:true}));
+    teeDeck.position.set(0,-.0175,.3); teeDeck.receiveShadow=true; teeGroup.add(teeDeck);
 
     // 2. Classic White Championship Tee Markers flanking the tee box (Left & Right)
     const markerGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -91,12 +74,14 @@ function createTeeBoxMat(scene) {
     leftMarker.position.set(-2.0, 0.08, 0.0);
     leftMarker.castShadow = true;
     leftMarker.receiveShadow = true;
+    leftMarker.visible = false;
     teeGroup.add(leftMarker);
 
     const rightMarker = new THREE.Mesh(markerGeo, markerMat);
     rightMarker.position.set(2.0, 0.08, 0.0);
     rightMarker.castShadow = true;
     rightMarker.receiveShadow = true;
+    rightMarker.visible = false;
     teeGroup.add(rightMarker);
 
     // 3. Subtle Natural Wooden Golf Tee under the ball
@@ -119,9 +104,9 @@ function createDashedFairwayCenterline(scene) {
     fairwayCenterline = centerGroup;
     
     // Crisp White Dashed Stripes along X=0 from Z=-2 to Z=-450
-    const dashLength = 2.4; // 2.4 yards long
-    const dashGap = 1.6;    // 1.6 yards gap
-    const dashWidth = 0.38; // 0.38 yards wide
+    const dashLength = 1.4; // 2.4 yards long
+    const dashGap = 3.6;    // 1.6 yards gap
+    const dashWidth = 0.045; // 0.38 yards wide
 
     const dashGeo = new THREE.PlaneGeometry(dashWidth, dashLength);
     dashGeo.rotateX(-Math.PI / 2);
@@ -190,40 +175,8 @@ function createConcentricTargetGreen(scene, yardage) {
     greenTurf.receiveShadow = true;
     greenGroup.add(greenTurf);
 
-    // 2. Center Cup & Flagstick
-    const cupRimGeo = new THREE.RingGeometry(0.24, 0.32, 32);
-    cupRimGeo.rotateX(-Math.PI / 2);
-    const cupRimMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const cupRim = new THREE.Mesh(cupRimGeo, cupRimMat);
-    cupRim.position.set(0, 0.022, 0);
-    greenGroup.add(cupRim);
-
-    // Flagstick Pole (Championship Fiberglass)
-    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 3.4, 16);
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.2 });
-    const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.set(0, 1.7, 0);
-    pole.castShadow = true;
-    greenGroup.add(pole);
-
-    // Flag Top Finial
-    const finialGeo = new THREE.SphereGeometry(0.08, 12, 12);
-    const finialMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.6, roughness: 0.2 });
-    const finial = new THREE.Mesh(finialGeo, finialMat);
-    finial.position.set(0, 3.4, 0);
-    greenGroup.add(finial);
-
-    // Flag
-    const flagGeo = new THREE.PlaneGeometry(1.3, 0.8);
-    const flagMat = new THREE.MeshStandardMaterial({
-        color: 0xef4444,
-        side: THREE.DoubleSide,
-        roughness: 0.35
-    });
-    const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(0.65, 3.0, 0);
-    flag.castShadow = true;
-    greenGroup.add(flag);
+    // Cup and cloth share the target group, so changing yardage moves them together.
+    targetFlag = createStudioGolfFlag(greenGroup, studioColor('--gold', 'gold'));
 
     // 5. Dynamic 3D Wooden Yardage Sign with Roof (Offset Left)
     const signCanvas = document.createElement('canvas');
@@ -358,6 +311,7 @@ export function setTargetDistance(yards) {
 }
 
 export function setTargetGreenVisible(visible) {
+    if (studioDistanceGuides) studioDistanceGuides.visible = Boolean(visible);
     if (activeTargetGreen) {
         activeTargetGreen.visible = Boolean(visible);
     }
@@ -367,56 +321,5 @@ export function setRangeDecorVisible(visible) {
     const v = Boolean(visible);
     if (teeBoxGroup) teeBoxGroup.visible = v;
     if (fairwayCenterline) fairwayCenterline.visible = v;
-}
-
-function createMountainPanorama(scene) {
-    // 1. Try GLB 3D Mountain Mesh
-    if (typeof THREE.GLTFLoader === 'function') {
-        const loader = new THREE.GLTFLoader();
-        loader.load('/range/models/rangeMtns.glb', (gltf) => {
-            const mountains = gltf.scene;
-            mountains.position.set(0, -2, -470);
-            mountains.scale.set(22, 18, 20);
-            
-            mountains.traverse((child) => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        color: 0x64748b,
-                        roughness: 0.95,
-                        metalness: 0.05
-                    });
-                }
-            });
-            
-            scene.add(mountains);
-        }, undefined, () => {
-            createProceduralMountainWall(scene);
-        });
-    } else {
-        createProceduralMountainWall(scene);
-    }
-}
-
-function createProceduralMountainWall(scene) {
-    const mtnGeo = new THREE.PlaneGeometry(600, 140, 64, 16);
-    const pos = mtnGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const y = pos.getY(i);
-        if (y > -50) {
-            const noise = Math.sin(x * 0.03) * 25 + Math.cos(x * 0.07) * 15;
-            pos.setY(i, y + noise);
-        }
-    }
-    mtnGeo.computeVertexNormals();
-
-    const mtnMat = new THREE.MeshStandardMaterial({
-        color: 0x52667a,
-        roughness: 0.9,
-        metalness: 0.05,
-        side: THREE.DoubleSide
-    });
-    const mtnMesh = new THREE.Mesh(mtnGeo, mtnMat);
-    mtnMesh.position.set(0, 45, -480);
-    scene.add(mtnMesh);
+    if (studioDistanceGuides) studioDistanceGuides.visible = v;
 }

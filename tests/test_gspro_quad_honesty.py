@@ -7,7 +7,7 @@ from the payload. The quad view was reading that absence as 0.0 and
 rendering a fake dead-straight, dead-centre shot for EVERY GSPro shot --
 indistinguishable from a real flush strike. This locks in the fix: those
 specific readouts must show an explicit absence state instead of invented
-zeros. The guided-source grid uses a blank value plus NOT REPORTED provenance.
+zeros. The concept workspace uses a blank value plus Unavailable provenance.
 """
 
 import pytest
@@ -66,9 +66,9 @@ def test_gspro_shot_with_no_club_data_shows_not_measured():
     root, app = _quad_app_with_shot(ogc_extra={})
     try:
         texts = _canvas_texts(app)
-        idx = texts.index("CLUB PATH")
+        idx = texts.index("Path")
         assert texts[idx + 1] == "--", f"missing path must be blank: {texts}"
-        assert texts[idx + 2] == "NOT REPORTED", f"missing path needs provenance: {texts}"
+        assert texts[idx + 2] == "Unavailable", f"missing path needs provenance: {texts}"
         joined = " | ".join(texts)
         # The fabricated-zero symptom: a fake "Neutral path" claim with no
         # real data behind it must not appear.
@@ -90,9 +90,9 @@ def test_shot_with_real_club_data_still_shows_real_values():
     })
     try:
         texts = _canvas_texts(app)
-        idx = texts.index("CLUB PATH")
+        idx = texts.index("Path")
         assert texts[idx + 1].replace(" ", "") == "4.2°", texts
-        assert texts[idx + 2] == "REPORTED", texts
+        assert texts[idx + 2] == "Reported", texts
     finally:
         root.destroy()
 
@@ -106,9 +106,9 @@ def test_zero_club_path_is_distinguishable_from_missing_club_path():
     })
     try:
         texts = _canvas_texts(app)
-        idx = texts.index("CLUB PATH")
+        idx = texts.index("Path")
         assert texts[idx + 1].replace(" ", "") == "0.0°", texts
-        assert texts[idx + 2] == "REPORTED", texts
+        assert texts[idx + 2] == "Reported", texts
     finally:
         root.destroy()
 
@@ -116,7 +116,7 @@ def test_zero_club_path_is_distinguishable_from_missing_club_path():
 def _overview_app_with_shot(ogc_extra=None):
     """Same fixture, but landing on Overview (view_mode 9) -- the default
     landing page and the actual live code path the reported bug hit
-    (src/ui/_legacy/overview_redesign*.py, not the base-file draw_overview_viewport)."""
+    (src/ui/concept_session.py, not the base-file draw_overview_viewport)."""
     tk = pytest.importorskip("tkinter")
     try:
         root = tk.Tk()
@@ -168,9 +168,8 @@ def test_overview_gspro_shot_with_no_club_data_does_not_claim_neutral_path():
             "Overview's delivery takeaway still claims a neutral/flush path "
             f"with no club data present -- texts: {texts}"
         )
-        idx = texts.index("CLUB PATH")
-        assert texts[idx + 1] == "--", texts
-        assert texts[idx + 2] == "NOT REPORTED", texts
+        idx = texts.index("Path")
+        assert texts[idx + 1] == "-- · Unavailable", texts
     finally:
         root.destroy()
 
@@ -183,8 +182,7 @@ def test_overview_shot_with_real_club_data_shows_real_values():
     })
     try:
         texts = _canvas_texts(app)
-        idx = texts.index("CLUB PATH")
-        assert texts[idx + 1].replace(" ", "") == "5.5°", texts
-        assert texts[idx + 2] == "REPORTED", texts
+        idx = texts.index("Path")
+        assert texts[idx + 1] == "5.5 ° · Reported", texts
     finally:
         root.destroy()

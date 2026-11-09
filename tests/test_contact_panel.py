@@ -78,6 +78,7 @@ def test_production_and_redesigned_quad_render_the_shared_panel(canvas):
 
     for app_class in (studio.ShanktuaryApp, ShanktuaryDesktopApp):
         app = object.__new__(app_class)
+        app.root = canvas.winfo_toplevel()
         app.canvas = canvas
         app.current_shot = {"club": "7 Iron", "vertical_launch_angle_degrees": 20}
         app.current_club = "7 Iron"
@@ -92,9 +93,14 @@ def test_production_and_redesigned_quad_render_the_shared_panel(canvas):
                                   0, 25, 45, 150, 90, "Straight", "A", 1.24)
         labels = [canvas.itemcget(i, "text") for i in canvas.find_all()
                   if canvas.type(i) == "text"]
-        assert labels.count("IMPACT LOCATION") == 1
+        modern = app_class is ShanktuaryDesktopApp
+        assert ([label.casefold() for label in labels].count("impact location")
+                if modern else labels.count("IMPACT LOCATION")) == 1
         assert not canvas.find_withtag("contact-marker")
-        assert len([i for i in canvas.find_withtag("contact-estimate") if canvas.type(i) == "oval"]) == 1
+        rings = [i for i in canvas.find_withtag("contact-estimate") if canvas.type(i) == "oval"]
+        assert len(rings) == (0 if modern else 1)
+        if modern:
+            assert "Impact unavailable" in labels
         assert not any(t in ("ESTIMATE", "DIR EST", "CENTER FLUSH") for t in labels)
         canvas.delete("all")
 

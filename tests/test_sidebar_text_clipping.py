@@ -55,17 +55,9 @@ def app(tmp_path, monkeypatch):
 
 
 def _session_label(canvas):
-    """The bold session label inside the sidebar session button."""
-    for item in reversed(canvas.find_all()):
-        if canvas.type(item) != "text":
-            continue
-        bbox = canvas.bbox(item)
-        if not bbox:
-            continue
-        if (70 <= bbox[0] <= 95 and 70 <= bbox[1] <= 100
-                and "bold" in canvas.itemcget(item, "font")):
-            return item, bbox
-    return None, None
+    """The current session label lives in the expanded workspace header."""
+    items = canvas.find_withtag("session-label")
+    return (items[0], canvas.bbox(items[0])) if items else (None, None)
 
 
 def _covering(canvas, item, bbox):
@@ -101,7 +93,7 @@ def test_session_label_is_not_clipped_by_later_passes(app, name):
     assert item is not None, "no session label was drawn"
 
     shown = application.canvas.itemcget(item, "text")
-    assert shown == name, f"label shows {shown!r}, expected the full {name!r}"
+    assert shown == "Session: " + name, f"label shows {shown!r}, expected the full {name!r}"
 
     covering = _covering(application.canvas, item, bbox)
     assert not covering, f"label is painted over by {covering}"
@@ -109,39 +101,29 @@ def test_session_label_is_not_clipped_by_later_passes(app, name):
 
 def test_a_long_session_name_ellipsizes_instead_of_running_under_controls(app):
     root, application = app
-    long_name = "A Very Long Session Name That Should Ellipsize"
+    long_name = "A Very Long Session Name That Should Ellipsize " * 4
     application.get_active_session()["name"] = long_name
     application.draw_screen()
     root.update()
 
     item, bbox = _session_label(application.canvas)
     shown = application.canvas.itemcget(item, "text")
-    assert shown.endswith("..."), f"long name was not ellipsized: {shown!r}"
+    assert shown.endswith("…"), f"long name was not ellipsized: {shown!r}"
     assert shown != long_name
     assert not _covering(application.canvas, item, bbox)
 
 
 def test_no_clipped_wordmark_behind_the_header(app):
-    """The v4 sidebar wordmark sat under the 52px header and showed a sliver."""
     root, application = app
     application.draw_screen()
     root.update()
-
     canvas = application.canvas
-    for item in canvas.find_all():
-        if canvas.type(item) != "text":
-            continue
-        text = canvas.itemcget(item, "text")
-        if text not in ("PERFORMANCE GOLF", "SHANKTUARY"):
-            continue
-        bbox = canvas.bbox(item)
-        if not bbox or bbox[0] > 300:
-            continue          # header brand lives further right; fine
-        # Anything in the sidebar column that starts above the 52px header
-        # boundary is the stale wordmark showing through.
-        assert bbox[1] >= 52, (
-            f"{text!r} at y={bbox[1]} is clipped by the 52px header"
-        )
+    brand = [item for item in canvas.find_all() if canvas.type(item) == "text"
+             and canvas.itemcget(item, "text") == "SHANKTUARY"]
+    assert len(brand) == 1
+    box = canvas.bbox(brand[0])
+    assert 0 <= box[0] < box[2] <= 260
+    assert not _covering(canvas, brand[0], box)
 
 
 def test_new_session_button_survives_and_stays_clear_of_the_label(app):
@@ -173,41 +155,16 @@ def test_new_session_button_survives_and_stays_clear_of_the_label(app):
     assert len(application.sessions) == before + 1, "+ button no longer works"
 
 
-def test_session_button_uses_the_sidebar_palette_not_the_old_grey(app):
-    """The repaint must use the sidebar's own colour family.
-
-    Filling this button with theme.SURFACE_2 (#1D2127, a grey from the older
-    dark theme) against the redesigned blue-teal sidebar (#091B24) rendered
-    as a black box. Assert the fill stays in the sidebar's family: close to
-    the surrounding background, and never a neutral grey.
-    """
+def test_session_picker_has_no_legacy_grey_slab(app):
     root, application = app
-    application.get_active_session()["name"] = "Session 1 - 7 Iron"
     application.draw_screen()
     root.update()
-
     canvas = application.canvas
     rect = application.sidebar_session_btn_rect
-
-    fills = []
-    for item in canvas.find_all():
-        if canvas.type(item) != "rectangle":
-            continue
-        if [int(v) for v in canvas.coords(item)] == [int(v) for v in rect]:
-            fill = canvas.itemcget(item, "fill")
-            if fill:
-                fills.append(fill)
-    assert fills, "session button face is never painted"
-
-    fill = fills[-1]
-    r = int(fill[1:3], 16)
-    g = int(fill[3:5], 16)
-    b = int(fill[5:7], 16)
-
-    # The sidebar palette is blue-teal: blue clearly exceeds red. A neutral
-    # grey (r ~= g ~= b) is the bug.
-    assert b > r + 6, (
-        f"session button fill {fill} is not a sidebar blue-teal "
-        f"(r={r} g={g} b={b}) — this renders as a black/grey box"
-    )
-
+    item, box = _session_label(canvas)
+    assert item is not None and rect
+    assert rect[0] <= box[0] and box[2] <= rect[2]
+    # The concept picker is a transparent header label, not the retired card.
+    for other in canvas.find_all():
+        if canvas.type(other) == "rectangle" and canvas.coords(other) == list(rect):
+            assert canvas.itemcget(other, "fill").lower() not in ("#1d2127", "#16191e")

@@ -402,8 +402,8 @@ class TestSetupEntryPoint:
                                                 "method": "callback"}),
         )
 
-        application.view_mode = 10
-        application.draw_screen()
+        from concept_gui_helpers import open_setup_details
+        open_setup_details(application)
         for _ in range(5):
             root.update()
 

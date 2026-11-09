@@ -17,11 +17,21 @@ class _InputQueue:
                 return
             if owner.queue.qsize() >= 256:
                 owner._status.update(state="error", message="Input queue full; shot not accepted", shot_received=False)
+                owner._accepted_shot = None
                 raise queue.Full("Input queue full")
             payload = deepcopy(shot)
             payload["_input_generation"] = self.generation
             payload["_source"] = self.source
-            owner.queue.put_nowait(payload)
+            # The display copy must also be independent of the queued object:
+            # Studio may enrich or consume that object immediately after put.
+            accepted_shot = deepcopy(payload)
+            try:
+                owner.queue.put_nowait(payload)
+            except queue.Full:
+                owner._status.update(state="error", message="Input queue full; shot not accepted", shot_received=False)
+                owner._accepted_shot = None
+                raise
+            owner._accepted_shot = accepted_shot
             owner._status.update(state="ready", message="Test shot received", shot_received=True)
 
     put_nowait = put
@@ -36,6 +46,7 @@ class SourceConnections:
         self._generation = uuid.uuid4().hex
         self._source = None
         self._active = False
+        self._accepted_shot = None
         self._client = None
         self._measurement_ids = OrderedDict()
         self._player = None
@@ -44,12 +55,15 @@ class SourceConnections:
 
     def snapshot(self):
         with self._lock:
-            return dict(self._status, source=self._source)
+            ready = self._active and self._status.get("state") == "ready" and self._status.get("shot_received")
+            return dict(self._status, source=self._source,
+                        accepted_shot=deepcopy(self._accepted_shot) if ready else None)
 
     def stop(self):
         with self._lock:
             self._generation = uuid.uuid4().hex
             self._active = False
+            self._accepted_shot = None
             self._status = dict(state="idle", message="Stopped", shot_received=False)
         threading.Thread(target=self._close, daemon=True).start()
 
@@ -99,6 +113,8 @@ class SourceConnections:
                         self._status["shot_received"] = False
                     if self._status.get("shot_received") and self._status.get("state") not in ("error", "idle"):
                         self._status["state"] = "ready"
+                    if not self._status.get("shot_received"):
+                        self._accepted_shot = None
                 else:
                     self._status["message"] = str(value)
         def run():
@@ -186,7 +202,8 @@ class StudioConnectionSetup:
                           open_connect_lan=options.get("host", "127.0.0.1") != "127.0.0.1")
         self.settings = self.settings_module.save_settings(**kwargs)
         if source in ("nova", "gspro", "both"):
-            self.legacy_status(source).update(connected=False, last_message="Connecting…")
+            for key in (("nova", "gspro") if source == "both" else (source,)):
+                self.legacy_status(key).update(connected=False, last_message="Connecting…")
         self.connections.start(source, options)
         self.wake()
 
@@ -199,13 +216,19 @@ class StudioConnectionSetup:
         source = status.get("source")
         if status["state"] != "idle" and source in ("nova", "gspro", "both"):
             legacy = self.legacy_status(source)
+            if source == "both":
+                legacy = {
+                    "connected": any(self.legacy_status(key).get("connected") for key in ("nova", "gspro")),
+                    "last_message": "Waiting for Nova or GSPro connection",
+                }
             if not legacy.get("connected"):
                 with self.connections._lock:
                     self.connections._status.update(shot_received=False, state="connecting")
+                    self.connections._accepted_shot = None
                 message = legacy.get("last_message") or "Waiting for connection"
                 if source == "gspro" and legacy.get("db_found") is False:
                     message = "GSPro database not found. Choose its file, then start reading."
-                status.update(shot_received=False, state="connecting", message=message)
+                status.update(shot_received=False, state="connecting", message=message, accepted_shot=None)
             elif not status["shot_received"]:
                 status.update(state="connected", message="Connected. Hit a test shot.")
         return status

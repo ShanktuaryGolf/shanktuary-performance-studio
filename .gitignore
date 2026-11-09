@@ -51,3 +51,8 @@ output_labeler/
 # Captured pressure traces (user data, one gzipped file per shot).
 # *.json above does not cover .json.gz.
 pressure_traces/
+
+# Isolated Windows board-test dependencies and per-run data.
+.venv-board-test/
+board-test-state/
+demo-only-state/

@@ -19,6 +19,7 @@ Based on the proven architecture from ShanktuaryGolf/SwingLab:
 """
 
 import base64
+import copy
 import http.server
 import json
 import os
@@ -29,6 +30,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from src.analytics.aim import AIM_FILE as _DEFAULT_AIM_FILE
 from src.analytics.aim import apply_aim, load_aim_offset
@@ -140,6 +142,26 @@ DEFAULT_LAYOUT = {
     }
 }
 
+# Fresh-install composition from the approved Studio Broadcast concept.
+# All other widgets remain available in the configurator. Existing saved
+# layouts are loaded unchanged by OBSState; this is not a migration.
+STUDIO_BROADCAST_WIDGETS = {
+    "carry": {"x": 230, "y": 140, "w": 600, "h": 330, "visible": True},
+    "total_spin": {"x": 1080, "y": 140, "w": 650, "h": 330, "visible": True},
+    "side_launch": {"x": 90, "y": 560, "w": 1080, "h": 470, "visible": True},
+    "wbb_heatmap": {"x": 1210, "y": 560, "w": 650, "h": 370, "visible": True},
+    "wbb_balance_bar": {"x": 1210, "y": 940, "w": 650, "h": 90, "visible": True},
+}
+for _widget_name, _widget in DEFAULT_LAYOUT["widgets"].items():
+    _widget["visible"] = _widget_name in STUDIO_BROADCAST_WIDGETS
+    if _widget_name in STUDIO_BROADCAST_WIDGETS:
+        _widget.update(STUDIO_BROADCAST_WIDGETS[_widget_name])
+# Index stays available by default as an established product contract.
+DEFAULT_LAYOUT["widgets"]["shanktuary_index"].update(
+    x=1570, y=20, w=300, h=100, visible=True
+)
+DEFAULT_LAYOUT["styling"]["preset"] = "studio-broadcast"
+
 class OBSState:
     def __init__(self):
         self.latest_shot = None
@@ -169,6 +191,7 @@ class OBSState:
         # and every /api/shot would otherwise stat+parse a JSON file.
         # invalidate_aim_cache() is how the desktop app publishes a change.
         self._aim_offset = None
+        self.layout_lock = threading.RLock()
         self.ensure_layout_file()
 
     def invalidate_aim_cache(self):
@@ -219,19 +242,58 @@ class OBSState:
         except Exception as e:
             print(f"[!] Error creating layout file: {e}")
 
-    def load_layout(self):
-        try:
-            if LAYOUT_FILE.exists():
-                return json.loads(LAYOUT_FILE.read_text())
-        except Exception:
-            pass
-        return DEFAULT_LAYOUT
+    def _layout_path(self, output):
+        if output not in ("overlay", "projection"):
+            raise ValueError("output must be overlay or projection")
+        return LAYOUT_FILE if output == "overlay" else LAYOUT_FILE.with_name("projection_layout.json")
 
-    def save_layout(self, layout_data):
+    def load_layout(self, output="overlay"):
+        with self.layout_lock:
+            path = self._layout_path(output)
+            # Read-only legacy fallback: both surfaces initially look exactly
+            # as before. First save freezes that baseline for the floor.
+            if not path.exists() and output == "projection":
+                path = LAYOUT_FILE
+            try:
+                if path.exists():
+                    return json.loads(path.read_text())
+            except Exception:
+                pass
+            return copy.deepcopy(DEFAULT_LAYOUT)
+
+    @staticmethod
+    def _merge_layout(base, draft, latest):
+        result = copy.deepcopy(latest) if isinstance(latest, dict) else {}
+        for key, value in draft.items():
+            if key in base and value == base[key]:
+                continue
+            result[key] = (OBSState._merge_layout(
+                base.get(key, {}) if isinstance(base.get(key), dict) else {},
+                value, result.get(key, {})) if isinstance(value, dict)
+                else copy.deepcopy(value))
+        return result
+
+    @staticmethod
+    def _write_layout(path, layout):
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(layout, indent=2))
+        temporary.replace(path)
+
+    def save_layout(self, layout_data, output="overlay", base=None):
         try:
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            LAYOUT_FILE.write_text(json.dumps(layout_data, indent=2))
-            self.broadcast({"type": "layout_update", "layout": layout_data})
+            with self.layout_lock:
+                path = self._layout_path(output)
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                floor = self._layout_path("projection")
+                if not floor.exists():
+                    # Fail closed on corrupt legacy data, rather than silently
+                    # replacing a user's calibration with factory defaults.
+                    legacy = json.loads(LAYOUT_FILE.read_text()) if LAYOUT_FILE.exists() else copy.deepcopy(DEFAULT_LAYOUT)
+                    self._write_layout(floor, legacy)
+                if base is not None:
+                    layout_data = self._merge_layout(base, layout_data, self.load_layout(output))
+                self._write_layout(path, layout_data)
+            self.broadcast({"type": "layout_update", "output": output, "layout": layout_data})
             return True
         except Exception as e:
             print(f"[!] Error saving layout: {e}")
@@ -924,8 +986,17 @@ class PressureManager:
         except Exception as e:
             print(f"[!] Could not load calibration: {e}")
 
+    def _calibration_configuration(self):
+        """Identify the source/assignment that a calibration was sampled from."""
+        return (getattr(self, "pressure_source", "wbb"), getattr(self, "board_mode", "single"),
+                bool(getattr(self, "is_simulator", False)),
+                getattr(self, "openfp_url", None) if getattr(self, "pressure_source", "wbb") == "openfp" else None,
+                board_id_to_text(getattr(self, "assigned_left", None)),
+                board_id_to_text(getattr(self, "assigned_right", None)))
+
     def start_stance_alignment(self, delay_sec=5.0, duration_sec=4.0):
         with self.lock:
+            self._alignment_configuration = self._calibration_configuration()
             self._alignment_samples = []
             self._alignment_start_time = time.time()
             self._alignment_sample_start = self._alignment_start_time + delay_sec
@@ -933,6 +1004,15 @@ class PressureManager:
             self._alignment_active = True
             self._alignment_status_msg = f"⏳ Step onto boards & take stance in {delay_sec:.0f}s..."
             return {"status": "started", "delay_sec": delay_sec, "duration_sec": duration_sec}
+
+    def cancel_stance_alignment(self):
+        """Discard an interrupted sample without changing saved calibration."""
+        with self.lock:
+            if self._alignment_active:
+                self._alignment_active = False
+                self._alignment_samples = []
+                self._alignment_status_msg = "Alignment cancelled"
+        return self.get_alignment_status()
 
     def get_alignment_status(self):
         with self.lock:
@@ -959,10 +1039,13 @@ class PressureManager:
                 "progress": round(prog, 2),
                 "message": msg,
                 "multipliers": self.balance_multiplier,
+                "configuration_matches": getattr(self, "_alignment_configuration", None) == self._calibration_configuration(),
             }
 
     def _finish_stance_alignment(self):
         with self.lock:
+            if not self._alignment_active:
+                return
             self._alignment_active = False
             if len(self._alignment_samples) >= 15:
                 avg_l = sum(s[0] for s in self._alignment_samples) / len(self._alignment_samples)
@@ -1026,6 +1109,7 @@ class PressureManager:
     def start_stance_width_calibration(self):
         """Begin the shift-left / shift-right stance-width measurement."""
         with self.lock:
+            self._stance_configuration = self._calibration_configuration()
             self.stance_cal.start()
             self.stance_width_mm = None
         return self.get_stance_width_status()
@@ -1044,6 +1128,7 @@ class PressureManager:
                 "active": st not in (StanceCalState.IDLE, StanceCalState.DONE),
                 "instruction": self.stance_cal.instruction,
                 "stance_width_mm": self.stance_width_mm,
+                "configuration_matches": getattr(self, "_stance_configuration", None) == self._calibration_configuration(),
             }
 
     def _create_hardware_backend(self, device_path=None):
@@ -1508,7 +1593,11 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         elif parsed_path == "/range":
             self.serve_file(assets_dir / "range" / "index.html", "text/html; charset=utf-8")
         elif parsed_path == "/api/layout":
-            self.send_json(obs_state.load_layout())
+            try:
+                output = parse_qs(urlsplit(self.path).query).get("output", ["overlay"])[0]
+                self.send_json(obs_state.load_layout(output))
+            except ValueError as e:
+                self.send_json({"status": "error", "message": str(e)}, code=400)
         elif parsed_path == "/api/bag":
             self.send_json(obs_state.load_bag())
         elif parsed_path == "/api/club":
@@ -1695,7 +1784,14 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 layout_data = json.loads(body)
                 if not isinstance(layout_data, dict):
                     raise ValueError("layout must be a JSON object")
-                success = obs_state.save_layout(layout_data)
+                output = parse_qs(urlsplit(self.path).query).get("output", ["overlay"])[0]
+                base = None
+                if self.headers.get("X-Studio-Layout-Merge") == "1":
+                    base, layout_data = layout_data.get("base"), layout_data.get("draft")
+                    if not isinstance(base, dict) or not isinstance(layout_data, dict):
+                        raise ValueError("base and draft must be objects")
+                obs_state._layout_path(output)  # Reject invalid output before writing.
+                success = obs_state.save_layout(layout_data, output, base)
                 self.send_json({"status": "ok" if success else "error"})
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, code=400)
@@ -1877,6 +1973,7 @@ class OBSHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         init_msg = json.dumps({
             "type": "init",
             "layout": obs_state.load_layout(),
+            "projection_layout": obs_state.load_layout("projection"),
             "data": current_shot,
             "club": current_club,
         })

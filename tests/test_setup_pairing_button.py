@@ -65,8 +65,8 @@ def _pump_events(root):
 
 
 def _open_setup(root, application):
-    application.view_mode = 10
-    application.draw_screen()
+    from concept_gui_helpers import open_setup_details
+    open_setup_details(application)
     _pump_events(root)
 
 
@@ -274,3 +274,16 @@ def test_repeated_clicks_do_not_stack_pairing_attempts(app, monkeypatch, request
     application.draw_screen()
     assert application.pairing_action_rect is not None
     assert len(started) == 1
+
+
+def test_setup_overview_details_and_back_use_real_clicks(app):
+    from concept_gui_helpers import click_rect, open_setup_details
+    root, application, _ = app
+    application.set_mode(10)
+    assert getattr(application, "concept_setup_page", "overview") == "overview"
+    assert "Boards & calibration" in _texts(application)
+    open_setup_details(application)
+    assert "Pair Board" in _texts(application) or application.setup_pair_rect
+    click_rect(application, application.concept_setup_actions["overview"])
+    assert application.concept_setup_page == "overview"
+    assert "Boards & calibration" in _texts(application)

@@ -153,9 +153,14 @@ class FaceGeometry:
         h_sign = -1 if self.left_handed else 1
         h = (px - sx) / self.px_per_mm * h_sign
         v = (sy - py) / self.px_per_mm
-        if abs(h) > FACE_MAX_H_MM or abs(v) > FACE_MAX_V_MM:
+        # A display transform can put an exact edge a few ULPs outside its
+        # mathematical boundary. Accept only numerical noise, not an expanded
+        # playable face, and return the original bounded coordinate contract.
+        epsilon = 1e-9
+        if abs(h) > FACE_MAX_H_MM + epsilon or abs(v) > FACE_MAX_V_MM + epsilon:
             return None
-        return (h, v)
+        return (max(-FACE_MAX_H_MM, min(FACE_MAX_H_MM, h)),
+                max(-FACE_MAX_V_MM, min(FACE_MAX_V_MM, v)))
 
 
 def contact_location(shot):

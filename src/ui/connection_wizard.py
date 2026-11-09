@@ -7,12 +7,14 @@ listener; drawing, launch and Back never start one. Other sources keep Connect.
 
 from __future__ import annotations
 
+import math
 import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog
 
 import theme
+from src.connections.presentation import metric_status, metric_value
 from src.ui import tokens as T
 from src.ui.asset_paths import asset_path
 from src.ui.scaling import ScaledCanvas
@@ -41,7 +43,7 @@ class ConnectionWizard(SplashScreen):
         self.always_show = bool(settings.get("always_show_splash", False))
         self.result = None
         self.page = "choose"
-        self.advanced = self.source == "cgp"
+        self.advanced = self.source in ("cgp", "both")
         self._alive = True
         self._images, self._image_cache, self._hero_cache = [], {}, {}
         self._hit_rects = []
@@ -127,6 +129,12 @@ class ConnectionWizard(SplashScreen):
         self._draw()
         self.win.after(200, self._poll_status)
 
+    def _rounded(self, x1, y1, x2, y2, r, fill, outline="", width=1):
+        # Share the production shell's softly lit, antialiased card material.
+        from src.ui.concept_shell import panel
+        return panel(self.canvas, x1, y1, x2, y2, fill=fill,
+                     outline=outline, r=r, width=width)
+
     def _px(self, value):
         return round(value * self.ui_scale)
 
@@ -163,12 +171,12 @@ class ConnectionWizard(SplashScreen):
             x + w,
             y + 42,
             7,
-            T.GOLD
+            T.TEAL_LINE
             if primary and enabled
             else T.SURFACE_2
             if not enabled
             else T.PAGE_BG,
-            T.HAIRLINE,
+            T.TEAL_LINE if primary and enabled else T.HAIRLINE,
         )
         self._text(
             x + 20,
@@ -181,29 +189,82 @@ class ConnectionWizard(SplashScreen):
         if enabled:
             self._hit((x, y, x + w, y + 42), action)
 
+    def _draw_workflow_rail(self, split):
+        """Use the same restrained navigation material as the Studio shell.
+
+        This is a modal workflow, so these labels deliberately are not fake
+        workspace links: Back and Close remain the only exit/navigation paths.
+        """
+        c = self.canvas
+        c.create_rectangle(0, 0, split, self.h, fill=T.RAIL_BG, outline="")
+        c.create_line(split, 0, split, self.h, fill=T.HAIRLINE)
+        from src.ui.concept_shell import paint_brand_mark
+
+        paint_brand_mark(c)
+        self._text(80, 37, "SHANKTUARY", 16, T.TEXT, True)
+        self._text(80, 70, "P E R F O R M A N C E  S T U D I O", 6, T.TEXT_2)
+        self._text(24, 130, "SESSION SETUP", 9, T.TEXT_2, True)
+        c.create_line(24, 157, split - 24, 157, fill=T.HAIRLINE)
+        self._rounded(16, 179, split - 16, 225, 10, T.SECTION_BG, T.TEAL_LINE)
+        self._text(31, 193, "Connection setup", 12, T.TEXT, True)
+        self._text(26, 257, "Your source. Your session.", 11, T.TEXT, True)
+        self._text(26, 292,
+                   "Choose your shot source, connect it, and verify a new shot before starting.",
+                   10, T.TEXT_2, width=split - 52)
+        c.create_line(24, self.h - 138, split - 24, self.h - 138, fill=T.HAIRLINE)
+        self._text(26, self.h - 116, "LOCAL STUDIO", 9, T.TEAL_TEXT, True)
+        self._text(26, self.h - 86, "Connection status is live.\nNo sample shot data is used.",
+                   9, T.TEXT_2, width=split - 52)
+
+    def _draw_stepper(self, x, right):
+        state = self._status.get("state")
+        ready = state == "ready" and self._status.get("shot_received", False)
+        step = 0 if self.page == "choose" else 3 if ready else 2 if state in ("listening", "connected", "ready") else 1
+        self._rounded(x, 87, right, 124, 10, T.SURFACE, T.HAIRLINE)
+        stride = (right - x) / 4
+        for index, label in enumerate(("Source", "Connect", "Test shot", "Start")):
+            left = x + index * stride
+            if index == step:
+                self._rounded(left + 5, 91, left + stride - 5, 120, 8,
+                              T.SECTION_BG, T.TEAL_LINE)
+            cx, cy = left + 25, 105
+            self.canvas.create_oval(cx-10, cy-10, cx+10, cy+10,
+                                    fill=T.TEAL_LINE if index == step else T.SURFACE,
+                                    outline=T.TEAL_LINE if index <= step else T.TEXT_3)
+            self.canvas.create_text(cx, cy, text=str(index + 1),
+                                    fill=T.PAGE_BG if index == step else T.TEXT_2,
+                                    font=(theme.ui_font(), 9, "bold"))
+            self._text(left + 43, 97, label, 10,
+                       T.TEXT if index <= step else T.TEXT_3, index == step)
+
     def _draw(self):
         for widget in self._widgets:
             widget.destroy()
         self._widgets, self._fields, self._images, self._hit_rects = [], {}, [], []
         self.canvas.delete("all")
-        split = int(self.w * 0.344)
-        self._draw_left(split)
-        x, right = split + 42, self.w - 42
-        self._text(x, 38, "S E S S I O N   S E T U P", 8, T.TEXT_3)
-        self._text(
-            x,
-            87,
-            "①  CHOOSE    ───    ②  CONNECT & TEST    ───    ③  PLAY",
-            9,
-            T.TEAL_TEXT,
-        )
+        split = T.NAV_RAIL_W
+        self._draw_workflow_rail(split)
+        x, right = split + 28, self.w - 28
+        # Quiet topographic lines frame the header without competing with copy.
+        for band in range(10):
+            points = []
+            for step in range(121):
+                angle = math.tau * step / 120
+                xx = (80 + band * 22) * math.cos(angle)
+                yy = (17 + band * 7) * math.sin(angle) * (1 + .2 * math.sin(angle * 3))
+                points.extend((self.w * .82 + xx * .94 - yy * .34,
+                               18 + xx * .34 + yy * .94))
+            self.canvas.create_line(*points, fill=T.SURFACE, smooth=True, width=.65)
+        self._text(x, 22, "Connection setup wizard", 25, T.TEXT, True)
+        self._text(x, 60, "Set up your data source and verify it’s working.", 11, T.TEXT_2)
+        self._draw_stepper(x, right)
         if self.page == "choose":
             self._draw_choose(x, right)
         else:
             self._draw_connect(x, right)
 
     def _draw_choose(self, x, right):
-        self._text(x, 135, "What would you like to connect?", 21, T.TEXT, True)
+        self._text(x, 135, "Choose your shot source", 21, T.TEXT, True)
         self._text(
             x,
             180,
@@ -248,7 +309,7 @@ class ConnectionWizard(SplashScreen):
                 y + 78,
                 9,
                 T.ACTIVE_BG if selected else T.SURFACE,
-                T.GOLD if selected else T.HAIRLINE,
+                T.TEAL_LINE if selected else T.HAIRLINE,
             )
             if logo:
                 im = self._load_image(source, asset_path(logo), 32 if source == "pureplay" else 28)
@@ -263,7 +324,7 @@ class ConnectionWizard(SplashScreen):
                 y + 31,
                 right - 24,
                 y + 46,
-                outline=T.GOLD if selected else T.HAIRLINE,
+                outline=T.TEAL_LINE if selected else T.HAIRLINE,
                 width=3 if selected else 1,
             )
             if not self.source_locked:
@@ -281,7 +342,7 @@ class ConnectionWizard(SplashScreen):
         self._text(
             x,
             630,
-            "Advanced connections   ·   CGP Draft 2   [EXPERIMENTAL]",
+            "Advanced connections   ·   CGP Draft 2 [EXPERIMENTAL]   ·   Nova + GSPro",
             8,
             T.GOLD if self.source == "cgp" else T.TEXT_3,
         )
@@ -294,8 +355,12 @@ class ConnectionWizard(SplashScreen):
                 9,
                 T.TEAL_TEXT,
             )
+            middle = x + (right-x)/2
+            self._text(middle+16, 654, "Select Nova + GSPro (Both)  →", 9,
+                       T.GOLD if self.source == "both" else T.TEAL_TEXT)
             if not self.source_locked:
-                self._hit((x, 650, right, 680), "source", "cgp")
+                self._hit((x, 650, middle, 680), "source", "cgp")
+                self._hit((middle+8, 650, right, 680), "source", "both")
         if self.source_locked:
             self._text(x, 677, "Source is fixed by SPS_SHOT_SOURCE.", 9, T.GOLD)
         y = self.h - 116
@@ -331,8 +396,97 @@ class ConnectionWizard(SplashScreen):
         self._widgets.append(entry)
         self._fields[key] = var
 
+    def _draw_test_shot(self, x, right):
+        """A verified-shot stage, never a simulated or inferred device feed."""
+        from src.ui.concept_art import range_landscape
+        ready = self._status.get("state") == "ready" and self._status.get("shot_received", False)
+        titles = {"nova": "Nova", "both": "Nova + GSPro", "gspro": "GSPro",
+                  "pureplay": "PurePlay", "open_connect": "Another launch monitor",
+                  "cgp": "CGP Draft 2"}
+        mid = x + (right - x) * .65
+        bottom = self.h - 143
+        self._rounded(x, 146, mid - 14, bottom, 13, T.SURFACE, T.HAIRLINE)
+        self._rounded(mid, 146, right, bottom, 13, T.SURFACE, T.HAIRLINE)
+        self._text(x + 20, 165, titles[self.source], 20, T.TEXT, True)
+        self._text(x + 20, 204, "Selected source", 10, T.TEAL_TEXT)
+        self.canvas.create_line(x + 16, 235, mid - 30, 235, fill=T.HAIRLINE)
+        self.status_var = tk.StringVar(value="Waiting for accepted test shot")
+        status = tk.Label(self.win, textvariable=self.status_var, bg=T.SURFACE,
+                          fg=T.TEXT, font=(theme.ui_font(), 11, "bold"), anchor="w",
+                          wraplength=self._px(mid - x - 68), justify="left")
+        self.canvas.create_window(x + 22, 250, window=status,
+                                  width=mid - x - 58, height=49, anchor="nw")
+        self._widgets.append(status)
+        scene = (x + 14, 313, mid - 28, 512)
+        self._rounded(*scene, 10, T.PAGE_BG, T.HAIRLINE)
+        range_landscape(self.canvas, scene[0] + 2, scene[1] + 2, scene[2] - 2, scene[3] - 2)
+        self.canvas.create_text((scene[0] + scene[2]) / 2, 402,
+                                text="Test shot received" if ready else "—",
+                                fill=T.TEXT, font=(theme.ui_font(), 22, "bold"))
+        self.canvas.create_text((scene[0] + scene[2]) / 2, 444,
+                                text="Ready to start your session" if ready else "No accepted shot yet",
+                                fill=T.TEXT, font=(theme.ui_font(), 12))
+        shot = self._status.get("accepted_shot") if ready else None
+        allowed_sources = ("nova", "gspro") if self.source == "both" else (self.source,)
+        if not isinstance(shot, dict) or shot.get("_source") not in allowed_sources:
+            shot = None
+        source_title = titles[shot["_source"]] if shot is not None else titles[self.source]
+        self._text(x + 22, 523, f"Test shot · {source_title}", 9, T.TEAL_TEXT,
+                   width=mid - x - 64)
+        self._rounded(x + 14, 547, mid - 28, 630, 9, T.SECTION_BG, T.HAIRLINE)
+        stride = (mid - x - 42) / 4
+        for index, (label, key, spec) in enumerate((
+            ("Carry (yd)", "carry", ".1f"),
+            ("Ball speed (mph)", "ball_speed", ".1f"),
+            ("Launch (°)", "launch", ".1f"),
+            ("Spin (rpm)", "spin", ".0f"),
+        )):
+            left = x + 14 + index * stride
+            if index:
+                self.canvas.create_line(left, 558, left, 619, fill=T.HAIRLINE)
+            value = metric_value(shot, key)
+            provenance = metric_status(shot, key)
+            self._text(left + 12, 556, label, 9, T.TEXT_2)
+            self._text(left + 12, 576, "—" if value is None else format(value, spec),
+                       20, T.TEXT, True)
+            self._text(left + 12, 610, provenance.title(), 8,
+                       T.GOLD if provenance in ("ESTIMATED", "MODELLED", "DERIVED") else T.TEXT_2)
+        self._text(x + 22, 645,
+                   "Only values from this accepted shot are shown." if shot is not None else
+                   "No shot metrics available from this source." if ready else
+                   "A connection is not a verified shot. Hit a new test shot.",
+                   9, T.TEXT_2, width=mid - x - 64)
+        sx, sw = mid + 18, right - mid - 36
+        self._text(sx, 167, "Other sources", 17, T.TEXT, True)
+        others = [(source, title) for source, title in titles.items()
+                  if source not in (self.source, "both", "cgp")][:3]
+        for index, (source, title) in enumerate(others):
+            yy = 213 + index * 62
+            self._rounded(sx, yy, right - 18, yy + 48, 10, T.SURFACE, T.HAIRLINE)
+            self._text(sx + 12, yy + 15, title, 11, T.TEXT, True, width=sw - 24)
+            if not self.source_locked:
+                self._hit((sx, yy, right - 18, yy + 48), "source", source)
+        self.canvas.create_line(sx, 411, right - 18, 411, fill=T.HAIRLINE)
+        if self.source not in ("nova", "both"):
+            self._text(sx, 431, "Optional metric estimates", 11, T.TEXT, True, width=sw)
+            options = self._options[self.source]
+            state = "ON" if options.get("ogc_enrichment") else "OFF"
+            self._text(sx, 462, f"OpenGolfCoach · {state}", 10, T.TEAL_TEXT, width=sw)
+            state = "ON" if options.get("ogc_club_estimates") else "OFF"
+            self._text(sx, 490, f"Club estimates · {state}", 10, T.TEAL_TEXT, width=sw)
+            self._button(sx, 529, sw, "Review estimates", "metrics")
+        else:
+            self._text(sx, 436, "Direct source connection", 11, T.TEXT, True, width=sw)
+            self._text(sx, 473, "Only an accepted new shot unlocks Start Session.",
+                       10, T.TEXT_2, width=sw)
+        self._button(sx, bottom - 60, sw, "Stop connection", "stop")
+        self._draw_connect_footer(x, right)
+
     def _draw_connect(self, x, right):
-        self._text(x, 135, "Connect your shot source.", 21, T.TEXT, True)
+        if self._status.get("state") in ("listening", "connected", "ready"):
+            self._draw_test_shot(x, right)
+            return
+        self._text(x, 135, "Connect and verify a test shot", 21, T.TEXT, True)
         self._text(
             x, 180, "Connect your setup, then hit a test shot. All right here.", 10
         )
@@ -484,7 +638,7 @@ class ConnectionWizard(SplashScreen):
         if self.source != "open_connect":
             self._button(ix, bottom - 63, iw, action, "connect", True)
         sx = mid + 38
-        self._text(sx, 244, "Connection check", 11, T.TEXT, True)
+        self._text(sx, 244, "Live connection check", 13, T.TEXT, True)
         self.status_var = tk.StringVar(value="Not started")
         label = tk.Label(
             self.win,
@@ -544,6 +698,9 @@ class ConnectionWizard(SplashScreen):
             "RETRY CONNECTION" if retry else "STOP CONNECTION",
             "connect" if retry else "stop",
         )
+        self._draw_connect_footer(x, right)
+
+    def _draw_connect_footer(self, x, right):
         y = self.h - 101
         self._button(x, y, 98, "←  Back", "back")
         self._button(
@@ -654,6 +811,7 @@ class ConnectionWizard(SplashScreen):
                     self._remember_fields()
                     self._draw()
             previous_state = self._status.get("state")
+            previous_shot = self._status.get("accepted_shot")
             previous_ready = self._status.get("state") == "ready" and self._status.get(
                 "shot_received", False
             )
@@ -662,10 +820,8 @@ class ConnectionWizard(SplashScreen):
                 "shot_received", False
             )
             if self.page == "connect":
-                if ready != previous_ready or (
-                    self.source == "open_connect"
-                    and previous_state != self._status.get("state")
-                ):
+                if (ready != previous_ready or previous_state != self._status.get("state")
+                        or previous_shot != self._status.get("accepted_shot")):
                     self._remember_fields()
                     self._draw()
                 else:
@@ -934,7 +1090,7 @@ class ConnectionWizard(SplashScreen):
             dialog,
             text="APPLY & RECONNECT",
             command=apply,
-            bg=T.GOLD,
+            bg=T.TEAL_LINE,
             fg=T.PAGE_BG,
             relief="flat",
             padx=self._px(16),
@@ -1008,7 +1164,7 @@ class ConnectionWizard(SplashScreen):
             dialog,
             text="DONE",
             command=close,
-            bg=T.GOLD,
+            bg=T.TEAL_LINE,
             fg=T.PAGE_BG,
             relief="flat",
             padx=self._px(24),

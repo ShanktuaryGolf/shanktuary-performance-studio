@@ -1,7 +1,8 @@
 // Main Driving Range Application Entrypoint
 
+import { studioShell } from './studio_shell.js';
 import { initRenderer } from './renderer.js';
-import { setupEnvironment } from './environment.js';
+import { setupEnvironment, updateEnvironmentWind } from './environment.js';
 import { setupFoliage, updateFoliageWind } from './foliage.js';
 import { CameraController, CameraModes } from './camera.js';
 import { GolfPhysicsEngine } from './physics.js';
@@ -12,6 +13,7 @@ function start() {
     console.log('[+] Initializing 3D Driving Range...');
     
     const { scene, camera, renderer } = initRenderer();
+    studioShell?.setEngine(!!renderer);
     
     // Setup Environment & Foliage
     setupEnvironment(scene);
@@ -38,12 +40,14 @@ function start() {
         
         const delta = Math.min(clock.getDelta(), 0.1);
         
-        updateFoliageWind(clock.getElapsedTime());
+        const elapsed = clock.getElapsedTime();
+        updateFoliageWind(elapsed);
+        updateEnvironmentWind(elapsed);
         ball.update(delta);
         cameraController.setBallPosition(ball.mesh.position);
         cameraController.update(delta);
         
-        renderer.render(scene, camera);
+        if (renderer) renderer.render(scene, camera);
     }
     
     animate();

@@ -34,53 +34,21 @@ def quad(tmp_path, monkeypatch, request):
         root.destroy()
 
 
-def _text_item(canvas, wanted, contains=False):
-    for item in canvas.find_all():
-        if canvas.type(item) != "text":
-            continue
-        text = canvas.itemcget(item, "text")
-        if (wanted in text) if contains else (text == wanted):
-            return item, canvas.bbox(item), text
-    return None, None, None
-
-
 def test_impact_caption_and_credibility_badge_do_not_touch(quad):
+    from test_quad_impact_panel import _overlap, _tag_box
     _root, app = quad
-    c = app.canvas
-
-    _ci, cap_bb, _ct = _text_item(c, "IMPACT LOCATION")
-    assert cap_bb, "IMPACT LOCATION was not drawn"
-
-    chip = None
-    for item in c.find_all():
-        if c.type(item) != "text":
-            continue
-        text = c.itemcget(item, "text")
-        if text in ("UNAVAILABLE", "REPORTED"):
-            chip = (item, c.bbox(item), text)
-    assert chip, "no state chip was drawn"
-
-    gap = chip[1][0] - cap_bb[2]
-    assert gap >= 8, (
-        f"{chip[2]!r} starts {gap}px after IMPACT LOCATION — they collide"
-    )
+    assert not _overlap(_tag_box(app, "contact-heading"), _tag_box(app, "contact-credibility"))
 
 
 def test_the_credibility_badge_fits_inside_the_panel(quad):
-    """The current plain-text badge must stay within its quadrant bounds.
-
-    The old estimate chip background no longer exists. Keep the clipping
-    regression meaningful by testing the current badge's actual geometry.
-    """
+    from test_quad_impact_panel import _tag_box
     _root, app = quad
     c = app.canvas
-    expected = "REPORTED" if "face_impact" in app.current_shot else "UNAVAILABLE"
-    _item, badge, _label = _text_item(c, expected)
-    _item, caption, _label = _text_item(c, "IMPACT LOCATION")
-    assert badge and caption, "contact header or credibility state missing"
-    assert badge[0] >= caption[2] + 8
-    assert badge[2] <= c.winfo_width() - 8
-    assert abs(badge[1] - caption[1]) <= 2
+    badge = _tag_box(app, "contact-credibility")
+    assert badge[0] > 260
+    assert badge[2] <= c.winfo_width() - 16
+    expected = "REPORTED" if "face_impact" in app.current_shot else "No face-contact measurement"
+    assert c.itemcget(c.find_withtag("contact-credibility")[0], "text") == expected
 
 
 def _polyline_intersects_rect(coords, rect, stroke_width=0):
@@ -120,19 +88,13 @@ def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
     c = app.canvas
     order = list(c.find_all())
 
-    traj = None
-    for item in order:
-        if c.type(item) != "line":
-            continue
-        coords = c.coords(item)
-        # The arc is a long multi-point gold polyline in the lower half.
-        if len(coords) >= 20 and c.itemcget(item, "fill").upper() in (
-                "#E3BC70", "#D4A24F"):
-            ys = coords[1::2]
-            if min(ys) > 600:
-                traj = item
-                break
-    assert traj is not None, "fixture must render the trajectory arc"
+    # Club no longer includes a ball-flight panel; it belongs to Shot.
+    app.set_mode(9)
+    c = app.canvas
+    order = list(c.find_all())
+    trajectories = c.find_withtag("flight-trajectory")
+    assert len(trajectories) == 1, "fixture must render a real derived trajectory"
+    traj = trajectories[0]
 
     tb = c.bbox(traj)
     trajectory = c.coords(traj)
@@ -154,105 +116,37 @@ def test_q2_mask_does_not_erase_the_trajectory_arc(quad):
 
 
 def test_selected_card_is_tall_enough_for_its_last_row(quad):
-    """Detail rows must fit INSIDE the card, not run off its bottom edge.
-
-    The earlier padding fix only checked horizontal margins and passed while
-    the real problem was vertical: the selected card was 120px but its three
-    detail rows end at y+124, so "Time" was clipped along the bottom border.
-    """
     _root, app = quad
+    app.set_mode(9)  # Recent Shots now lives only in Shot, not a second global rail.
     c = app.canvas
-
-    cards = getattr(app, "design_shot_card_rects", [])
-    assert cards, "fixture must render its shot card"
-    sel_idx = app.selected_shot_index
-    card = next((r for r in cards if r[4] == sel_idx), None)
-    assert card is not None, "selected fixture card must be on screen"
-
-    # The visible card body: the widest filled rect spanning this card.
-    body_bottom = None
+    card = next(r for r in app.design_shot_card_rects if r[4] == app.selected_shot_index)
+    items = []
     for item in c.find_all():
-        if c.type(item) != "rectangle":
-            continue
-        co = c.coords(item)
-        if len(co) != 4:
-            continue
-        x1, y1, x2, y2 = co
-        if x1 < 320 and (x2 - x1) > 150 and y1 >= card[1] - 6 and y2 <= card[3] + 8:
-            body_bottom = max(body_bottom or 0, y2)
-    assert body_bottom is not None, "selected card body not found"
-
-    # Every label/value belonging to this card must end above that edge.
-    for item in c.find_all():
-        if c.type(item) != "text":
-            continue
-        text = c.itemcget(item, "text")
-        if text not in ("Time", "Shape", "Ball Speed") and not (
-                text.endswith(" PM") or text.endswith(" AM")):
-            continue
-        bb = c.bbox(item)
-        if not bb or bb[0] > 320:
-            continue
-        # Only rows inside this card's vertical span.
-        if not (card[1] <= bb[1] < body_bottom):
-            continue
-        assert bb[3] <= body_bottom, (
-            f"{text!r} bottom {bb[3]} runs {bb[3] - body_bottom}px past the "
-            f"card edge {body_bottom} — the row is clipped"
-        )
+        if c.type(item) != "text": continue
+        b = c.bbox(item)
+        if card[0] <= (b[0]+b[2])/2 <= card[2] and card[1] <= (b[1]+b[3])/2 <= card[3]:
+            items.append(item)
+            assert b[1] >= card[1] and b[3] <= card[3], c.itemcget(item, "text")
+    assert items, "selected card has no text"
 
 
-def test_both_card_layers_agree_on_the_selected_height(quad):
-    """v4 and v8 both paint this card; a height mismatch shows as a seam."""
-    import inspect
-
-    import shell_redesign_v4 as v4
-    import shell_redesign_v8 as v8
-
-    def selected_height(module):
-        src = inspect.getsource(module.paint_sidebar)
-        for line in src.splitlines():
-            if "if selected else 52" in line:
-                return int(line.split("=")[1].split("if")[0].strip())
-        return None
-
-    h4 = selected_height(v4)
-    h8 = selected_height(v8)
-    assert h4 == h8, (
-        f"selected card height differs: v4={h4} v8={h8} — the shorter body "
-        f"shows as a band under the taller layer's content"
-    )
+def test_only_one_recent_card_per_shot_is_registered(quad):
+    _root, app = quad
+    app.set_mode(9)
+    indices = [r[4] for r in app.design_shot_card_rects]
+    assert indices and len(indices) == len(set(indices))
 
 
 def test_shot_card_values_clear_the_card_edge(quad):
-    """Card values need real padding, not 4px of breathing room."""
     _root, app = quad
+    app.set_mode(9)
     c = app.canvas
-
-    cards = getattr(app, "design_shot_card_rects", [])
-    assert cards, "fixture must render its shot card"
-    card_right = cards[0][2]
-
-    checked = 0
+    card = next(r for r in app.design_shot_card_rects if r[4] == app.selected_shot_index)
+    values = []
     for item in c.find_all():
-        if c.type(item) != "text":
-            continue
-        text = c.itemcget(item, "text")
-        if not (text.endswith(" PM") or text.endswith(" AM")):
-            continue
-        bb = c.bbox(item)
-        if not bb or bb[0] > 320:
-            continue
-        # Only the selected card's right-aligned value column.
-        if bb[2] < card_right - 60:
-            continue
-        checked += 1
-        margin = card_right - bb[2]
-        # card_right is the OUTER hit rect; the visible card body is inset a
-        # few px inside it, so this margin is a slight over-estimate of what
-        # the eye sees. 19px looked crowded against the border; >=22 reads
-        # as deliberate padding.
-        assert margin >= 22, (
-            f"{text!r} sits {margin}px from the card edge — reads as clipped"
-        )
-    assert checked, "fixture must render its right-aligned time value"
+        if c.type(item) != "text" or not c.itemcget(item,"text").endswith("yd"): continue
+        b = c.bbox(item)
+        if card[0] <= b[0] and card[1] <= (b[1]+b[3])/2 <= card[3] and b[2] <= card[2]:
+            values.append(b)
+            assert b[2] <= card[2] - 24, "carry text collides with selected-shot delete action"
+    assert values, "selected card must render its carry value"
