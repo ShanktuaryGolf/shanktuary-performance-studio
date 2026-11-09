@@ -1454,10 +1454,12 @@ class PressureManager:
                 stamp = state["last_sample_timestamp"]
                 fresh = bool(board and board.is_open and stamp is not None
                              and 0 <= now - stamp <= self.WIZARD_SAMPLE_MAX_AGE)
-                if detail.get("calibration_status") == "unavailable":
+                recovery_blocked = bool(detail.get("recovery_blocked"))
+                if detail.get("calibration_status") == "unavailable" or recovery_blocked:
                     fresh = False
                 elapsed = now - (stamp if stamp is not None else state["opened_at"])
-                if not fresh and elapsed >= self.WIZARD_RETRY_DELAY:
+                if (not fresh and not recovery_blocked
+                        and elapsed >= self.WIZARD_RETRY_DELAY):
                     if state["retries"] < self.WIZARD_MAX_RETRIES:
                         state["retries"] += 1
                         if board:
@@ -1506,6 +1508,14 @@ class PressureManager:
             missing = [key.upper() for key, detail in diagnostics.items() if not detail["fresh"]]
             if missing:
                 labels = " / ".join(missing)
+                invalid = [key for key in missing
+                           if diagnostics[key.lower()].get("recovery_blocked")]
+                if invalid:
+                    wiz.health_state = "error"
+                    wiz.health_message = (
+                        f"Board {' / '.join(invalid)}: invalid zero sensor data. "
+                        "Reading paused. Inspect packet diagnostics before restarting setup.")
+                    return
                 failed = any(diagnostics[key.lower()]["retry_exhausted"] for key in missing)
                 uncalibrated = any(diagnostics[key.lower()].get("calibration_status") == "unavailable"
                                    for key in missing)

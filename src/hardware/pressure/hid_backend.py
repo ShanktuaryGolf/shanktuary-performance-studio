@@ -12,6 +12,8 @@ This replicates the approach used by WiimoteLib / WiiBalanceWalker.
 import struct
 import sys
 import time
+from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass
 
 try:
@@ -85,6 +87,7 @@ BB_EXT_TYPE = bytes([0x00, 0x00, 0xA4, 0x20, 0x04, 0x02])
 
 CALIBRATION_TIMEOUT = 2.0
 CALIBRATION_MAX_READS = 256
+INVALID_ZERO_PAYLOAD = "Invalid sensor payload: all four raw ADC values are zero."
 
 
 @dataclass
@@ -166,6 +169,7 @@ class HidBackend(BoardBackend):
         self._last_sample_timestamp: float | None = None
         self._raw_cells: dict[str, int] | None = None
         self._last_error: str | None = None
+        self._reset_packet_diagnostics()
 
     def open(self) -> None:
         if self.is_open:
@@ -175,6 +179,7 @@ class HidBackend(BoardBackend):
         self._last_sample_timestamp = None
         self._raw_cells = None
         self._last_error = None
+        self._reset_packet_diagnostics()
         try:
             self._open_device()
         except Exception as exc:
@@ -241,20 +246,20 @@ class HidBackend(BoardBackend):
         self._device.set_nonblocking(0)
 
         # 1. Initialize extension controller
-        self._device.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xF0, 0x01, 0x55] + [0x00] * 15))
+        self._write(bytes([0x16, 0x04, 0xA4, 0x00, 0xF0, 0x01, 0x55] + [0x00] * 15))
         time.sleep(0.05)
-        self._device.write(bytes([0x16, 0x04, 0xA4, 0x00, 0xFB, 0x01, 0x00] + [0x00] * 15))
+        self._write(bytes([0x16, 0x04, 0xA4, 0x00, 0xFB, 0x01, 0x00] + [0x00] * 15))
         time.sleep(0.05)
 
         # 2. Read factory calibration data from 0xA40024 (24 bytes)
         self._collect_calibration()
 
         # 3. Turn on LED 1 (solid blue)
-        self._device.write(bytes([0x11, 0x10]))
+        self._write(bytes([0x11, 0x10]))
         time.sleep(0.05)
 
         # 4. Set reporting mode: continuous, buttons + extension
-        self._device.write(bytes([0x12, 0x04, 0x32]))
+        self._write(bytes([0x12, 0x04, 0x32]))
         time.sleep(0.05)
 
         # Switch to non-blocking for normal streaming operation
@@ -263,13 +268,66 @@ class HidBackend(BoardBackend):
               f"(calibration={'factory' if self._calibration else 'unavailable'}); "
               "awaiting sensor samples")
 
+    def _reset_packet_diagnostics(self) -> None:
+        self._packet_count = 0
+        self._report_counts: dict[int, int] = {}
+        self._recent_packets: deque = deque(maxlen=8)
+        self._last_packets_by_report: dict[int, dict] = {}
+        self._recent_writes: deque = deque(maxlen=8)
+        self._first_writes: list[dict] = []
+        self._first_acks: list[dict] = []
+        self._recent_acks: deque = deque(maxlen=8)
+        self._last_status: dict | None = None
+        self._zero_extension_count = 0
+        self._zero_extension_streak = 0
+        self._last_nonzero_extension_timestamp: float | None = None
+
+    def _write(self, data):
+        """Record the result of an existing write, without retries or new I/O."""
+        entry = dict(timestamp=time.monotonic(), hex=bytes(data[:64]).hex(),
+                     requested_length=len(data), return_count=None, error=None)
+        try:
+            result = self._device.write(data)
+            entry["return_count"] = result
+            return result
+        except Exception as exc:
+            entry["error"] = str(exc)[:512]
+            raise
+        finally:
+            self._recent_writes.append(entry)
+            if len(self._first_writes) < 8:
+                self._first_writes.append(entry)
+
     def _observe_packet(self, data) -> float:
         timestamp = time.monotonic()
         self._last_packet_timestamp = timestamp
-        if data[0] in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19) and len(data) >= 11:
+        report_id = data[0]
+        entry = dict(timestamp=timestamp, report_id=report_id, length=len(data),
+                     hex=bytes(data[:64]).hex())
+        self._packet_count += 1
+        self._report_counts[report_id] = self._report_counts.get(report_id, 0) + 1
+        self._recent_packets.append(entry)
+        self._last_packets_by_report[report_id] = entry
+        if report_id == RPT_IN_ACK and len(data) >= 5:
+            # ACKs name only the output command ID, not its memory address.
+            ack = dict(timestamp=timestamp, report_id=data[3], error=data[4])
+            self._recent_acks.append(ack)
+            if len(self._first_acks) < 8:
+                self._first_acks.append(ack)
+        if report_id == RPT_IN_STATUS and len(data) >= 7:
+            self._last_status = dict(timestamp=timestamp, flags=data[3],
+                                     extension_present=bool(data[3] & 0x02),
+                                     battery=data[6])
+        if report_id in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19) and len(data) >= 11:
             tr, br, tl, bl = struct.unpack(">HHHH", bytes(data[3:11]))
             self._raw_cells = dict(top_left=tl, top_right=tr,
                                    bottom_left=bl, bottom_right=br)
+            if not any((tr, br, tl, bl)):
+                self._zero_extension_count += 1
+                self._zero_extension_streak += 1
+            else:
+                self._zero_extension_streak = 0
+                self._last_nonzero_extension_timestamp = timestamp
         return timestamp
 
     def _collect_calibration(self) -> None:
@@ -282,7 +340,7 @@ class HidBackend(BoardBackend):
         start = EXT_CALIB_ADDR & 0xFFFF
         deadline = time.monotonic() + CALIBRATION_TIMEOUT
         self._last_error = "Factory calibration unavailable: incomplete response"
-        self._device.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
+        self._write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
         for _ in range(CALIBRATION_MAX_READS):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -324,12 +382,32 @@ class HidBackend(BoardBackend):
         is_open describes the usable backend, not quarantined OS handles.
         Timestamps are monotonic and remain None until actually observed.
         """
+        sensor_status = (
+            "waiting" if self._raw_cells is None else
+            "invalid_zero_payload" if not any(self._raw_cells.values()) else
+            "valid" if self._calibration else "uncalibrated"
+        )
         return {
+            "sensor_data_status": sensor_status,
+            "recovery_blocked": sensor_status == "invalid_zero_payload",
+            "packet_count": self._packet_count,
+            "report_counts": dict(self._report_counts),
+            "last_packet": deepcopy(self._recent_packets[-1]) if self._recent_packets else None,
+            "recent_packets": deepcopy(list(self._recent_packets)),
+            "last_packets_by_report": deepcopy(self._last_packets_by_report),
+            "recent_writes": deepcopy(list(self._recent_writes)),
+            "first_writes": deepcopy(self._first_writes),
+            "first_acks": deepcopy(self._first_acks),
+            "recent_acks": deepcopy(list(self._recent_acks)),
+            "last_status": deepcopy(self._last_status),
+            "zero_extension_count": self._zero_extension_count,
+            "zero_extension_streak": self._zero_extension_streak,
+            "last_nonzero_extension_timestamp": self._last_nonzero_extension_timestamp,
             "calibration_status": "factory" if self._calibration else "unavailable",
             "last_packet_timestamp": self._last_packet_timestamp,
             "last_sample_timestamp": self._last_sample_timestamp,
             "raw_cells": dict(self._raw_cells) if self._raw_cells is not None else None,
-            "last_error": self._last_error,
+            "last_error": INVALID_ZERO_PAYLOAD if sensor_status == "invalid_zero_payload" else self._last_error,
             "is_open": self.is_open,
         }
 
@@ -337,8 +415,8 @@ class HidBackend(BoardBackend):
         if self._device is None:
             return
         try:
-            self._device.write(bytes([0x11, 0x00]))
-            self._device.write(bytes([0x12, 0x00, 0x30]))
+            self._write(bytes([0x11, 0x00]))
+            self._write(bytes([0x12, 0x00, 0x30]))
         except Exception:
             pass
         self.close()
@@ -395,7 +473,7 @@ class HidBackend(BoardBackend):
             # Re-enable continuous reporting if status report received
             if report_id == RPT_IN_STATUS:
                 try:
-                    self._device.write(bytes([0x12, 0x04, 0x32]))
+                    self._write(bytes([0x12, 0x04, 0x32]))
                 except Exception as exc:
                     self._last_error = f"HID reporting request failed: {exc}"
                     self.close()
@@ -411,7 +489,7 @@ class HidBackend(BoardBackend):
             latest = data
             latest_timestamp = timestamp
 
-        if latest is None or self._calibration is None:
+        if latest is None or self._calibration is None or not any(latest[3:11]):
             return None
 
         ext = latest[3:11]

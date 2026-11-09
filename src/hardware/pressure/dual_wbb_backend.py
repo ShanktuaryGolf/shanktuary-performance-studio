@@ -83,7 +83,8 @@ class DualWbbBackend(BoardBackend):
         rr = self._right.read()
         # A child can detect a disconnection during read(). Discard even a
         # final queued sample rather than presenting a disconnected pair.
-        if not self.is_open:
+        if (not self.is_open or self._invalid_sensor_data(self._left)
+                or self._invalid_sensor_data(self._right)):
             self._clear_readings()
             return None
         if lr is not None:
@@ -129,7 +130,8 @@ class DualWbbBackend(BoardBackend):
 
     @property
     def last_dual_reading(self) -> DualPlateReading | None:
-        if not self.is_open:
+        if (not self.is_open or self._invalid_sensor_data(self._left)
+                or self._invalid_sensor_data(self._right)):
             self._clear_readings()
         elif self._last_dual is not None:
             now = time.monotonic()
@@ -137,6 +139,13 @@ class DualWbbBackend(BoardBackend):
                     and self._is_fresh(self._last_dual.right, now)):
                 self._last_dual = None
         return self._last_dual
+
+    @staticmethod
+    def _invalid_sensor_data(backend) -> bool:
+        method = getattr(type(backend), "get_diagnostics", None)
+        if method is None:
+            return False
+        return bool(method(backend).get("recovery_blocked"))
 
     def _is_fresh(self, reading: SensorReading | None, now: float) -> bool:
         return (reading is not None
@@ -150,12 +159,14 @@ class DualWbbBackend(BoardBackend):
             ("left", self._left, self._left_reading),
             ("right", self._right, self._right_reading),
         ):
-            fresh = backend.is_open and self._is_fresh(reading, now)
+            invalid = self._invalid_sensor_data(backend)
+            fresh = backend.is_open and not invalid and self._is_fresh(reading, now)
             sides[name] = {
                 "is_open": backend.is_open,
                 "timestamp": reading.timestamp if reading is not None else None,
                 "fresh": fresh,
                 "error": ("disconnected" if not backend.is_open else
+                          "invalid_sensor_data" if invalid else
                           "waiting_for_sample" if reading is None else
                           "stale_sample" if not fresh else None),
             }

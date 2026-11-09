@@ -336,3 +336,66 @@ def test_reconnect_rechecks_wizard_after_reacquiring_lock(manager, monkeypatch):
     assert rebuilds == []
     assert manager.assignment_wizard.phase == "waiting_left"
     assert a.closes == b.closes == 0
+
+
+def test_invalid_zero_payload_is_not_healthy_or_blindly_reopened(manager):
+    a, b = start(manager)
+    # A distinct class models the actual HID diagnostics without changing the
+    # fixture's ordinary healthy/empty stream behavior.
+    class InvalidBoard(Board):
+        blocked = True
+        def get_diagnostics(self):
+            detail = super().get_diagnostics()
+            detail.update(sensor_data_status="invalid_zero_payload" if self.blocked else "valid",
+                          recovery_blocked=self.blocked,
+                          last_error="Invalid sensor payload: all four raw ADC values are zero."
+                          if self.blocked else None)
+            return detail
+    invalid = InvalidBoard()
+    manager._wiz_backend_a = invalid
+    a.close()
+    for elapsed in (0, 4, 10, 30):
+        manager.clock[0] = 100 + elapsed
+        b.sample(0, manager.clock[0])
+        manager._poll_assignment_wizard()
+    status = manager.assignment_wizard.get_status()
+    assert status["phase"] == "waiting_left"
+    assert status["health_state"] == "error"
+    assert "invalid zero sensor data" in status["message"]
+    assert "Inspect packet diagnostics" in status["message"]
+    assert not status["board_a_weight_valid"]
+    assert status["boards"]["a"]["retries"] == 0
+    assert len(manager.opened) == 2 and invalid.closes == 0
+    assert status["boards"]["a"]["last_sample_timestamp"] is None
+    invalid.blocked = False
+    invalid.sample(70, 130)
+    b.sample(0, 130)
+    manager._poll_assignment_wizard()
+    assert manager.assignment_wizard.phase == "waiting_right"
+    assert manager.assignment_wizard.health_state == "ready"
+
+
+def test_invalid_data_overrides_recent_previously_valid_weight(manager):
+    a, b = start(manager)
+    class InvalidBoard(Board):
+        blocked = False
+        def get_diagnostics(self):
+            detail = super().get_diagnostics()
+            detail["recovery_blocked"] = self.blocked
+            return detail
+    invalid = InvalidBoard()
+    manager._wiz_backend_b = invalid
+    b.close()
+    a.sample(70, 100)
+    invalid.sample(0, 100)
+    manager._poll_assignment_wizard()
+    assert manager.assignment_wizard.phase == "waiting_right"
+    invalid.blocked = True
+    manager.clock[0] = 100.1
+    a.sample(35, 100.1)
+    manager._poll_assignment_wizard()
+    status = manager.assignment_wizard.get_status()
+    assert status["phase"] == "waiting_right"
+    assert not status["board_b_weight_valid"]
+    assert status["boards"]["b"]["last_sample_timestamp"] == 100
+    assert manager.saved == []

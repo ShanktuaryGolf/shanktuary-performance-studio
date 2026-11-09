@@ -136,12 +136,16 @@ def test_silent_open_is_not_streaming_and_deadline_bounded(setup, capsys):
     backend.open()
     assert clock.now - start < hb.CALIBRATION_TIMEOUT + 0.3
     assert device.reads <= hb.CALIBRATION_MAX_READS
-    assert backend.get_diagnostics() == {
+    diagnostics = backend.get_diagnostics()
+    expected = {
         'calibration_status': 'unavailable', 'last_packet_timestamp': None,
         'last_sample_timestamp': None, 'raw_cells': None,
         'last_error': 'Factory calibration unavailable: incomplete response',
         'is_open': True,
     }
+    assert {key: diagnostics[key] for key in expected} == expected
+    assert diagnostics['sensor_data_status'] == 'waiting'
+    assert diagnostics['packet_count'] == 0
     assert 'streaming' not in capsys.readouterr().out
 
 

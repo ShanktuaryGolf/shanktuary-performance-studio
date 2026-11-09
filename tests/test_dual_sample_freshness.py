@@ -180,3 +180,41 @@ def test_reopen_after_child_disconnect_requires_new_pair(pair):
     left.samples.append(sample(100))
     assert dual.read() is None
     assert dual.last_dual_reading is None
+
+
+def test_invalid_sensor_payload_immediately_invalidates_cached_pair(pair, monkeypatch):
+    dual, left, right, clock = pair
+    monkeypatch.setattr(FakeBackend, "get_diagnostics",
+                        lambda self: {"recovery_blocked": getattr(self, "invalid", False)},
+                        raising=False)
+    left.samples.append(sample(100))
+    right.samples.append(sample(100))
+    assert dual.read() is not None
+    clock.return_value = 100.1
+    left.invalid = True
+    right.samples.append(sample(100.1))
+    assert dual.read() is None
+    assert dual.last_dual_reading is None
+    assert dual.get_diagnostics()["left"]["error"] == "invalid_sensor_data"
+    assert not dual.get_diagnostics()["ready"]
+    assert left.is_open and right.is_open  # no reconnect or close side effect
+    left.invalid = False
+    left.samples.append(sample(100.2))
+    clock.return_value = 100.2
+    assert dual.read() is None  # discarded cached peer cannot be resurrected
+    right.samples.append(sample(100.3))
+    clock.return_value = 100.3
+    assert dual.read() is not None
+
+
+def test_invalid_payload_property_does_not_expose_previous_healthy_pair(pair, monkeypatch):
+    dual, left, right, _ = pair
+    monkeypatch.setattr(FakeBackend, "get_diagnostics",
+                        lambda self: {"recovery_blocked": getattr(self, "invalid", False)},
+                        raising=False)
+    left.samples.append(sample(100))
+    right.samples.append(sample(100))
+    dual.read()
+    left.invalid = True
+    assert dual.last_dual_reading is None
+    assert left.read_count == right.read_count == 1
