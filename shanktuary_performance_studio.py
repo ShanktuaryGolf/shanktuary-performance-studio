@@ -9548,7 +9548,10 @@ class ShanktuaryApp:
             sub = (f"Stance width {float(width_mm):.0f} mm — you can step off."
                    if width_mm else "You can step off.")
         elif step == "assign":
-            if phase == "waiting_left":
+            if st.get("health_message"):
+                headline = "Board readings need attention"
+                sub = st["health_message"]
+            elif phase == "waiting_left":
                 headline = "Step on your LEFT board"
                 sub = "Put your LEFT foot on one board and leave it there"
             elif phase == "waiting_right":
@@ -9579,6 +9582,17 @@ class ShanktuaryApp:
 
         if flow_err:
             sub = flow_err
+
+        # Recovery diagnostics can span several lines. Measure the wrapped
+        # subtitle before laying out the plates so it never clips or overlaps.
+        sub_width = max(200, w - int(100 * s))
+        measure = self.canvas.create_text(-4000, -4000, text=sub,
+                                          font=(theme.ui_font(), f_sub), anchor="n",
+                                          width=sub_width, justify="center")
+        subtitle_box = self.canvas.bbox(measure)
+        self.canvas.delete(measure)
+        if subtitle_box:
+            h_sub = max(h_sub, subtitle_box[3] - subtitle_box[1])
 
         head_col = theme.ACCENT if flow_done else theme.ACCENT_TEXT
         if flow_err:
@@ -9660,7 +9674,8 @@ class ShanktuaryApp:
         y += h_head + gap_head
         self.canvas.create_text(cx, y, text=sub,
                                 fill=theme.WARN if flow_err else theme.TEXT_2,
-                                font=(theme.ui_font(), f_sub), anchor="n")
+                                font=(theme.ui_font(), f_sub), anchor="n",
+                                width=sub_width, justify="center")
         y += h_sub + gap_plates
 
         top = y
@@ -9675,7 +9690,9 @@ class ShanktuaryApp:
             for i, (label, kg) in enumerate((("BOARD A", w_a), ("BOARD B", w_b))):
                 px1 = cx - plate_w - gap // 2 + i * (plate_w + gap)
                 px2 = px1 + plate_w
-                loaded = kg > thresh
+                weight_valid = st.get("board_a_weight_valid" if i == 0
+                                      else "board_b_weight_valid", True)
+                loaded = weight_valid and kg > thresh
 
                 # Highlight whichever plate is carrying weight, so the user
                 # gets immediate feedback that this specific board is live.
@@ -9696,7 +9713,7 @@ class ShanktuaryApp:
                                         font=(theme.ui_font(), f_label), anchor="n")
                 ty += h_label + int(8 * s)
                 self.canvas.create_text(pcx, ty,
-                                        text=f"{kg:.0f}",
+                                        text=f"{kg:.0f}" if weight_valid else "—",
                                         fill=theme.TEXT if loaded else theme.TEXT_3,
                                         font=(theme.ui_font(), f_kg, "bold"),
                                         anchor="n")

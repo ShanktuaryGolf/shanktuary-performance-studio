@@ -116,6 +116,9 @@ class BoardAssignmentWizard:
         self.board_a_weight = 0.0
         self.board_b_weight = 0.0
         self.message = ""
+        self.health_state = "idle"
+        self.health_message = ""
+        self.board_diagnostics = {}
 
     def start(self, board_a: Any | None = None, board_b: Any | None = None):
         if board_a is not None:
@@ -128,6 +131,9 @@ class BoardAssignmentWizard:
         self.board_a_weight = 0.0
         self.board_b_weight = 0.0
         self.message = "Step on the board under your LEFT foot (>5kg)"
+        self.health_state = "ready"
+        self.health_message = ""
+        self.board_diagnostics = {}
 
     def reset(self):
         self.phase = AssignmentPhase.IDLE
@@ -136,6 +142,9 @@ class BoardAssignmentWizard:
         self.board_a_weight = 0.0
         self.board_b_weight = 0.0
         self.message = ""
+        self.health_state = "idle"
+        self.health_message = ""
+        self.board_diagnostics = {}
 
     def update(self, weight_a: float, weight_b: float) -> tuple[AssignmentPhase, str]:
         self.board_a_weight = max(0.0, weight_a)
@@ -165,7 +174,12 @@ class BoardAssignmentWizard:
     def get_status(self) -> dict:
         return {
             "phase": self.phase.value if hasattr(self.phase, "value") else str(self.phase),
-            "message": self.message,
+            "message": self.health_message or self.message,
+            "health_state": self.health_state,
+            "health_message": self.health_message,
+            "boards": {key: dict(value) for key, value in self.board_diagnostics.items()},
+            "board_a_weight_valid": self.board_diagnostics.get("a", {}).get("fresh", True),
+            "board_b_weight_valid": self.board_diagnostics.get("b", {}).get("fresh", True),
             "board_a_weight": round(self.board_a_weight, 1),
             "board_b_weight": round(self.board_b_weight, 1),
             "is_complete": self.phase == AssignmentPhase.COMPLETE,

@@ -20,9 +20,12 @@ tk = pytest.importorskip("tkinter")
 class _FakeWiz:
     threshold = 5.0
 
-    def __init__(self, phase, wa, wb):
+    def __init__(self, phase, wa, wb, health_message=None):
         self._st = {"phase": phase, "board_a_weight": wa,
                     "board_b_weight": wb, "message": ""}
+        if health_message:
+            self._st.update(health_message=health_message,
+                            board_a_weight_valid=False, board_b_weight_valid=False)
         self.board_a, self.board_b = "A", "B"
         self.left_board = "A" if phase == "complete" else None
         self.right_board = "B" if phase == "complete" else None
@@ -66,14 +69,19 @@ def restore_pressure_manager():
         obs_server.pressure_manager = original
 
 
-@pytest.mark.parametrize("phase,wa,wb", [
-    ("waiting_left", 0.0, 0.0),
-    ("waiting_right", 34.0, 0.0),
-    ("complete", 10.0, 2.0),
+@pytest.mark.parametrize("phase,wa,wb,health_message", [
+    ("waiting_left", 0.0, 0.0, None),
+    ("waiting_right", 34.0, 0.0, None),
+    ("complete", 10.0, 2.0, None),
+    ("waiting_left", 0.0, 0.0,
+     "Board A / B: factory calibration unavailable. Step off, check power and "
+     "close other board apps, then cancel and retry setup."),
+    ("waiting_left", 0.0, 0.0,
+     "Board A / B: no live readings. Keep boards unloaded while the connection retries."),
 ])
 @pytest.mark.parametrize("size", [(1900, 970), (1280, 720), (1100, 720)])
 def test_no_text_overlaps_or_clips(tk_root, restore_pressure_manager,
-                                   phase, wa, wb, size):
+                                   phase, wa, wb, health_message, size):
     import shanktuary_performance_studio as studio
 
     obs_server = restore_pressure_manager
@@ -84,7 +92,7 @@ def test_no_text_overlaps_or_clips(tk_root, restore_pressure_manager,
     app.canvas = canvas
     app.root = tk_root
     obs_server.pressure_manager = type(
-        "PM", (), {"assignment_wizard": _FakeWiz(phase, wa, wb)})()
+        "PM", (), {"assignment_wizard": _FakeWiz(phase, wa, wb, health_message)})()
 
     canvas.delete("all")
     studio.ShanktuaryApp.draw_board_assign_modal(app, w, h)
@@ -99,6 +107,8 @@ def test_no_text_overlaps_or_clips(tk_root, restore_pressure_manager,
             texts.append((canvas.itemcget(item, "text"), bb))
 
     assert texts, "modal painted no text at all"
+    if health_message:
+        assert any(text == "—" for text, _ in texts), "unavailable weight shown as zero"
 
     for i in range(len(texts)):
         for j in range(i + 1, len(texts)):

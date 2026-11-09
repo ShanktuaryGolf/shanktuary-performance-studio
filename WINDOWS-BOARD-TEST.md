@@ -3,8 +3,9 @@ SHANKTUARY WINDOWS WII BOARD TEST - SOURCE WORKFLOW, NOT A RELEASE
 This is an isolated source test run from your git checkout, not an installer.
 Physical Windows hardware has NOT been tested here. Automated Linux tests
 and Windows wheel availability checks cannot establish Bluetooth reliability.
-ACCURACY WARNING: factory-calibration failure uses adaptive scaling, which is
-NOT verified kg/force accuracy. Check console calibrated=yes/adaptive status.
+Factory calibration is required for weight readings. Failed or incomplete
+calibration never falls back to guessed kilograms. An open HID handle or a
+paired device alone does not prove that either board is sending live samples.
 
 REQUIREMENTS
 Windows x64, Python 3.12 x64 from python.org with Tcl/Tk, internet for the
@@ -62,12 +63,25 @@ Open-FP remains an experimental source in the underlying app UI; this bundle's
 startup and instructions target Wii boards. Do not select simulator endpoints
 and call those readings hardware evidence.
 
-A live stream is not proof of calibrated accuracy. The current HID backend can
-fall back to adaptive scaling if factory calibration cannot be read; check the
-console for calibrated=yes versus calibrated=adaptive. Treat adaptive readings
-as unverified. Two-board fallback and Windows Bluetooth compatibility still
-need actual laptop testing. Launch-monitor synchronized shot capture is outside
-this board-only package's scope.
+A live stream is not proof of calibrated accuracy. The HID backend validates
+all factory-calibration bytes before reporting kilograms. If calibration is
+unavailable, raw packets are retained for diagnostics but are not labeled kg.
+During assignment, missing/stale samples and calibration failures are shown
+explicitly. The app retries each reader at most twice, then asks you to step
+off, check board power, close other board apps, and cancel/retry setup. No
+automatic pairing or tare is performed. A dash means weight is unavailable,
+whereas 0 kg means a recent calibrated zero-load sample was received.
+
+For troubleshooting, the test's /api/pressure/status endpoint includes
+assignment_wizard.boards.a/b: device_id, calibration_status, raw_cells,
+last_packet_timestamp, last_sample_timestamp, sample_age_seconds,
+packet_age_seconds, fresh, retries, retry_exhausted, and last_error. Timestamps
+use the monotonic sensor clock, not wall-clock dates. Normal-stream diagnostics
+are exposed under hardware_diagnostics. Report these fields and the console
+error rather than repeating loading tests when no live readings are available.
+Two-board behavior and Windows Bluetooth compatibility still need actual laptop
+testing. Launch-monitor synchronized shot capture is outside this board-only
+package's scope.
 
 ISOLATION
 All app paths are redirected before importing the app. A new loopback-only

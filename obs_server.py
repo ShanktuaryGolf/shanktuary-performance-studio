@@ -22,6 +22,7 @@ import base64
 import copy
 import http.server
 import json
+import math
 import os
 import socket
 import socketserver
@@ -640,6 +641,9 @@ class PressureManager:
     _env_source_override = False
     _saved_source = "wbb"
     _saved_openfp_url = None
+    WIZARD_SAMPLE_MAX_AGE = 1.5
+    WIZARD_RETRY_DELAY = 3.0
+    WIZARD_MAX_RETRIES = 2
 
     def __init__(self):
         self.backend = None
@@ -744,8 +748,6 @@ class PressureManager:
                 with self.lock:
                     backend = self.backend
                     wiz = self.assignment_wizard
-                    wiz_a = self._wiz_backend_a
-                    wiz_b = self._wiz_backend_b
 
                 # 0. Hardware auto-reconnect if not in simulator mode, no backend open, and wizard not active
                 is_wiz_active = bool(wiz and wiz.phase in ("waiting_left", "waiting_right"))
@@ -762,41 +764,28 @@ class PressureManager:
                     if now - self._last_reconnect_attempt >= 2.0:
                         self._last_reconnect_attempt = now
                         with self.lock:
-                            try:
-                                # Dual-aware: a bare _create_hardware_backend()
-                                # here would silently demote a configured dual
-                                # setup to one board after any dropout.
-                                self._set_simulator_unlocked(self.is_simulator)
-                            except Exception:
-                                pass
+                            current = self.backend
+                            current_wiz = self.assignment_wizard
+                            wizard_now = bool(current_wiz and current_wiz.phase in
+                                              ("waiting_left", "waiting_right"))
+                            managed_now = bool(current is not None and
+                                getattr(type(current), "SELF_RECONNECTS", False) and
+                                getattr(current, "is_running", False))
+                            # A UI action may have started assignment or replaced
+                            # the backend since the snapshot. Never close it on
+                            # the strength of that stale reconnect decision.
+                            if (not self.is_simulator and not wizard_now and not managed_now
+                                    and (not current or not current.is_open)):
+                                try:
+                                    self._set_simulator_unlocked(self.is_simulator)
+                                except Exception:
+                                    pass
                             backend = self.backend
 
-                # 1. Wizard multi-board polling. Only a genuine two-backend
-                # setup drives the wizard. The old code fell back to splitting
-                # ONE board's left/right cells into board_a/board_b, so
-                # shifting weight on a single board walked the wizard all the
-                # way to "both boards assigned" -- a dual configuration the
-                # user did not have.
-                if wiz and wiz.phase in ("waiting_left", "waiting_right"):
-                    if wiz_a and wiz_b:
-                        w_a = wiz.board_a_weight
-                        w_b = wiz.board_b_weight
-                        # Read under the lock, and only if the handles are
-                        # still current: a UI-thread close mid-read is a
-                        # native hidapi use-after-free (see stream read).
-                        with self.lock:
-                            if (self._wiz_backend_a is wiz_a
-                                    and self._wiz_backend_b is wiz_b):
-                                rd_a = wiz_a.read()
-                                rd_b = wiz_b.read()
-                            else:
-                                rd_a = rd_b = None
-                        if rd_a:
-                            w_a = rd_a.total_weight
-                        if rd_b:
-                            w_b = rd_b.total_weight
-                        if w_a > 0.0 or w_b > 0.0:
-                            self.update_assignment_wizard(w_a, w_b)
+                # Assignment owns its two readers until completion/cancellation.
+                # It validates freshness and exposes bounded recovery failures.
+                if is_wiz_active:
+                    self._poll_assignment_wizard()
 
                 # 2. Standard stream loop
                 if backend and backend.is_open:
@@ -1261,6 +1250,12 @@ class PressureManager:
 
     def _set_simulator_unlocked(self, enabled: bool):
         """Inner logic — caller MUST already hold self.lock."""
+        self._close_wizard_backends_unlocked()
+        wizard = getattr(self, "assignment_wizard", None)
+        if wizard and wizard.phase in ("waiting_left", "waiting_right"):
+            wizard.reset()
+        self.latest_frame = None
+        self._latest_raw_reading = None
         self.is_simulator = enabled
         if self.backend:
             try: self.backend.close()
@@ -1281,7 +1276,12 @@ class PressureManager:
                     if b_left and b_right:
                         self.backend = DualWbbBackend(b_left, b_right)
                     else:
-                        self.backend = b_left or b_right
+                        # A configured dual setup must not silently become one
+                        # board while claiming its saved left/right assignment.
+                        for board in (b_left, b_right):
+                            if board:
+                                board.close()
+                        self.backend = None
                 else:
                     self.backend = self._create_hardware_backend()
             except Exception:
@@ -1385,6 +1385,142 @@ class PressureManager:
                 "connected": bool(self.backend and self.backend.is_open),
             }
 
+    def _close_wizard_backends_unlocked(self):
+        """Release each assignment reader once while holding the I/O lock."""
+        closed = set()
+        for attr in ("_wiz_backend_a", "_wiz_backend_b"):
+            board = getattr(self, attr, None)
+            setattr(self, attr, None)
+            if board is not None and id(board) not in closed:
+                closed.add(id(board))
+                try:
+                    board.close()
+                except Exception as exc:
+                    print(f"[!] Assignment board close failed: {exc}")
+        self._wiz_health = {}
+
+    def _poll_assignment_wizard(self):
+        """Read genuine samples, expose failures, and bound per-board recovery.
+
+        A HID handle or an enumerated Bluetooth device is not a weight sample.
+        Uncalibrated/stale data must not be shown as zero kg or assign a foot.
+        All read/close/reopen operations share the same lock as normal I/O.
+        """
+        with self.lock:
+            wiz = self.assignment_wizard
+            if not wiz or wiz.phase not in ("waiting_left", "waiting_right"):
+                return
+            if self.is_simulator:
+                return  # Demo loads are explicitly supplied, never inferred.
+            now = time.monotonic()
+            health = getattr(self, "_wiz_health", None)
+            if not health:
+                health = self._wiz_health = {
+                    key: {"opened_at": now, "last_sample_timestamp": None,
+                          "retries": 0, "last_error": None}
+                    for key in ("a", "b")
+                }
+            diagnostics = {}
+            for key in ("a", "b"):
+                attr = f"_wiz_backend_{key}"
+                board = getattr(self, attr, None)
+                state = health[key]
+                reading = None
+                try:
+                    if board and board.is_open:
+                        reading = board.read()
+                except Exception as exc:
+                    state["last_error"] = f"Read failed: {exc}"
+                    try:
+                        board.close()
+                    except Exception:
+                        pass
+                    setattr(self, attr, None)
+                    board = None
+                now = time.monotonic()
+                if reading is not None:
+                    stamp = reading.timestamp
+                    weight = reading.total_weight
+                    if (math.isfinite(stamp) and 0 <= now - stamp <= self.WIZARD_SAMPLE_MAX_AGE
+                            and math.isfinite(weight) and weight >= 0):
+                        state["last_sample_timestamp"] = stamp
+                        state["last_error"] = None
+                        setattr(wiz, f"board_{key}_weight", weight)
+                diagnostic_method = getattr(type(board), "get_diagnostics", None)
+                try:
+                    detail = dict(diagnostic_method(board)) if diagnostic_method else {}
+                except Exception as exc:
+                    detail = {"last_error": f"Diagnostics failed: {exc}"}
+                stamp = state["last_sample_timestamp"]
+                fresh = bool(board and board.is_open and stamp is not None
+                             and 0 <= now - stamp <= self.WIZARD_SAMPLE_MAX_AGE)
+                if detail.get("calibration_status") == "unavailable":
+                    fresh = False
+                elapsed = now - (stamp if stamp is not None else state["opened_at"])
+                if not fresh and elapsed >= self.WIZARD_RETRY_DELAY:
+                    if state["retries"] < self.WIZARD_MAX_RETRIES:
+                        state["retries"] += 1
+                        if board:
+                            try:
+                                board.close()
+                            except Exception:
+                                pass
+                        setattr(self, attr, None)
+                        # A previous load is never reusable after reopening.
+                        state["last_sample_timestamp"] = None
+                        setattr(wiz, f"board_{key}_weight", 0.0)
+                        path = wiz.board_a if key == "a" else wiz.board_b
+                        board = self._create_hardware_backend(path)
+                        setattr(self, attr, board)
+                        state["opened_at"] = time.monotonic()
+                        state["last_error"] = None if board else "Board could not be opened."
+                        diagnostic_method = getattr(type(board), "get_diagnostics", None)
+                        try:
+                            detail = dict(diagnostic_method(board)) if diagnostic_method else {}
+                        except Exception:
+                            detail = {}
+                        stamp = None
+                detail.update(
+                    device_id=board_id_to_text(wiz.board_a if key == "a" else wiz.board_b),
+                    is_open=bool(board and board.is_open), fresh=fresh,
+                    last_sample_timestamp=stamp, retries=state["retries"],
+                    retry_exhausted=bool(not fresh and
+                        state["retries"] >= self.WIZARD_MAX_RETRIES and
+                        time.monotonic() - state["opened_at"] >= self.WIZARD_RETRY_DELAY),
+                )
+                if state["last_error"]:
+                    detail["last_error"] = state["last_error"]
+                diagnostics[key] = detail
+            # Initializing the second reader can take seconds. Recheck both
+            # ages after all I/O rather than treating the first as still fresh.
+            now = time.monotonic()
+            for detail in diagnostics.values():
+                stamp = detail.get("last_sample_timestamp")
+                age = now - stamp if stamp is not None else None
+                packet = detail.get("last_packet_timestamp")
+                detail["sample_age_seconds"] = round(age, 3) if age is not None else None
+                detail["packet_age_seconds"] = round(now - packet, 3) if packet is not None else None
+                detail["fresh"] = bool(detail["fresh"] and age is not None
+                                       and 0 <= age <= self.WIZARD_SAMPLE_MAX_AGE)
+            wiz.board_diagnostics = diagnostics
+            missing = [key.upper() for key, detail in diagnostics.items() if not detail["fresh"]]
+            if missing:
+                labels = " / ".join(missing)
+                failed = any(diagnostics[key.lower()]["retry_exhausted"] for key in missing)
+                uncalibrated = any(diagnostics[key.lower()].get("calibration_status") == "unavailable"
+                                   for key in missing)
+                wiz.health_state = "error" if failed else "recovering" if any(
+                    detail["retries"] for detail in diagnostics.values()) else "waiting"
+                problem = "factory calibration unavailable" if uncalibrated else "no live readings"
+                wiz.health_message = (f"Board {labels}: {problem}. " +
+                    ("Step off, check power and close other board apps, then cancel and retry setup."
+                     if failed else "Keep boards unloaded while the connection retries."))
+                return
+            wiz.health_state = "ready"
+            wiz.health_message = ""
+            self.update_assignment_wizard(wiz.board_a_weight, wiz.board_b_weight,
+                                          _from_hardware=True)
+
     def start_assignment_wizard(self):
         with self.lock:
             from src.hardware.pressure.connection import BoardAssignmentWizard
@@ -1395,16 +1531,13 @@ class PressureManager:
                 except Exception: pass
                 self.backend = None
 
-            if self._wiz_backend_a:
-                try: self._wiz_backend_a.close()
-                except Exception: pass
-                self._wiz_backend_a = None
-            if self._wiz_backend_b:
-                try: self._wiz_backend_b.close()
-                except Exception: pass
-                self._wiz_backend_b = None
-
-            dev_paths = self.enumerate_boards()
+            self._close_wizard_backends_unlocked()
+            self.latest_frame = None
+            self._latest_raw_reading = None
+            # Different HID paths are required; duplicate enumeration records
+            # must never make one physical reader look like a dual setup.
+            dev_paths = ([] if self.is_simulator else list(
+                {board_id_to_text(p): p for p in self.enumerate_boards()}.values()))
 
             # Dual assignment requires TWO boards. It used to invent a
             # "Board B" placeholder and drive the wizard from one board's
@@ -1462,9 +1595,23 @@ class PressureManager:
                 threshold=5.0
             )
             self.assignment_wizard.start()
+            now = time.monotonic()
+            self._wiz_health = {
+                key: {"opened_at": now, "last_sample_timestamp": None,
+                      "retries": 0, "last_error": None}
+                for key in ("a", "b")
+            }
+            if not self.is_simulator:
+                self.assignment_wizard.health_state = "waiting"
+                self.assignment_wizard.health_message = "Waiting for live calibrated readings from both boards."
+                self.assignment_wizard.board_diagnostics = {
+                    key: {"fresh": False, "last_sample_timestamp": None}
+                    for key in ("a", "b")
+                }
             return self.assignment_wizard.get_status()
 
-    def update_assignment_wizard(self, weight_a: float, weight_b: float):
+    def update_assignment_wizard(self, weight_a: float, weight_b: float,
+                                 *, _from_hardware: bool = False):
         with self.lock:
             if not self.assignment_wizard:
                 # start_assignment_wizard refuses to run without two real
@@ -1473,6 +1620,15 @@ class PressureManager:
                 status = self.start_assignment_wizard()
                 if not self.assignment_wizard:
                     return status
+            # HTTP/demo controls may supply synthetic weights only in demo
+            # mode. Physical assignment is driven exclusively by our readers.
+            if (not self.is_simulator and
+                    (not _from_hardware or self.assignment_wizard.health_state != "ready")):
+                return self.assignment_wizard.get_status()
+            # Completion is a one-time ownership transfer, not a reason to
+            # reopen the just-transferred devices on a repeated HTTP update.
+            if self.assignment_wizard.phase == "complete":
+                return self.assignment_wizard.get_status()
             phase, msg = self.assignment_wizard.update(weight_a, weight_b)
             if phase == "complete" or getattr(phase, "value", phase) == "complete":
                 self.assigned_left = self.assignment_wizard.left_board
@@ -1507,8 +1663,15 @@ class PressureManager:
 
     def reset_assignment_wizard(self):
         with self.lock:
+            self._close_wizard_backends_unlocked()
             if self.assignment_wizard:
                 self.assignment_wizard.reset()
+            # The ordinary worker can reopen hardware on its next pass. No
+            # old wizard handle or displayed frame survives cancellation.
+            self.latest_frame = None
+            self._latest_raw_reading = None
+            if self.is_simulator and self.backend is None:
+                self._set_simulator_unlocked(True)
             return {"phase": "idle", "message": ""}
 
     def toggle_demo_swing(self) -> bool:
@@ -1524,6 +1687,16 @@ class PressureManager:
             elif hasattr(self.backend, "open"):
                 self.backend.open()
             return True
+
+    def _hardware_diagnostics(self):
+        backend = self.backend
+        method = getattr(type(backend), "get_diagnostics", None)
+        if not method:
+            return {"is_open": bool(backend and backend.is_open)}
+        try:
+            return method(backend)
+        except Exception as exc:
+            return {"is_open": bool(backend and backend.is_open), "last_error": str(exc)}
 
     def get_status(self):
         with self.lock:
@@ -1548,6 +1721,7 @@ class PressureManager:
                     and self.backend.__class__.__name__ == "DualWbbBackend"
                 ),
                 "assignment_wizard": wizard_status,
+                "hardware_diagnostics": self._hardware_diagnostics(),
                 "latest": self.latest_frame,
                 "tare": {
                     "top_left": self.tare_offsets.top_left if self.tare_offsets else 0.0,

@@ -83,6 +83,9 @@ EXT_TEMP_ADDR = 0xA40060    # 2 bytes — factory temperature reference
 # Balance Board extension type identifier
 BB_EXT_TYPE = bytes([0x00, 0x00, 0xA4, 0x20, 0x04, 0x02])
 
+CALIBRATION_TIMEOUT = 2.0
+CALIBRATION_MAX_READS = 256
+
 
 @dataclass
 class _CalibrationData:
@@ -159,9 +162,27 @@ class HidBackend(BoardBackend):
         self._calibration: _BoardCalibration | None = None
         self._device_path = device_path
         self._temp_ref: float = 0.0
-        self._baseline_raw: tuple[int, int, int, int] | None = None
+        self._last_packet_timestamp: float | None = None
+        self._last_sample_timestamp: float | None = None
+        self._raw_cells: dict[str, int] | None = None
+        self._last_error: str | None = None
 
     def open(self) -> None:
+        if self.is_open:
+            return
+        self._calibration = None
+        self._last_packet_timestamp = None
+        self._last_sample_timestamp = None
+        self._raw_cells = None
+        self._last_error = None
+        try:
+            self._open_device()
+        except Exception as exc:
+            self._last_error = f"HID initialization failed: {exc}"
+            self.close()
+            raise
+
+    def _open_device(self) -> None:
         if hid is None:
             raise RuntimeError("hidapi is not installed. Run: pip install hidapi")
 
@@ -226,26 +247,7 @@ class HidBackend(BoardBackend):
         time.sleep(0.05)
 
         # 2. Read factory calibration data from 0xA40024 (24 bytes)
-        cal_bytes = bytearray()
-        try:
-            self._device.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
-            time.sleep(0.05)
-            for _ in range(12):
-                d = self._device.read(64, 100)
-                if d and d[0] == 0x21 and len(d) >= 22:
-                    sz = ((d[3] >> 4) & 0x0F) + 1
-                    cal_bytes.extend(d[6:6+sz])
-                    if len(cal_bytes) >= 24:
-                        break
-        except Exception:
-            pass
-
-        if len(cal_bytes) >= 24:
-            self._calibration = self._parse_calibration(bytes(cal_bytes[:24]))
-            print(f"[+] Loaded factory calibration: 0kg={self._calibration.top_left.kg0}, 17kg={self._calibration.top_left.kg17}, 34kg={self._calibration.top_left.kg34}")
-        else:
-            self._calibration = None
-            print("[!] Using adaptive calibration baseline (100 counts/kg)")
+        self._collect_calibration()
 
         # 3. Turn on LED 1 (solid blue)
         self._device.write(bytes([0x11, 0x10]))
@@ -257,7 +259,79 @@ class HidBackend(BoardBackend):
 
         # Switch to non-blocking for normal streaming operation
         self._device.set_nonblocking(1)
-        print(f"[+] Wii Balance Board connected and streaming via HID (calibrated={'yes' if self._calibration else 'adaptive'})!")
+        print(f"[+] Wii Balance Board opened via HID "
+              f"(calibration={'factory' if self._calibration else 'unavailable'}); "
+              "awaiting sensor samples")
+
+    def _observe_packet(self, data) -> float:
+        timestamp = time.monotonic()
+        self._last_packet_timestamp = timestamp
+        if data[0] in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19) and len(data) >= 11:
+            tr, br, tl, bl = struct.unpack(">HHHH", bytes(data[3:11]))
+            self._raw_cells = dict(top_left=tl, top_right=tr,
+                                   bottom_left=bl, bottom_right=br)
+        return timestamp
+
+    def _collect_calibration(self) -> None:
+        """Assemble only the requested EEPROM bytes, regardless of arrival order.
+
+        Unrelated input reports do not consume a small fixed packet budget.
+        Both time and read count are bounded even for a continuously busy device.
+        """
+        received: dict[int, int] = {}
+        start = EXT_CALIB_ADDR & 0xFFFF
+        deadline = time.monotonic() + CALIBRATION_TIMEOUT
+        self._last_error = "Factory calibration unavailable: incomplete response"
+        self._device.write(bytes([0x17, 0x04, 0xA4, 0x00, 0x24, 0x00, 0x18]))
+        for _ in range(CALIBRATION_MAX_READS):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            # Never use zero (an infinite wait in blocking hidapi mode).
+            data = self._device.read(64, max(1, min(100, int(remaining * 1000))))
+            if not data:
+                continue
+            self._observe_packet(data)
+            if data[0] != RPT_IN_READ_DATA:
+                continue
+            if len(data) < 6 or data[3] & 0x0F:
+                self._last_error = "Factory calibration unavailable: invalid/error memory report"
+                continue
+            size = (data[3] >> 4) + 1
+            address = (data[4] << 8) | data[5]
+            offset = address - start
+            if len(data) < 6 + size or not (0 <= offset and offset + size <= 24):
+                self._last_error = "Factory calibration unavailable: invalid size/address"
+                continue
+            chunk = dict(enumerate(data[6:6 + size], offset))
+            if any(i in received and received[i] != value for i, value in chunk.items()):
+                self._last_error = "Factory calibration unavailable: conflicting response bytes"
+                return
+            received.update(chunk)
+            if len(received) == 24:
+                try:
+                    self._calibration = self._parse_calibration(
+                        bytes(received[i] for i in range(24)))
+                except ValueError as exc:
+                    self._last_error = f"Factory calibration unavailable: {exc}"
+                else:
+                    self._last_error = None
+                return
+
+    def get_diagnostics(self) -> dict:
+        """Connection and observed data, without claiming uncalibrated kg.
+
+        is_open describes the usable backend, not quarantined OS handles.
+        Timestamps are monotonic and remain None until actually observed.
+        """
+        return {
+            "calibration_status": "factory" if self._calibration else "unavailable",
+            "last_packet_timestamp": self._last_packet_timestamp,
+            "last_sample_timestamp": self._last_sample_timestamp,
+            "raw_cells": dict(self._raw_cells) if self._raw_cells is not None else None,
+            "last_error": self._last_error,
+            "is_open": self.is_open,
+        }
 
     def shutdown(self) -> None:
         if self._device is None:
@@ -278,13 +352,15 @@ class HidBackend(BoardBackend):
             # Still pending after ~2s: closing now would corrupt the heap.
             # Leak the handle rather than crash the app.
             _UNSETTLED_HANDLES.append(dev)
+            self._last_error = "HID close incomplete: pending read; handle quarantined"
             print("[!] Balance board read did not finish; handle left open "
                   "to avoid a crash")
             return
         try:
             dev.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._last_error = f"HID close failed: {exc}"
+            _UNSETTLED_HANDLES.append(dev)
 
     @property
     def is_open(self) -> bool:
@@ -299,26 +375,31 @@ class HidBackend(BoardBackend):
             return None
 
         latest = None
+        latest_timestamp = None
         # Drain everything queued; keep only the newest data report.
         for _ in range(64):  # hard cap to bound one poll cycle
             try:
                 data = self._device.read(64)
-            except Exception:
+            except Exception as exc:
+                self._last_error = f"HID read failed: {exc}"
                 # Read failure = device gone (power off / BT drop). Mark the
                 # backend closed so PressureManager's reconnect logic fires.
                 self.close()
-                break
+                return None
             if not data:
                 break
 
+            timestamp = self._observe_packet(data)
             report_id = data[0]
 
             # Re-enable continuous reporting if status report received
             if report_id == RPT_IN_STATUS:
                 try:
                     self._device.write(bytes([0x12, 0x04, 0x32]))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._last_error = f"HID reporting request failed: {exc}"
+                    self.close()
+                    return None
                 continue
 
             if report_id not in (RPT_IN_BTN_EXT8, RPT_IN_BTN_EXT19):
@@ -328,39 +409,35 @@ class HidBackend(BoardBackend):
                 continue
 
             latest = data
+            latest_timestamp = timestamp
 
-        if latest is None:
+        if latest is None or self._calibration is None:
             return None
 
         ext = latest[3:11]
         tr, br, tl, bl = struct.unpack(">HHHH", bytes(ext))
 
-        if self._baseline_raw is None:
-            self._baseline_raw = (tr, br, tl, bl)
-
-        if self._calibration:
-            kg_tl = _interpolate_kg(tl, self._calibration.top_left)
-            kg_tr = _interpolate_kg(tr, self._calibration.top_right)
-            kg_bl = _interpolate_kg(bl, self._calibration.bottom_left)
-            kg_br = _interpolate_kg(br, self._calibration.bottom_right)
-        else:
-            # Adaptive baseline delta if factory EEPROM was not readable (~100 counts per kg)
-            kg_tr = max(0.0, (tr - self._baseline_raw[0]) / 100.0)
-            kg_br = max(0.0, (br - self._baseline_raw[1]) / 100.0)
-            kg_tl = max(0.0, (tl - self._baseline_raw[2]) / 100.0)
-            kg_bl = max(0.0, (bl - self._baseline_raw[3]) / 100.0)
+        kg_tl = _interpolate_kg(tl, self._calibration.top_left)
+        kg_tr = _interpolate_kg(tr, self._calibration.top_right)
+        kg_bl = _interpolate_kg(bl, self._calibration.bottom_left)
+        kg_br = _interpolate_kg(br, self._calibration.bottom_right)
+        self._last_sample_timestamp = latest_timestamp
 
         return SensorReading(
             top_left=kg_tl,
             top_right=kg_tr,
             bottom_left=kg_bl,
             bottom_right=kg_br,
-            timestamp=time.monotonic(),
+            timestamp=latest_timestamp,
         )
 
     @staticmethod
     def _parse_calibration(data: bytes) -> _BoardCalibration:
-        vals = struct.unpack(">12H", data[:24])
+        if len(data) != 24:
+            raise ValueError("expected all 24 calibration bytes")
+        vals = struct.unpack(">12H", data)
+        if any(not (0 < vals[i] < vals[i + 4] < vals[i + 8]) for i in range(4)):
+            raise ValueError("reference values must be positive and strictly increasing")
         return _BoardCalibration(
             top_right=_CalibrationData(vals[0], vals[4], vals[8]),
             bottom_right=_CalibrationData(vals[1], vals[5], vals[9]),

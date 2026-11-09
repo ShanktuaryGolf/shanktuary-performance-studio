@@ -461,11 +461,10 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
                     wizard, "board_a" if i == 0 else "board_b", None
                 )
                 if wizard_device is not None:
-                    load = _number(
-                        state["assignment"].get(
-                            "board_a_weight" if i == 0 else "board_b_weight"
-                        )
-                    )
+                    weight_key = "board_a_weight" if i == 0 else "board_b_weight"
+                    load = (_number(state["assignment"].get(weight_key))
+                            if state["assignment"].get(weight_key + "_valid", True)
+                            else None)
                     role = (
                         "LEFT"
                         if wizard_device == getattr(wizard, "left_board", None)
@@ -524,6 +523,11 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
         )
     elif error:
         heading, note = "Setup needs attention", error
+    elif step == "assign" and state["assignment"].get("health_message"):
+        heading = ("Board readings need attention"
+                   if state["assignment"].get("health_state") == "error"
+                   else "Checking live board readings")
+        note = state["assignment"]["health_message"]
     elif step == "assign":
         heading, note = {
             "waiting_left": (

@@ -19,6 +19,8 @@ class DualWbbBackend(BoardBackend):
     BoardAssignDialog) before constructing this backend.
     """
 
+    SAMPLE_MAX_AGE_S = 1.5
+
     def __init__(self, left: BoardBackend, right: BoardBackend) -> None:
         self._left = left
         self._right = right
@@ -36,17 +38,26 @@ class DualWbbBackend(BoardBackend):
         self._orientation = value
 
     def open(self) -> None:
+        if not self.is_open:
+            self._clear_readings()
         if not self._left.is_open:
             self._left.open()
         if not self._right.is_open:
             self._right.open()
 
+    def _clear_readings(self) -> None:
+        self._left_reading = None
+        self._right_reading = None
+        self._last_dual = None
+
     def close(self) -> None:
+        self._clear_readings()
         self._left.close()
         self._right.close()
 
     def shutdown(self) -> None:
         """Power off both boards."""
+        self._clear_readings()
         self._left.shutdown()
         self._right.shutdown()
 
@@ -63,29 +74,41 @@ class DualWbbBackend(BoardBackend):
           top_right    = right foot front (TL+TR of right board)
           bottom_right = right foot back  (BL+BR of right board)
         """
-        # Drain both boards, keeping latest reading from each
+        # Each backend owns queue draining. In particular, a simulator may
+        # produce data on every call, so draining here could loop forever.
+        if not self.is_open:
+            self._clear_readings()
+            return None
         lr = self._left.read()
-        while lr is not None:
-            self._left_reading = lr
-            lr = self._left.read()
-
         rr = self._right.read()
-        while rr is not None:
+        # A child can detect a disconnection during read(). Discard even a
+        # final queued sample rather than presenting a disconnected pair.
+        if not self.is_open:
+            self._clear_readings()
+            return None
+        if lr is not None:
+            self._left_reading = lr
+        if rr is not None:
             self._right_reading = rr
-            rr = self._right.read()
 
-        if self._left_reading is None or self._right_reading is None:
+        now = time.monotonic()
+        if not (self._is_fresh(self._left_reading, now)
+                and self._is_fresh(self._right_reading, now)):
+            self._last_dual = None
+            return None
+        if lr is None and rr is None:
             return None
 
         left = self._left_reading
         right = self._right_reading
-
-        now = time.monotonic()
+        # Date the aggregate by the newest contributing sample, not this
+        # poll. Both source timestamps remain available on the dual reading.
+        timestamp = max(left.timestamp, right.timestamp)
 
         self._last_dual = DualPlateReading(
             left=left,
             right=right,
-            timestamp=now,
+            timestamp=timestamp,
             device_timestamp_us=0,
         )
 
@@ -101,9 +124,43 @@ class DualWbbBackend(BoardBackend):
             bottom_left=left.bottom_left + left.bottom_right,
             top_right=right.top_left + right.top_right,
             bottom_right=right.bottom_left + right.bottom_right,
-            timestamp=now,
+            timestamp=timestamp,
         )
 
     @property
     def last_dual_reading(self) -> DualPlateReading | None:
+        if not self.is_open:
+            self._clear_readings()
+        elif self._last_dual is not None:
+            now = time.monotonic()
+            if not (self._is_fresh(self._last_dual.left, now)
+                    and self._is_fresh(self._last_dual.right, now)):
+                self._last_dual = None
         return self._last_dual
+
+    def _is_fresh(self, reading: SensorReading | None, now: float) -> bool:
+        return (reading is not None
+                and 0 <= now - reading.timestamp <= self.SAMPLE_MAX_AGE_S)
+
+    def get_diagnostics(self) -> dict:
+        """Describe availability without refreshing or consuming samples."""
+        now = time.monotonic()
+        sides = {}
+        for name, backend, reading in (
+            ("left", self._left, self._left_reading),
+            ("right", self._right, self._right_reading),
+        ):
+            fresh = backend.is_open and self._is_fresh(reading, now)
+            sides[name] = {
+                "is_open": backend.is_open,
+                "timestamp": reading.timestamp if reading is not None else None,
+                "fresh": fresh,
+                "error": ("disconnected" if not backend.is_open else
+                          "waiting_for_sample" if reading is None else
+                          "stale_sample" if not fresh else None),
+            }
+        return {
+            "sample_max_age_s": self.SAMPLE_MAX_AGE_S,
+            "ready": sides["left"]["fresh"] and sides["right"]["fresh"],
+            **sides,
+        }

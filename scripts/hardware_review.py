@@ -38,7 +38,7 @@ def main():
     selected = {}
     tk.Label(choice_root, text='PHYSICAL HARDWARE TEST - NO SIMULATED READINGS', wraplength=520).pack(pady=14)
     tk.Label(choice_root, text='Choose only hardware you own and intend to connect.\nWii boards must already be paired and exposed as Windows HID.\nPairing is optional and requires a separate confirmation.', wraplength=520).pack(pady=10)
-    tk.Label(choice_root, text='Accuracy warning: if factory calibration fails, adaptive scaling is NOT verified kg/force accuracy. Check the console calibration status.', wraplength=520, fg='#9C341B').pack(pady=10)
+    tk.Label(choice_root, text='Factory calibration is required for weight readings. If it cannot be read, setup shows diagnostics instead of guessed kg. Keep boards unloaded while connecting.', wraplength=520, fg='#9C341B').pack(pady=10)
     def choose(source, mode):
         url = None
         if source == 'openfp':
