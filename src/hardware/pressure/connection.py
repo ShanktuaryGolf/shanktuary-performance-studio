@@ -4,7 +4,10 @@ On Linux: automated via bluetoothctl.
 On Windows: manual pairing through Windows Bluetooth settings.
 """
 
+import math
 import sys
+import time
+from copy import deepcopy
 
 
 def connect_board() -> None:
@@ -119,6 +122,7 @@ class BoardAssignmentWizard:
         self.health_state = "idle"
         self.health_message = ""
         self.board_diagnostics = {}
+        self._completed_at = None
 
     def start(self, board_a: Any | None = None, board_b: Any | None = None):
         if board_a is not None:
@@ -134,6 +138,7 @@ class BoardAssignmentWizard:
         self.health_state = "ready"
         self.health_message = ""
         self.board_diagnostics = {}
+        self._completed_at = None
 
     def reset(self):
         self.phase = AssignmentPhase.IDLE
@@ -145,8 +150,11 @@ class BoardAssignmentWizard:
         self.health_state = "idle"
         self.health_message = ""
         self.board_diagnostics = {}
+        self._completed_at = None
 
     def update(self, weight_a: float, weight_b: float) -> tuple[AssignmentPhase, str]:
+        if self.phase == AssignmentPhase.COMPLETE:
+            return self.phase, self.message
         self.board_a_weight = max(0.0, weight_a)
         self.board_b_weight = max(0.0, weight_b)
 
@@ -167,20 +175,40 @@ class BoardAssignmentWizard:
             right_weight = self.board_a_weight if self.right_board == self.board_a else self.board_b_weight
             if right_weight > self.threshold:
                 self.phase = AssignmentPhase.COMPLETE
+                self._completed_at = time.monotonic()
                 self.message = "✓ Both boards successfully assigned!"
 
         return self.phase, self.message
 
     def get_status(self) -> dict:
+        complete = self.phase == AssignmentPhase.COMPLETE
+        boards = deepcopy(self.board_diagnostics)
+        if complete:
+            # Readers transfer to the live backend on completion. These
+            # retained values describe assignment, never current hardware.
+            # Age the original observations without fetching replacement data
+            # or changing the successful assignment result.
+            now = time.monotonic()
+            for detail in boards.values():
+                detail["historical"] = True
+                detail["fresh_at_snapshot"] = bool(detail.get("fresh", False))
+                detail["fresh"] = False
+                for source, target in (("last_sample_timestamp", "sample_age_seconds"),
+                                       ("last_packet_timestamp", "packet_age_seconds")):
+                    stamp = detail.get(source)
+                    age = now - stamp if isinstance(stamp, (int, float)) else None
+                    detail[target] = round(age, 3) if age is not None and math.isfinite(age) else None
         return {
             "phase": self.phase.value if hasattr(self.phase, "value") else str(self.phase),
             "message": self.health_message or self.message,
             "health_state": self.health_state,
             "health_message": self.health_message,
-            "boards": {key: dict(value) for key, value in self.board_diagnostics.items()},
-            "board_a_weight_valid": self.board_diagnostics.get("a", {}).get("fresh", True),
-            "board_b_weight_valid": self.board_diagnostics.get("b", {}).get("fresh", True),
+            "boards": boards,
+            "diagnostics_source": "assignment_completion_snapshot" if complete else "assignment",
+            "snapshot_timestamp": self._completed_at if complete else None,
+            "board_a_weight_valid": not complete and boards.get("a", {}).get("fresh", True),
+            "board_b_weight_valid": not complete and boards.get("b", {}).get("fresh", True),
             "board_a_weight": round(self.board_a_weight, 1),
             "board_b_weight": round(self.board_b_weight, 1),
-            "is_complete": self.phase == AssignmentPhase.COMPLETE,
+            "is_complete": complete,
         }

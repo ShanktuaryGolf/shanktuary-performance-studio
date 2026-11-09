@@ -218,3 +218,161 @@ def test_invalid_payload_property_does_not_expose_previous_healthy_pair(pair, mo
     left.invalid = True
     assert dual.last_dual_reading is None
     assert left.read_count == right.read_count == 1
+
+
+def test_diagnostics_queries_each_child_once_without_polling(pair, monkeypatch):
+    dual, left, right, _ = pair
+    calls = []
+
+    def diagnostics(backend):
+        calls.append(backend)
+        return {"last_sample_timestamp": 99.8, "last_packet_timestamp": 99.9}
+
+    monkeypatch.setattr(FakeBackend, "get_diagnostics", diagnostics, raising=False)
+    result = dual.get_diagnostics()
+    assert calls == [left, right]
+    assert left.read_count == right.read_count == 0
+    assert result["ready"] is False  # no aggregate cache was populated
+    assert result["left"]["child_diagnostics"]["fresh"] is True
+    assert result["left"]["child_diagnostics"]["sample_age_seconds"] == 0.2
+    assert result["left"]["child_diagnostics"]["packet_age_seconds"] == 0.1
+
+
+def test_missing_child_diagnostics_does_not_invent_live_observations(pair):
+    dual, left, right, _ = pair
+    left.samples.append(sample(100))
+    right.samples.append(sample(100))
+    assert dual.read() is not None
+    result = dual.get_diagnostics()
+    assert result["ready"] is True
+    child = result["left"]["child_diagnostics"]
+    assert child["device_id"] is None
+    assert child["sample_age_seconds"] is None
+    assert child["packet_age_seconds"] is None
+    assert child["fresh"] is child["packet_fresh"] is False
+
+
+@pytest.fixture
+def hid_pair(monkeypatch):
+    import src.hardware.pressure.hid_backend as hb
+
+    class Device:
+        def __init__(self):
+            self.packets = deque()
+            self.reads = 0
+
+        def read(self, *args):
+            self.reads += 1
+            return self.packets.popleft() if self.packets else []
+
+        def write(self, *args):
+            pytest.fail("Diagnostics must not send HID commands")
+
+        def open_path(self, *args):
+            pytest.fail("Diagnostics must not open HID handles")
+
+        def close(self):
+            pytest.fail("Diagnostics must not close HID handles")
+
+    now = [100.0]
+    monkeypatch.setattr(hb.time, "monotonic", lambda: now[0])
+    left = hb.HidBackend(b"\\\\?\\HID#left-\xff")
+    right = hb.HidBackend("\\\\?\\HID#right")
+    for board in (left, right):
+        board._device = Device()
+        board._calibration = hb.DEFAULT_CALIBRATION
+    return DualWbbBackend(left, right), left, right, now
+
+
+def extension_packet(value):
+    import struct
+    return bytes([0x32, 0, 0]) + struct.pack(">4H", *([value] * 4))
+
+
+def test_zero_child_keeps_current_peer_diagnostics_after_caches_clear(hid_pair):
+    dual, left, right, now = hid_pair
+    for board in (left, right):
+        board._device.packets.append(extension_packet(2800))
+    assert dual.read() is not None
+    now[0] = 100.1
+    left._device.packets.append(extension_packet(0))
+    right._device.packets.append(extension_packet(2900))
+    assert dual.read() is None
+    assert dual.last_dual_reading is None
+    reads = (left._device.reads, right._device.reads)
+
+    result = dual.get_diagnostics()
+    assert not result["ready"]
+    assert result["left"]["error"] == "invalid_sensor_data"
+    assert result["right"]["error"] == "waiting_for_sample"  # aggregate cache only
+    a = result["left"]["child_diagnostics"]
+    b = result["right"]["child_diagnostics"]
+    assert result["left"]["device_id"].encode("latin-1") == left._device_path
+    assert result["right"]["device_id"] == right._device_path
+    assert a["device_id"] == result["left"]["device_id"]
+    assert a["sensor_data_status"] == "invalid_zero_payload"
+    assert a["recovery_blocked"] and not a["fresh"]
+    assert a["packet_fresh"] and a["packet_count"] == 2
+    assert a["sample_age_seconds"] == 0.1
+    assert a["packet_age_seconds"] == 0
+    assert a["zero_extension_count"] == a["zero_extension_streak"] == 1
+    assert set(a["raw_cells"].values()) == {0}
+    assert b["fresh"] and b["packet_fresh"]
+    assert b["sample_age_seconds"] == b["packet_age_seconds"] == 0
+    assert b["last_sample_timestamp"] == 100.1
+    assert b["packet_count"] == 2
+    assert set(b["raw_cells"].values()) == {2900}
+
+    now[0] = 102
+    later = dual.get_diagnostics()["right"]["child_diagnostics"]
+    assert later["sample_age_seconds"] == later["packet_age_seconds"] == 1.9
+    assert not later["fresh"] and not later["packet_fresh"]
+    assert (left._device.reads, right._device.reads) == reads
+    assert left.is_open and right.is_open
+    assert dual._left_reading is dual._right_reading is None
+
+
+def test_child_evidence_stays_bounded_and_detached(hid_pair):
+    dual, left, right, _ = hid_pair
+    for board in (left, right):
+        board._device.packets.extend(extension_packet(2800) for _ in range(30))
+    assert dual.read() is not None
+    reads = (left._device.reads, right._device.reads)
+    for _ in range(3):
+        child = dual.get_diagnostics()["left"]["child_diagnostics"]
+        assert child["packet_count"] == 30
+        assert len(child["recent_packets"]) == 8
+        assert child["recent_packets"][0]["length"] == 11
+        child["recent_packets"][0]["length"] = 0
+        child["raw_cells"]["top_left"] = 0
+        assert left.get_diagnostics()["raw_cells"]["top_left"] == 2800
+    assert (left._device.reads, right._device.reads) == reads
+
+
+@pytest.mark.parametrize("sample_stamp,packet_stamp,expected_age,fresh,packet_fresh", [
+    (98.5, 100, 1.5, True, True),
+    (98.499, 100, 1.501, False, True),
+    (100.01, 100.01, -0.01, False, False),
+    (float("nan"), float("inf"), None, False, False),
+    (None, None, None, False, False),
+])
+def test_child_freshness_uses_original_unrounded_timestamps(
+        hid_pair, sample_stamp, packet_stamp, expected_age, fresh, packet_fresh):
+    dual, left, _, _ = hid_pair
+    left._last_sample_timestamp = sample_stamp
+    left._last_packet_timestamp = packet_stamp
+    child = dual.get_diagnostics()["left"]["child_diagnostics"]
+    assert child["sample_age_seconds"] == expected_age
+    assert child["fresh"] is fresh
+    assert child["packet_fresh"] is packet_fresh
+
+
+def test_closed_or_uncalibrated_child_never_claims_fresh_weight(hid_pair):
+    dual, left, _, _ = hid_pair
+    left._last_sample_timestamp = left._last_packet_timestamp = 100
+    left._calibration = None
+    child = dual.get_diagnostics()["left"]["child_diagnostics"]
+    assert not child["fresh"] and child["packet_fresh"]
+    left._device = None
+    child = dual.get_diagnostics()["left"]["child_diagnostics"]
+    assert not child["fresh"] and not child["packet_fresh"]

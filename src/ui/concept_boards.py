@@ -551,7 +551,8 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
         )
     elif step == "align":
         heading, note = (
-            "Stand in your address position",
+            "Board readings paused" if state["alignment"].get("paused")
+            else "Stand in your address position",
             state["alignment"].get("message") or "Take your stance and hold still.",
         )
     elif step == "width":
@@ -629,9 +630,10 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
     if step == "align" and state["alignment"].get("active"):
         remaining = _number(state["alignment"].get("remaining_sec"))
         status = (
-            f"{remaining:.1f}s remaining"
+            "Readings paused" if state["alignment"].get("paused")
+            else f"{remaining:.1f}s remaining"
             if remaining is not None
-            else "Calibration running"
+            else "Waiting for live data"
         )
     elif (step == "width" or done) and state["measured"]:
         status = f"Measured stance width: {state['stance']['stance_width_mm']:.0f} mm"

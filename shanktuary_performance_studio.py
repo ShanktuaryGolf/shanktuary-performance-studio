@@ -9564,10 +9564,11 @@ class ShanktuaryApp:
                 headline = "Board assignment"
                 sub = st.get("message", "")
         elif step == "align":
-            headline = "Stand in your address position"
+            headline = ("Board readings paused" if al.get("paused")
+                        else "Stand in your address position")
             sub = al.get("message", "Take your stance and hold still")
-            rem = float(al.get("remaining_sec", 0.0) or 0.0)
-            if al.get("active"):
+            rem = al.get("remaining_sec")
+            if al.get("active") and not al.get("paused") and rem is not None:
                 big_value = f"{rem:.1f}s"
         elif step == "width":
             headline = "Measure stance width"
@@ -9619,7 +9620,9 @@ class ShanktuaryApp:
         # or the measured width) rather than two board plates.
         body_h = plate_h if show_plates else (h_kg if big_value else 0)
         # The 50/50 step also reserves a band for its progress bar.
-        pre_bar = int(26 * s) if (step == "align" and al.get("active")) else 0
+        show_bar = (step == "align" and al.get("active") and not al.get("paused")
+                    and al.get("remaining_sec") is not None)
+        pre_bar = int(26 * s) if show_bar else 0
 
         block_h = (h_rail + int(26 * s) + h_head + gap_head + h_sub
                    + gap_plates + body_h + pre_bar + gap_dots + gap_btn + btn_h)
@@ -9746,7 +9749,6 @@ class ShanktuaryApp:
         # Progress bar for the timed 50/50 hold, so the user can see it
         # running rather than guessing whether it registered. It gets its own
         # reserved band -- drawn into the dots' gap it crowded them.
-        show_bar = step == "align" and al.get("active")
         bar_band = int(26 * s) if show_bar else 0
         dot_y = top + body_h + bar_band + gap_dots
         if show_bar:
@@ -10688,7 +10690,8 @@ class ShanktuaryApp:
 
         al = pm.get_alignment_status() if (pm and hasattr(pm, "get_alignment_status")) else {}
         aligning = al.get("active", False)
-        rem = al.get("remaining_sec", 0.0)
+        paused = al.get("paused", False)
+        rem = al.get("remaining_sec")
         in_lead = al.get("in_lead_in", False)
         prog = al.get("progress", 0.0)
         al_msg = al.get("message", "")
@@ -10706,11 +10709,14 @@ class ShanktuaryApp:
                                 fill=theme.WARN if in_lead else theme.TEXT_3,
                                 font=(theme.ui_font(), 7), anchor="nw")
         if aligning:
-            self.canvas.create_text(rx1 - 30, by + 12, text=f"{rem:.1f}s",
-                                    fill=theme.WARN if in_lead else theme.ACCENT_TEXT,
+            countdown = ("Paused" if paused else f"{rem:.1f}s" if rem is not None
+                         else "Waiting")
+            self.canvas.create_text(rx1 - 30, by + 12, text=countdown,
+                                    fill=theme.WARN if in_lead or paused else theme.ACCENT_TEXT,
                                     font=(theme.ui_font(), 13), anchor="ne")
             # progress covers the whole lead-in + sample sequence.
-            frac = max(0.0, min(1.0, float(prog)))
+            frac = (max(0.0, min(1.0, float(prog)))
+                    if not paused and rem is not None else 0.0)
             self.canvas.create_rectangle(rx0 + 18, by + 37,
                                          rx0 + 18 + (rx1 - rx0 - 36) * frac,
                                          by + 40,

@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from obs_server import PressureManager
@@ -40,14 +41,18 @@ class TestStanceCalibration(unittest.TestCase):
 
     def test_stance_alignment_math(self):
         pm = PressureManager()
-        # Simulate Left board reading 40kg, Right board reading 30kg for the same real weight
-        samples = [(40.0, 30.0)] * 40
-        pm._alignment_samples = samples
-        pm._alignment_end_time = time.time() - 1.0
-        pm._alignment_active = True
-
-        # Process alignment completion
-        pm._finish_stance_alignment()
+        # Feed a complete live hold instead of bypassing the safety guards.
+        pm.backend = SimpleNamespace(is_open=True)
+        with patch("obs_server.time.monotonic", return_value=100) as sensor_clock, \
+                patch("obs_server.time.time", return_value=1000) as wall_clock:
+            pm._latest_raw_reading = SensorReading(20, 15, 20, 15, 100)
+            pm.start_stance_alignment(delay_sec=0, duration_sec=4)
+            for i in range(41):
+                sensor_clock.return_value = 100 + i / 10
+                wall_clock.return_value = 1000 + i / 10
+                reading = SensorReading(20, 15, 20, 15, sensor_clock.return_value)
+                pm._latest_raw_reading = reading
+                pm._advance_stance_alignment(reading)
 
         self.assertFalse(pm._alignment_active)
         mult_l, mult_r = pm.balance_multiplier
@@ -62,6 +67,8 @@ class TestStanceCalibration(unittest.TestCase):
 
     def test_lead_in_countdown_status(self):
         pm = PressureManager()
+        pm.backend = SimpleNamespace(is_open=True)
+        pm._latest_raw_reading = SensorReading(20, 15, 20, 15, time.monotonic())
         res = pm.start_stance_alignment(delay_sec=5.0, duration_sec=4.0)
         self.assertEqual(res["delay_sec"], 5.0)
         self.assertEqual(res["duration_sec"], 4.0)

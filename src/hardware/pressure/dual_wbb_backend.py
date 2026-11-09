@@ -1,5 +1,6 @@
 """Dual Wii Balance Board backend -- two WBBs as left/right foot plates."""
 
+import math
 import time
 
 from .base import (
@@ -151,17 +152,61 @@ class DualWbbBackend(BoardBackend):
         return (reading is not None
                 and 0 <= now - reading.timestamp <= self.SAMPLE_MAX_AGE_S)
 
+    def _child_diagnostics(self, backend, now: float) -> dict:
+        """Read a child's existing, bounded diagnostics, never its HID queue.
+
+        These observations belong to the physical child, independently of
+        the aggregate cache (which is cleared when either child is invalid).
+        Backends without diagnostics remain unknown, not inferred from a
+        cached aggregate reading.
+        """
+        method = getattr(type(backend), "get_diagnostics", None)
+        detail = dict(method(backend)) if method else {}
+        path = getattr(backend, "_device_path", None)
+        if path is not None:
+            # Match saved HID identities without adding a bytes repr or
+            # replacing any byte values in the device path.
+            detail["device_id"] = path.decode("latin-1") if isinstance(path, bytes) else str(path)
+        else:
+            detail.setdefault("device_id", None)
+        detail["is_open"] = backend.is_open
+        for source, target in (("last_sample_timestamp", "sample_age_seconds"),
+                               ("last_packet_timestamp", "packet_age_seconds")):
+            stamp = detail.get(source)
+            age = now - stamp if isinstance(stamp, (int, float)) else None
+            detail[target] = round(age, 3) if age is not None and math.isfinite(age) else None
+        stamp = detail.get("last_sample_timestamp")
+        packet = detail.get("last_packet_timestamp")
+        detail["fresh"] = bool(
+            backend.is_open and not detail.get("recovery_blocked")
+            and detail.get("calibration_status") != "unavailable"
+            and isinstance(stamp, (int, float)) and 0 <= now - stamp <= self.SAMPLE_MAX_AGE_S
+        )
+        detail["packet_fresh"] = bool(
+            backend.is_open and isinstance(packet, (int, float))
+            and 0 <= now - packet <= self.SAMPLE_MAX_AGE_S
+        )
+        detail["sample_max_age_s"] = self.SAMPLE_MAX_AGE_S
+        return detail
+
     def get_diagnostics(self) -> dict:
-        """Describe availability without refreshing or consuming samples."""
+        """Describe cached readiness and current child observations passively.
+
+        Each child is queried once. HidBackend's packet/write histories are
+        already bounded; no reads, writes, retries, or new handles occur here.
+        """
         now = time.monotonic()
         sides = {}
         for name, backend, reading in (
             ("left", self._left, self._left_reading),
             ("right", self._right, self._right_reading),
         ):
-            invalid = self._invalid_sensor_data(backend)
+            child = self._child_diagnostics(backend, now)
+            invalid = bool(child.get("recovery_blocked"))
             fresh = backend.is_open and not invalid and self._is_fresh(reading, now)
             sides[name] = {
+                "device_id": child["device_id"],
+                "child_diagnostics": child,
                 "is_open": backend.is_open,
                 "timestamp": reading.timestamp if reading is not None else None,
                 "fresh": fresh,

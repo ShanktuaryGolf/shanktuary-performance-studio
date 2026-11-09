@@ -157,6 +157,64 @@ def test_interrupt_alignment_stops_sampler_without_background_completion(workspa
     assert not ui.snapshot(pm)['ready']
 
 
+@pytest.mark.parametrize('surface', ['redesign', 'legacy_modal', 'legacy_setup'])
+@pytest.mark.parametrize('paused, remaining, progress, message', [
+    (True, None, 0.0,
+     'Readings paused. Waiting for live board data; the full hold will restart.'),
+    (False, None, 1.0, 'Waiting for a fresh board sample to finish the hold.'),
+    (False, 4.0, 0.5, 'Hold stance still... (4.0s)'),
+])
+def test_alignment_reading_pause_and_wait_do_not_show_zero_countdown(
+        workspace, monkeypatch, surface, paused, remaining, progress, message):
+    import shanktuary_performance_studio as production
+
+    app, pm = workspace
+    app.start_guided_setup(steps=['align'])
+    monkeypatch.setattr(pm, 'get_alignment_status', lambda: {
+        'active': True, 'paused': paused, 'remaining_sec': remaining,
+        'progress': progress, 'in_lead_in': False, 'message': message,
+    })
+    before = list(pm.calls)
+    app.tick_setup_flow()
+    assert app._flow_step() == 'align' and not app.setup_flow_done
+
+    if surface == 'redesign':
+        words = render(app, guided=True)
+        expected = ('Readings paused' if paused else 'Waiting for live data'
+                    if remaining is None else '4.0s remaining')
+        assert expected in words
+    elif surface == 'legacy_modal':
+        production.ShanktuaryApp.draw_board_assign_modal(app, 1600, 900)
+        words = app.canvas.words()
+        if paused:
+            assert 'Board readings paused' in words
+        assert ('4.0s' in words) == (remaining is not None)
+        bars = [args for name, args, _ in app.canvas.calls
+                if name == 'create_rectangle' and len(args) == 4
+                and args[3] - args[1] == 6]
+        assert bool(bars) == (remaining is not None and not paused)
+    else:
+        # Exercise the shared legacy calibration row without native device I/O.
+        pm.pressure_source = 'openfp'
+        app._draw_setup_openfp_panel = lambda *args: 400
+        app.canvas.find_all = lambda: [1]
+        app.sessions = []
+        app.active_session_index = 0
+        app.aim_calib_shots = []
+        app.is_left_handed = app.aim_calibrating = False
+        app.aim_offset_deg = 0.0
+        monkeypatch.setattr(production.gspro_settings, 'effective_source', lambda: 'nova')
+        monkeypatch.setattr(production.gspro_settings, 'load_settings',
+                            lambda: {'source_locked': False})
+        production.ShanktuaryApp.draw_setup_viewport(app, 1600, 1100)
+        words = app.canvas.words()
+        assert ('Paused' if paused else 'Waiting' if remaining is None else '4.0s') in words
+
+    assert message in words
+    assert '0.0s' not in words and '0.0s remaining' not in words
+    assert pm.calls == before, 'painting or polling a pause must not restart hardware'
+
+
 def test_modal_swallows_source_and_pairing_clicks_and_done_clears(workspace):
     app, pm = workspace
     render(app)

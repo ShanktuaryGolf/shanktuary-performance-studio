@@ -814,16 +814,9 @@ class PressureManager:
                         self._latest_raw_reading = reading
                         tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
 
-                        # Sampling for 4-second stance alignment
-                        if self._alignment_active:
-                            now_t = time.time()
-                            if now_t >= self._alignment_sample_start:
-                                if tared.total >= 10.0:
-                                    left_w = tared.top_left + tared.bottom_left
-                                    right_w = tared.top_right + tared.bottom_right
-                                    self._alignment_samples.append((left_w, right_w))
-                            if now_t >= self._alignment_end_time:
-                                self._finish_stance_alignment()
+                        # Alignment consumes genuine, fresh samples before
+                        # balance multipliers, never a retained display frame.
+                        self._advance_stance_alignment(tared, source_backend=backend)
 
                         # Apply 50/50 stance balance calibration multipliers
                         if self.balance_multiplier != [1.0, 1.0]:
@@ -882,6 +875,9 @@ class PressureManager:
                             if self.latest_frame:
                                 obs_state.broadcast({"type": "pressure", "data": self.latest_frame})
                             last_broadcast = now
+                # Also run when read() returns None or no backend is open.
+                # A stopped stream must not leave a completed countdown active.
+                self._advance_stance_alignment()
             except Exception as e:
                 # Rate-limited logging: real bugs must not vanish silently,
                 # but a persistent hardware fault can't be allowed to spam.
@@ -984,15 +980,113 @@ class PressureManager:
                 board_id_to_text(getattr(self, "assigned_right", None)))
 
     def start_stance_alignment(self, delay_sec=5.0, duration_sec=4.0):
+        delay_sec, duration_sec = float(delay_sec), float(duration_sec)
+        if not (math.isfinite(delay_sec) and delay_sec >= 0
+                and math.isfinite(duration_sec) and duration_sec > 0):
+            raise ValueError("Alignment requires a nonnegative delay and positive duration")
         with self.lock:
             self._alignment_configuration = self._calibration_configuration()
+            self._alignment_backend = self.backend
+            self._alignment_delay_sec = delay_sec
+            self._alignment_duration_sec = duration_sec
             self._alignment_samples = []
+            self._alignment_last_sample_timestamp = None
+            self._alignment_hold_start = None
             self._alignment_start_time = time.time()
             self._alignment_sample_start = self._alignment_start_time + delay_sec
             self._alignment_end_time = self._alignment_sample_start + duration_sec
             self._alignment_active = True
+            self._alignment_paused = False
             self._alignment_status_msg = f"⏳ Step onto boards & take stance in {delay_sec:.0f}s..."
+            self._advance_stance_alignment()
             return {"status": "started", "delay_sec": delay_sec, "duration_sec": duration_sec}
+
+    def _pause_stance_alignment_unlocked(self, message):
+        """Discard only the unfinished hold, preserving saved calibration."""
+        self._alignment_paused = True
+        self._alignment_samples = []
+        self._alignment_last_sample_timestamp = None
+        self._alignment_hold_start = None
+        self._alignment_status_msg = message
+
+    def _alignment_live_unlocked(self):
+        backend = self.backend
+        if not backend or not backend.is_open:
+            return False
+        diagnostic_method = getattr(type(backend), "get_diagnostics", None)
+        if diagnostic_method:
+            try:
+                detail = diagnostic_method(backend)
+            except Exception:
+                return False
+            if (detail.get("ready") is False or detail.get("recovery_blocked")
+                    or detail.get("calibration_status") == "unavailable"):
+                return False
+        reading = self._latest_raw_reading
+        if reading is None or not math.isfinite(reading.timestamp):
+            return False
+        return 0 <= time.monotonic() - reading.timestamp <= self.WIZARD_SAMPLE_MAX_AGE
+
+    def _advance_stance_alignment(self, reading=None, *, source_backend=None):
+        """Watch collection even without samples; only new data can finish it."""
+        with self.lock:
+            if not self._alignment_active:
+                return
+            if self._alignment_configuration != self._calibration_configuration():
+                self._alignment_active = False
+                self._alignment_samples = []
+                self._alignment_status_msg = "Alignment cancelled: board configuration changed."
+                return
+            if source_backend is not None and source_backend is not self.backend:
+                self._pause_stance_alignment_unlocked(
+                    "Reader changed. Waiting for live data to restart the full hold.")
+                return
+            if self._alignment_backend is not self.backend:
+                self._alignment_backend = self.backend
+                self._pause_stance_alignment_unlocked(
+                    "Reader changed. Waiting for live data to restart the full hold.")
+            if not self._alignment_live_unlocked():
+                self._pause_stance_alignment_unlocked(
+                    "Readings paused. Waiting for live board data; the full hold will restart.")
+                return
+            if reading is None:
+                # Never persist old samples merely because the timer expired.
+                return
+            now = time.time()
+            stamp = reading.timestamp
+            if (not math.isfinite(stamp)
+                    or not 0 <= time.monotonic() - stamp <= self.WIZARD_SAMPLE_MAX_AGE):
+                self._pause_stance_alignment_unlocked(
+                    "Readings paused. Waiting for live board data; the full hold will restart.")
+                return
+            previous = self._alignment_last_sample_timestamp
+            if previous is not None:
+                if stamp <= previous:
+                    return  # duplicate/stale samples cannot fill or finish a hold
+                if stamp - previous > self.WIZARD_SAMPLE_MAX_AGE:
+                    self._pause_stance_alignment_unlocked(
+                        "Readings interrupted. The full hold will restart.")
+            if self._alignment_paused:
+                self._alignment_paused = False
+                self._alignment_start_time = now
+                self._alignment_sample_start = now + self._alignment_delay_sec
+                self._alignment_end_time = self._alignment_sample_start + self._alignment_duration_sec
+            self._alignment_last_sample_timestamp = stamp
+            if now < self._alignment_sample_start:
+                return
+            left_w = reading.top_left + reading.bottom_left
+            right_w = reading.top_right + reading.bottom_right
+            if not (math.isfinite(left_w) and math.isfinite(right_w)
+                    and left_w > 5.0 and right_w > 5.0):
+                self._pause_stance_alignment_unlocked(
+                    "Waiting for load on both boards; the full hold will restart.")
+                return
+            if self._alignment_hold_start is None:
+                self._alignment_hold_start = stamp
+                self._alignment_end_time = now + self._alignment_duration_sec
+            self._alignment_samples.append((left_w, right_w))
+            if stamp - self._alignment_hold_start >= self._alignment_duration_sec:
+                self._finish_stance_alignment()
 
     def cancel_stance_alignment(self):
         """Discard an interrupted sample without changing saved calibration."""
@@ -1005,26 +1099,30 @@ class PressureManager:
 
     def get_alignment_status(self):
         with self.lock:
+            # A read-only status request may invalidate an unsafe collection,
+            # but can never resume it or save calibration without new samples.
+            self._advance_stance_alignment()
             now = time.time()
+            paused = bool(self._alignment_active and getattr(self, "_alignment_paused", False))
             rem = max(0.0, self._alignment_end_time - now) if self._alignment_active else 0.0
             tot_dur = max(0.01, self._alignment_end_time - self._alignment_start_time) if self._alignment_start_time > 0 else 9.0
-            prog = min(1.0, max(0.0, (tot_dur - rem) / tot_dur)) if self._alignment_active else (1.0 if self._alignment_status_msg.startswith("✓") else 0.0)
-            
-            # Dynamic message update based on phase
-            if self._alignment_active:
+            prog = min(0.99, max(0.0, (tot_dur - rem) / tot_dur)) if self._alignment_active else (1.0 if self._alignment_status_msg.startswith("✓") else 0.0)
+            if paused:
+                msg, rem, prog = self._alignment_status_msg, None, 0.0
+            elif self._alignment_active:
                 if now < self._alignment_sample_start:
-                    rem_lead = max(0.1, self._alignment_sample_start - now)
-                    msg = f"⏳ Step onto boards & take stance ({rem_lead:.1f}s)..."
+                    msg = f"⏳ Step onto boards & take stance ({self._alignment_sample_start - now:.1f}s)..."
+                elif rem > 0:
+                    msg = f"🎯 Hold stance still... ({rem:.1f}s)"
                 else:
-                    rem_samp = max(0.1, self._alignment_end_time - now)
-                    msg = f"🎯 Hold stance still... ({rem_samp:.1f}s)"
+                    msg, rem = "Waiting for a fresh reading to finish the hold...", None
             else:
                 msg = self._alignment_status_msg
-
             return {
                 "active": self._alignment_active,
-                "in_lead_in": bool(self._alignment_active and now < self._alignment_sample_start),
-                "remaining_sec": round(rem, 1),
+                "paused": paused,
+                "in_lead_in": bool(self._alignment_active and not paused and now < self._alignment_sample_start),
+                "remaining_sec": round(rem, 1) if rem is not None else None,
                 "progress": round(prog, 2),
                 "message": msg,
                 "multipliers": self.balance_multiplier,
@@ -1035,21 +1133,31 @@ class PressureManager:
         with self.lock:
             if not self._alignment_active:
                 return
+            start = getattr(self, "_alignment_hold_start", None)
+            end = getattr(self, "_alignment_last_sample_timestamp", None)
+            if (getattr(self, "_alignment_configuration", None) != self._calibration_configuration()
+                    or getattr(self, "_alignment_paused", False)
+                    or start is None or end is None
+                    or end - start < self._alignment_duration_sec
+                    or not 0 <= time.monotonic() - end <= self.WIZARD_SAMPLE_MAX_AGE
+                    or not self._alignment_live_unlocked()
+                    or self._latest_raw_reading.timestamp != end):
+                self._pause_stance_alignment_unlocked(
+                    "Readings interrupted. Waiting for live data to restart the full hold.")
+                return
             self._alignment_active = False
             if len(self._alignment_samples) >= 15:
                 avg_l = sum(s[0] for s in self._alignment_samples) / len(self._alignment_samples)
                 avg_r = sum(s[1] for s in self._alignment_samples) / len(self._alignment_samples)
                 if avg_l > 5.0 and avg_r > 5.0:
                     target = (avg_l + avg_r) * 0.5
-                    scale_l = target / avg_l
-                    scale_r = target / avg_r
-                    self.balance_multiplier = [round(scale_l, 4), round(scale_r, 4)]
+                    self.balance_multiplier = [round(target / avg_l, 4), round(target / avg_r, 4)]
                     self._save_calibration()
                     self._alignment_status_msg = f"✓ 50/50 Stance Calibrated (L:{self.balance_multiplier[0]:.2f}, R:{self.balance_multiplier[1]:.2f})"
                 else:
                     self._alignment_status_msg = "Alignment failed: Under 5kg detected on boards."
             else:
-                self._alignment_status_msg = "Alignment failed: Stand still during countdown."
+                self._alignment_status_msg = "Alignment failed: Not enough live samples. Try again."
 
     def tare(self):
         with self.lock:
