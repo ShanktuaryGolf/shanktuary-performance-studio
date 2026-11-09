@@ -2,6 +2,7 @@
 
 import math
 import time
+from dataclasses import replace
 
 from .base import (
     BoardBackend,
@@ -28,6 +29,11 @@ class DualWbbBackend(BoardBackend):
         self._last_dual: DualPlateReading | None = None
         self._left_reading: SensorReading | None = None
         self._right_reading: SensorReading | None = None
+        # Display observations are independent of pair readiness. A bad peer
+        # must not erase the other board's latest calibrated observation.
+        self._observed_readings: dict[str, SensorReading | None] = {
+            "left": None, "right": None,
+        }
         self._orientation = BoardOrientation.LANDSCAPE
 
     @property
@@ -41,6 +47,7 @@ class DualWbbBackend(BoardBackend):
     def open(self) -> None:
         if not self.is_open:
             self._clear_readings()
+            self._clear_observed_readings()
         if not self._left.is_open:
             self._left.open()
         if not self._right.is_open:
@@ -53,14 +60,31 @@ class DualWbbBackend(BoardBackend):
 
     def close(self) -> None:
         self._clear_readings()
+        self._clear_observed_readings()
         self._left.close()
         self._right.close()
 
     def shutdown(self) -> None:
         """Power off both boards."""
         self._clear_readings()
+        self._clear_observed_readings()
         self._left.shutdown()
         self._right.shutdown()
+
+    def _clear_observed_readings(self) -> None:
+        self._observed_readings = {"left": None, "right": None}
+
+    def _observe_board_reading(
+            self, side: str, backend: BoardBackend,
+            reading: SensorReading | None) -> bool:
+        available = backend.is_open and not self._invalid_sensor_data(backend)
+        if not available:
+            self._observed_readings[side] = None
+        elif reading is not None:
+            # SensorReading is mutable, including through last_dual_reading.
+            # Retain only a detached copy of the most recent child result.
+            self._observed_readings[side] = replace(reading)
+        return available
 
     @property
     def is_open(self) -> bool:
@@ -78,14 +102,17 @@ class DualWbbBackend(BoardBackend):
         # Each backend owns queue draining. In particular, a simulator may
         # produce data on every call, so draining here could loop forever.
         if not self.is_open:
+            self._observe_board_reading("left", self._left, None)
+            self._observe_board_reading("right", self._right, None)
             self._clear_readings()
             return None
         lr = self._left.read()
         rr = self._right.read()
+        left_available = self._observe_board_reading("left", self._left, lr)
+        right_available = self._observe_board_reading("right", self._right, rr)
         # A child can detect a disconnection during read(). Discard even a
         # final queued sample rather than presenting a disconnected pair.
-        if (not self.is_open or self._invalid_sensor_data(self._left)
-                or self._invalid_sensor_data(self._right)):
+        if not (left_available and right_available):
             self._clear_readings()
             return None
         if lr is not None:
@@ -151,6 +178,50 @@ class DualWbbBackend(BoardBackend):
     def _is_fresh(self, reading: SensorReading | None, now: float) -> bool:
         return (reading is not None
                 and 0 <= now - reading.timestamp <= self.SAMPLE_MAX_AGE_S)
+
+    def get_board_loads(self) -> dict:
+        """Return each child's current calibrated load without polling it.
+
+        Only observations from the existing read() path are eligible. This
+        accessor does not change aggregate caches or readiness, and returns
+        detached scalar snapshots rather than internal SensorReading objects.
+        The caller owns synchronization with read() and lifecycle operations.
+        """
+        now = time.monotonic()
+        sides = {}
+        for side, backend in (("left", self._left), ("right", self._right)):
+            child = self._child_diagnostics(backend, now)
+            reading = self._observed_readings[side]
+            total = None
+            if not child["is_open"]:
+                error = "disconnected"
+            elif child.get("recovery_blocked"):
+                error = "invalid_sensor_data"
+            elif child.get("calibration_status") == "unavailable":
+                error = "calibration_unavailable"
+            elif reading is None:
+                error = "waiting_for_sample"
+            else:
+                total = reading.total_kg
+                if (not math.isfinite(reading.timestamp)
+                        or not math.isfinite(total) or total < 0):
+                    error = "invalid_sample"
+                elif not self._is_fresh(reading, now):
+                    error = "stale_sample"
+                else:
+                    error = None
+            if error in ("disconnected", "invalid_sensor_data", "calibration_unavailable"):
+                # A later recovery requires a new actual sample, not revival
+                # of an observation made before the child became unavailable.
+                self._observed_readings[side] = None
+            sides[side] = {
+                "device_id": child["device_id"],
+                "total_kg": total if error is None else None,
+                "timestamp": reading.timestamp if error is None else None,
+                "fresh": error is None,
+                "error": error,
+            }
+        return sides
 
     def _child_diagnostics(self, backend, now: float) -> dict:
         """Read a child's existing, bounded diagnostics, never its HID queue.

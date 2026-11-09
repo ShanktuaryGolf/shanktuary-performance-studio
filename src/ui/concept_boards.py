@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import nullcontext
 
 from . import tokens as T
 from .concept_shell import panel, text
@@ -37,6 +38,40 @@ def _status(owner, method):
         return {}
 
 
+
+def _current_wbb_loads(pm, backend):
+    """Read passive per-child display samples under the pressure I/O lock.
+
+    Map by exact device identity, never enumeration index or an old wizard
+    weight. A healthy child's display remains independent of aggregate
+    readiness when its peer cannot contribute a usable sample.
+    """
+    import obs_server
+
+    method = getattr(type(backend), "get_board_loads", None)
+    if method is None:
+        return {}
+    try:
+        with getattr(pm, "lock", nullcontext()):
+            if backend is not getattr(pm, "backend", None):
+                return {}
+            observed = method(backend)
+    except Exception:
+        return {}
+    records = [observed.get(side, {}) for side in ("left", "right")]
+    ids = [obs_server.board_id_to_text(record.get("device_id")) for record in records]
+    if ids[0] and ids[0] == ids[1]:
+        return {}  # one device must never fill two physical board cards
+    now = time.monotonic()
+    loads = {}
+    for device, record in zip(ids, records):
+        stamp, load = _number(record.get("timestamp")), _number(record.get("total_kg"))
+        if (device and record.get("fresh") and stamp is not None
+                and 0 <= now - stamp <= 1.5 and load is not None and load >= 0):
+            loads[device] = load
+    return loads
+
+
 def snapshot(pm):
     """Only actual hardware enumeration and successful calibration prove state."""
     import obs_server
@@ -51,6 +86,19 @@ def snapshot(pm):
     streaming = (
         connected and timestamp is not None and 0 <= time.monotonic() - timestamp <= 1.5
     )
+    board_loads = {}
+    if not openfp and not demo:
+        board_loads = _current_wbb_loads(pm, backend) if dual else {}
+        diagnostic = getattr(type(backend), "get_diagnostics", None)
+        if diagnostic:
+            try:
+                with getattr(pm, "lock", nullcontext()):
+                    detail = diagnostic(backend) if backend is getattr(pm, "backend", None) else {"ready": False}
+                if (detail.get("ready") is False or detail.get("recovery_blocked")
+                        or detail.get("calibration_status") == "unavailable"):
+                    streaming = False
+            except Exception:
+                streaming = False
     if openfp and not streaming:
         reading = getattr(backend, "last_dual_reading", None)
         timestamp = _number(getattr(reading, "timestamp", None))
@@ -104,6 +152,7 @@ def snapshot(pm):
         left=left,
         right=right,
         assignment=assignment,
+        board_loads=board_loads,
         alignment=alignment,
         stance=stance,
         paired=paired and not demo,
@@ -447,6 +496,8 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
                     getattr(reading.left if i == 0 else reading.right, "total", None)
                 )
         else:
+            if state["dual"]:
+                load = state["board_loads"].get(device)
             if device and device == state["left"]:
                 role = "LEFT"
             elif device and device == state["right"]:
@@ -454,14 +505,15 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
             if step == "assign" and state["assignment"].get("phase") in (
                 "waiting_left",
                 "waiting_right",
-                "complete",
             ):
-                # Wizard status is keyed to its own board handles, not scan order.
-                wizard_device = getattr(
-                    wizard, "board_a" if i == 0 else "board_b", None
-                )
+                # Pair each active wizard handle with its exact displayed ID,
+                # including when enumeration order or the device page changes.
+                key = ("a" if i == 0 else "b") if state["demo"] else next(
+                    (key for key in ("a", "b") if device and
+                     obs_server.board_id_to_text(getattr(wizard, f"board_{key}", None)) == device), None)
+                wizard_device = getattr(wizard, f"board_{key}", None) if key else None
                 if wizard_device is not None:
-                    weight_key = "board_a_weight" if i == 0 else "board_b_weight"
+                    weight_key = f"board_{key}_weight"
                     load = (_number(state["assignment"].get(weight_key))
                             if state["assignment"].get(weight_key + "_valid", True)
                             else None)
