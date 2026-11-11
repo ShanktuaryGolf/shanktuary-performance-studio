@@ -352,8 +352,8 @@ def draw_lab(app, avail_w, h, offset_x=0):
         trace = app.get_pressure_trace(app.current_shot) if app.current_shot else None
         latest = trace[-1] if trace else None
     else:
-        from .lab_pressure_view import sync_live_history
-        latest = sync_live_history(app, manager)
+        from .lab_pressure_view import render_live_frame
+        latest = render_live_frame(app, manager, synchronize=True)
     with palette(app):
         c.create_rectangle(
             offset_x, 52, offset_x + avail_w, h, fill=theme.BG, outline=""

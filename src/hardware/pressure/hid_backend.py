@@ -164,6 +164,7 @@ class HidBackend(BoardBackend):
         self._device: hid.device | None = None
         self._calibration: _BoardCalibration | None = None
         self._device_path = device_path
+        self._close_incomplete = False
         self._temp_ref: float = 0.0
         self._last_packet_timestamp: float | None = None
         self._last_sample_timestamp: float | None = None
@@ -411,6 +412,13 @@ class HidBackend(BoardBackend):
             "is_open": self.is_open,
         }
 
+    def disconnect_for_session(self) -> dict:
+        """Close safely, without mistaking a quarantined handle for release."""
+        self.close()
+        released = not self.is_open and not self._close_incomplete
+        return {"released": released, "powered_off": None,
+                "error": None if released else self._last_error}
+
     def shutdown(self) -> None:
         if self._device is None:
             return
@@ -430,6 +438,7 @@ class HidBackend(BoardBackend):
             # Still pending after ~2s: closing now would corrupt the heap.
             # Leak the handle rather than crash the app.
             _UNSETTLED_HANDLES.append(dev)
+            self._close_incomplete = True
             self._last_error = "HID close incomplete: pending read; handle quarantined"
             print("[!] Balance board read did not finish; handle left open "
                   "to avoid a crash")
@@ -438,6 +447,7 @@ class HidBackend(BoardBackend):
             dev.close()
         except Exception as exc:
             self._last_error = f"HID close failed: {exc}"
+            self._close_incomplete = True
             _UNSETTLED_HANDLES.append(dev)
 
     @property

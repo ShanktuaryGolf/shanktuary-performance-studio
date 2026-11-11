@@ -8876,10 +8876,10 @@ class ShanktuaryApp:
 
         trail, _stored = self.pressure_display_trail()
         if not self.is_reviewing_past_shot() and not getattr(self, "lab_demo_running", False):
-            from src.ui.lab_pressure_view import current_live_frame
+            from src.ui.lab_pressure_view import render_live_frame
             # First live sample and stopped streams must not silently borrow
             # the last shot's stored force curve under a live label.
-            trail = self.swing_lab_history if current_live_frame(getattr(obs_server, "pressure_manager", None)) else []
+            trail = self.swing_lab_history if render_live_frame(self, getattr(obs_server, "pressure_manager", None)) else []
             _stored = False
 
         gx1, gx2 = x1 + 46, x2 - 16
@@ -8893,7 +8893,13 @@ class ShanktuaryApp:
                                     font=(theme.ui_font(), 9))
             return
 
-        samples = trail[-120:]
+        if not _stored and not getattr(self, "lab_demo_running", False):
+            from src.ui.lab_pressure_view import live_timeline_samples
+            samples = live_timeline_samples(trail, time.monotonic())
+        else:
+            samples = trail[-120:]
+        if len(samples) < 2:
+            return
         n = len(samples)
 
         def sx(i):
@@ -8946,10 +8952,10 @@ class ShanktuaryApp:
                     v = 100.0 - float(s.get("pct_left", 50.0) or 50.0)
                 v = float(v if v is not None else 0.0)
                 pts.append((sx(i), gy2 - max(0.0, min(1.0, v / scale)) * gh))
-            for i in range(len(pts) - 1):
-                self.canvas.create_line(pts[i][0], pts[i][1],
-                                        pts[i + 1][0], pts[i + 1][1],
-                                        fill=col, width=2)
+            self.canvas.create_line(
+                *[value for point in pts for value in point], fill=col, width=2,
+                smooth=False, capstyle="butt", joinstyle="round", tags="pressure-curve",
+            )
 
         # Impact marker -- the moment both curves are read against.
         for i, s in enumerate(samples):

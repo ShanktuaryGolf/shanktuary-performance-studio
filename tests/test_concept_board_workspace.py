@@ -438,3 +438,45 @@ def test_openfp_mode_choices_explicitly_switch_back_to_wii(workspace, mode):
     pm.pressure_source = 'openfp'
     render(app, guided=True)
     assert not any(key.startswith('switch_wbb_') for key in app.board_workspace_rects)
+
+
+def test_disconnect_controls_and_power_honesty(workspace):
+    app, pm = workspace
+    words = render(app)
+    assert "Disconnect boards" in words
+    assert "disconnect_boards" in app.board_workspace_rects
+    pm.hardware_paused = True
+    pm._disconnect_result = {"message": "Stops connections in this app; power-off is not confirmed."}
+    words = render(app)
+    assert "Resume boards" in words
+    assert "Board connections stopped" in words
+    assert any("power-off is not confirmed" in word for word in words)
+    assert "resume_boards" in app.board_workspace_rects
+    assert "disconnect_boards" not in app.board_workspace_rects
+
+
+def test_disconnect_cancel_never_touches_readers(workspace, monkeypatch):
+    app, pm = workspace
+    pm.disconnect_boards = Mock()
+    render(app)
+    monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *a, **k: False)
+    rect = app.board_workspace_rects["disconnect_boards"]
+    assert ui.handle_click(app, (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2)
+    pm.disconnect_boards.assert_not_called()
+    assert not getattr(app, "board_disconnect_busy", False)
+
+
+def test_disconnect_is_absent_from_simulated_controls(workspace):
+    app, pm = workspace
+    pm.is_simulator = True
+    render(app)
+    assert "disconnect_boards" not in app.board_workspace_rects
+
+
+def test_disconnect_busy_disables_repeated_action(workspace):
+    app, pm = workspace
+    app.board_disconnect_busy = True
+    words = render(app)
+    assert "Working…" in words
+    assert "disconnect_boards" not in app.board_workspace_rects
+    assert "resume_boards" not in app.board_workspace_rects

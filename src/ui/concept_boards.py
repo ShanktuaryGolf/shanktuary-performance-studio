@@ -141,6 +141,8 @@ def snapshot(pm):
     # Saved/default width and unit multipliers do not prove a calibration ran.
     ready = paired and assigned and aligned and measured and streaming and not demo
     return dict(
+        paused=bool(getattr(pm, "hardware_paused", False)),
+        disconnect_result=getattr(pm, "_disconnect_result", None) or {},
         openfp=openfp,
         dual=dual,
         demo=demo,
@@ -568,7 +570,13 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
 
     rx, rw = split + 30, x1 - split - 58
     phase = state["assignment"].get("phase")
-    if done:
+    if state["paused"] and not state["demo"] and not state["openfp"]:
+        heading, note = (
+            "Board connections stopped",
+            state["disconnect_result"].get("message") or
+            "Stops connections in this app; power-off is not confirmed. Pairings are kept.",
+        )
+    elif done:
         heading, note = (
             "Setup flow finished",
             "You can step off the boards. Skipped steps are not calibrated.",
@@ -662,7 +670,9 @@ def draw(app, avail_w, h, offset_x=0, guided=False):
         outline=T.TEAL_SOFT,
         r=10,
     )
-    if state["demo"]:
+    if state["paused"] and not state["demo"] and not state["openfp"]:
+        status = "Auto-reconnect paused · Power-off not confirmed"
+    elif state["demo"]:
         status = "Demo / simulated · not connected hardware"
     elif state["openfp"]:
         status = (
@@ -906,10 +916,20 @@ def _draw_pair_panel(app, state, x0, y0, x1, y1, guided):
         width=x1 - x0 - 40,
     )
     if not state["openfp"]:
-        rect = (x0 + 20, y1 - 40, x1 - 20, y1 - 13)
+        mid = (x0 + x1) / 2
+        rect = (x0 + 20, y1 - 40, mid - 4, y1 - 13)
         _button(c, rect, "Bluetooth settings", enabled=not guided, size=9)
         if not guided:
             app.setup_bt_settings_rect = rect
+        rect = (mid + 4, y1 - 40, x1 - 20, y1 - 13)
+        busy = bool(getattr(app, "board_disconnect_busy", False))
+        enabled = not guided and not state["demo"] and not busy
+        _button(c, rect, "Working…" if busy else
+                "Resume boards" if state["paused"] else "Disconnect boards",
+                enabled=enabled, size=9)
+        if enabled:
+            app.board_workspace_rects[
+                "resume_boards" if state["paused"] else "disconnect_boards"] = rect
 
 
 def handle_click(app, x, y):
@@ -920,6 +940,40 @@ def handle_click(app, x, y):
     for action, rect in getattr(app, "board_workspace_rects", {}).items():
         if not (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
             continue
+        if action in ("disconnect_boards", "resume_boards"):
+            if pm and not getattr(app, "board_disconnect_busy", False):
+                from tkinter import messagebox
+                if action == "disconnect_boards" and not messagebox.askyesno(
+                        "Disconnect balance boards?",
+                        "Stops connections and automatic retries in this app. "
+                        "Bluetooth pairings and saved calibration are kept.\n\n"
+                        "Power-off is not confirmed. Switch the boards off manually "
+                        "to stop battery use.", parent=app.root):
+                    return True
+                # Native HID close may need to settle a pending read. Keep the
+                # action off the event callback and reject repeated clicks.
+                import threading
+                app.board_disconnect_busy = True
+
+                def finish(message):
+                    app.board_disconnect_busy = False
+                    app.copy_feedback = message
+                    app.draw_screen()
+
+                def perform():
+                    try:
+                        result = getattr(pm, action)()
+                        message = result["message"]
+                    except Exception as exc:
+                        message = f"Board connection action failed: {exc}"
+                    try:
+                        app.root.after(0, lambda: finish(message))
+                    except Exception:
+                        pass  # app may have closed while the handle settled
+
+                threading.Thread(target=perform, daemon=True,
+                                 name="board-disconnect").start()
+            return True
         if action in ("switch_wbb_single", "switch_wbb_dual"):
             # These are explicit source + mode choices, not paint-time changes.
             # Activate the saved Wii calibration before choosing its board mode.

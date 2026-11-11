@@ -84,6 +84,7 @@ def _levels(loads):
     return tuple(round(value / loads.maximum * _LEVELS) for value in (loads.front, loads.back))
 
 
+@lru_cache(maxsize=16)
 def _rgb(color):
     return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
 
@@ -221,20 +222,27 @@ def _draw_foot(canvas, x0, y0, width, height, is_left, loads):
         _vector_foot(canvas, x0, y0, width, height, is_left, *levels)
         return
     width, height = max(1, round(width)), max(1, round(height))
-    key = (width, height, bool(is_left), *levels)
+    scale = getattr(real, "ui_scale", 1.0)
+    key = (width, height, bool(is_left), *levels, scale)
     cache = getattr(real, "_estimated_foot_cache", None)
     if cache is None:
         cache = real._estimated_foot_cache = OrderedDict()
     photo = cache.get(key)
     if photo is None:
-        photo = ImageTk.PhotoImage(_foot_pixels(width, height, is_left, *levels), master=real)
+        pixels = _foot_pixels(width, height, is_left, *levels)
+        if scale != 1:
+            # Same logical raster and same resize as ScaledCanvas, but upload
+            # once instead of Tk upload -> readback -> resize -> second upload.
+            pixels = pixels.resize((max(1, round(width * scale)), max(1, round(height * scale))))
+        photo = ImageTk.PhotoImage(pixels, master=real)
+        photo._sps_device_scale = scale
         cache[key] = photo
         while len(cache) > _PHOTO_CACHE_SIZE:
             cache.popitem(last=False)
     else:
         cache.move_to_end(key)
-    # Follow the shared Canvas API: ViewportCanvas translates, ScaledCanvas
-    # scales the raster and retains the current frame's image references.
+    # Coordinates still follow ViewportCanvas and ScaledCanvas. The marker
+    # prevents a second image resize while cached/retained owners keep it alive.
     canvas.create_image(x0, y0, anchor="nw", image=photo, tags="estimated-foot-image")
 
 

@@ -128,8 +128,13 @@ class BoardBackend(ABC):
         """Clean up resources."""
 
     def shutdown(self) -> None:
-        """Power off the board hardware. Default: just close."""
+        """Request shutdown/close. Physical power-off is not guaranteed."""
         self.close()
+
+    def disconnect_for_session(self) -> dict:
+        """Release only this reader; the caller owns stopping reconnects."""
+        self.close()
+        return {"released": not self.is_open, "powered_off": None}
 
     @abstractmethod
     def read(self) -> SensorReading | None:

@@ -1,10 +1,54 @@
 """Passive live-pressure presentation and short, time-based CoP trails."""
 import math
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 COP_TRAIL_SECONDS = 1.75
 LIVE_MAX_AGE_SECONDS = 1.5
+LAB_FRAME_SECONDS = 1 / 30
+LIVE_HISTORY_SECONDS = 20.0
+LIVE_TIMELINE_SECONDS = 12.0
+LIVE_HISTORY_MAX_SAMPLES = 1200
+_UNSET = object()
+
+
+def frame_delay_ms(started, interval=LAB_FRAME_SECONDS, now=None):
+    """Budget paint time inside the interval and leave Tk room for input."""
+    now = time.monotonic() if now is None else now
+    return max(8, math.ceil((started + interval - now) * 1000))
+
+
+@contextmanager
+def pressure_render_snapshot(app, manager, frame=_UNSET):
+    """One passive, coherent sensor-health observation for every Lab panel."""
+    if getattr(app, "_lab_render_snapshot_active", False):
+        yield
+        return
+    if frame is _UNSET:
+        frame = sync_live_history(app, manager)
+    app._lab_render_snapshot_active = True
+    app._lab_render_snapshot = frame
+    try:
+        yield
+    finally:
+        app._lab_render_snapshot_active = False
+        app._lab_render_snapshot = None
+
+
+def render_live_frame(app, manager, *, synchronize=False):
+    if getattr(app, "_lab_render_snapshot_active", False):
+        return app._lab_render_snapshot
+    return sync_live_history(app, manager) if synchronize else current_live_frame(manager)
+
+
+def live_timeline_samples(frames, reference_time):
+    """Keep the former ~12-second live window at any UI cadence, with all samples."""
+    result = []
+    for frame in frames[-LIVE_HISTORY_MAX_SAMPLES:]:
+        stamp = finite_number(frame.get("timestamp")) if isinstance(frame, dict) else None
+        if stamp is not None and 0 <= reference_time - stamp <= LIVE_TIMELINE_SECONDS:
+            result.append(frame)
+    return result
 
 
 def finite_number(value):
@@ -84,7 +128,15 @@ def sync_live_history(app, manager, now=None):
         history.clear()
     if frame is not getattr(app, "_lab_last_live_frame", None) and stamp != last_stamp:
         history.append(frame)
-        del history[:-200]
+        # A faster painter must not shorten the force/transfer time window.
+        first = 0
+        while first < len(history):
+            prior = finite_number(history[first].get("timestamp"))
+            if prior is not None and stamp - prior <= LIVE_HISTORY_SECONDS:
+                break
+            first += 1
+        del history[:first]
+        del history[:-LIVE_HISTORY_MAX_SAMPLES]
     app._lab_last_live_frame = frame
     app._lab_last_live_stamp = stamp
     app._lab_rejected_frame = None

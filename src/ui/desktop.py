@@ -13,7 +13,8 @@ iterative renderers are progressively consolidated.
 from __future__ import annotations
 
 import sys
-from contextlib import contextmanager
+from collections import OrderedDict
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import shanktuary_performance_studio as studio
@@ -166,13 +167,22 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         return logical_font(kwargs.pop("root", self.root), **kwargs)
 
     def _text_width(self, text, font_spec):
-        size = font_spec[1] if len(font_spec) > 1 else 10
-        return logical_font(
-            self.root,
-            family=font_spec[0],
-            size=size,
-            weight="bold" if "bold" in font_spec else "normal",
-        ).measure(text)
+        # Text shaping can cost more than the rest of a live frame. Cache the
+        # exact existing logical-font measurement, not an approximation.
+        key = (str(text), tuple(font_spec))
+        cache = getattr(self, "_logical_text_widths", None)
+        if cache is None:
+            cache = self._logical_text_widths = OrderedDict()
+        if key not in cache:
+            size = font_spec[1] if len(font_spec) > 1 else 10
+            cache[key] = logical_font(
+                self.root, family=font_spec[0], size=size,
+                weight="bold" if "bold" in font_spec else "normal",
+            ).measure(text)
+            if len(cache) > 512:
+                cache.popitem(last=False)
+        cache.move_to_end(key)
+        return cache[key]
 
     def set_ui_scale(self, choice, *, persist=True):
         if choice not in CHOICES:
@@ -253,38 +263,48 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         return studio.ShanktuaryApp.pressure_display_trail(self)
 
     def poll_pressure_stream(self):
-        """Keep sensor collection responsive without repainting static Setup 30Hz.
+        """Paint live Lab near 30 Hz without slowing sensor processing.
 
-        Device processing still owns its full-rate data. The desktop redraws
-        live Lab at 10Hz and connection/calibration status at 4Hz, and lets Tk
-        drain input events between frames even at high accessibility scaling.
+        The deadline includes paint time rather than adding a fixed sleep
+        after every frame. No catch-up burst is scheduled after a slow paint.
+        The explicit preview owns its own one timer, never two redraw loops.
         """
         import time
 
+        from .lab_pressure_view import (
+            LAB_FRAME_SECONDS,
+            frame_delay_ms,
+            pressure_render_snapshot,
+            sync_live_history,
+        )
+
+        started = time.monotonic()
+        delay = 100
         try:
             pm = getattr(studio.obs_server, "pressure_manager", None)
-            from .lab_pressure_view import sync_live_history
             latest = sync_live_history(self, pm)
             if pm:
                 self.tick_setup_flow()
-            now = time.monotonic()
-            # Lab decay and stale-state transitions must repaint even
-            # when no new sample object arrives or the golfer stays still.
-            live = self.view_mode == 8 or (self.view_mode == 12 and latest is not getattr(
+            lab = self.view_mode == 8
+            preview = lab and getattr(self, "lab_demo_running", False)
+            live = lab or (self.view_mode == 12 and latest is not getattr(
                 self, "_last_concept_painted_frame", None
             ))
-            interval = 0.1 if live else 0.25
-            if (
+            interval = LAB_FRAME_SECONDS if lab else 0.1 if live else 0.25
+            if not preview and (
                 live or self.view_mode == 10 or self.show_board_assign_modal
-            ) and now - getattr(
+            ) and started - getattr(
                 self, "_last_concept_pressure_paint", 0
             ) >= interval:
-                self.draw_screen()
-                self._last_concept_pressure_paint = time.monotonic()
+                with pressure_render_snapshot(self, pm, latest):
+                    self.draw_screen()
+                self._last_concept_pressure_paint = started
                 self._last_concept_painted_frame = latest
+            if lab and not preview:
+                delay = frame_delay_ms(started, LAB_FRAME_SECONDS)
         except Exception:
             pass
-        self.root.after(100, self.poll_pressure_stream)
+        self.root.after(delay, self.poll_pressure_stream)
 
     def draw_screen(self):
         """Compose the live production workspace beneath the concept shell.
@@ -316,7 +336,14 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
         theme.RAIL_W = tokens.NAV_RAIL_W
         self.canvas = ViewportCanvas(real_canvas)
         try:
-            with legacy_palette._page_palette(self):
+            from .lab_pressure_view import pressure_render_snapshot, source_key
+            manager = getattr(studio.obs_server, "pressure_manager", None)
+            scope = pressure_render_snapshot(self, manager) if self.view_mode == 8 else nullcontext()
+            retained = (real_canvas.retained_frame((
+                8, real_canvas.ui_scale, real_canvas.winfo_width(), real_canvas.winfo_height(),
+                source_key(manager), bool(getattr(self, "lab_demo_running", False)),
+            )) if self.view_mode == 8 and isinstance(real_canvas, ScaledCanvas) else nullcontext())
+            with retained, scope, legacy_palette._page_palette(self):
                 return super().draw_screen()
         finally:
             self.canvas = real_canvas

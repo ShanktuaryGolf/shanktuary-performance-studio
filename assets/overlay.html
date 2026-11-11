@@ -1971,9 +1971,40 @@
 
     // --- Swing Lab Pressure Tile Functions ---
     const pressureTrail = [];
+    let livePressureExpiry = null;
+    let livePressureSerial = 0;
+    const LIVE_PRESSURE_MAX_AGE_MS = 1500;
+
+    // Only live WebSocket frames own this expiry. Saved shot metrics and
+    // deliberately rendered historical/demo previews are not modified.
+    function clearStaleLivePressure() {
+      pressureTrail.length = 0;
+      const labels = {
+        v_wbb_phase: 'PRESSURE UNAVAILABLE',
+        v_wbb_pct_left: '-- L',
+        v_wbb_pct_right: '-- R',
+      };
+      for (const [id, label] of Object.entries(labels)) {
+        const el = document.getElementById(id);
+        if (el) el.innerText = label;
+      }
+      const fill = document.getElementById('v_wbb_fill_l');
+      if (fill) fill.style.width = '0%';
+      for (const id of ['obsHeatmapCanvas', 'obsCopCanvas']) {
+        const canvas = document.getElementById(id);
+        if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
 
     function handleLivePressureFrame(p) {
       if (!p) return;
+      const serial = ++livePressureSerial;
+      if (livePressureExpiry !== null) clearTimeout(livePressureExpiry);
+      livePressureExpiry = setTimeout(() => {
+        if (serial !== livePressureSerial) return;
+        livePressureExpiry = null;
+        clearStaleLivePressure();
+      }, LIVE_PRESSURE_MAX_AGE_MS);
       pressureTrail.push(p);
       if (pressureTrail.length > 120) pressureTrail.shift();
 

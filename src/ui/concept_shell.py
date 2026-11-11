@@ -1,6 +1,7 @@
 """The approved full-width labeled navigation and studio header."""
 
 import math
+from functools import lru_cache
 
 import theme
 
@@ -71,8 +72,10 @@ def paint_brand_mark(canvas):
         cache[scale] = ImageTk.PhotoImage(_brand_mark_pixels(scale), master=real)
     # Bypass only ScaledCanvas's image upsampling; coordinates still use its
     # exact scale, and normal canvas bbox/hit geometry remains unchanged.
-    return tk.Canvas._create(real, "image", (44 * scale, 60 * scale),
-                             {"image": cache[scale], "anchor": "center", "tags": "studio-brand-mark"})
+    options = {"image": cache[scale], "anchor": "center", "tags": "studio-brand-mark"}
+    if hasattr(real, "create_device_image"):
+        return real.create_device_image(44 * scale, 60 * scale, **options)
+    return tk.Canvas._create(real, "image", (44 * scale, 60 * scale), options)
 
 
 def text(c, x, y, value, size=12, color=T.TEXT, bold=False, anchor="w", **kw):
@@ -234,12 +237,10 @@ def icon(c, kind, x, y, color=T.TEXT):
         c.create_oval(x + 4, y - 5, x + 14, y + 5, outline=color, width=1.6)
 
 
-def paint(app, w, h):
-    c = app.canvas
-    c.create_rectangle(0, 0, RAIL, h, fill=T.RAIL_BG, outline="")
-    c.create_line(RAIL, 0, RAIL, h, fill=T.HAIRLINE)
-    c.create_rectangle(RAIL, 0, w, 176, fill=T.PAGE_BG, outline="")
-    # Organic contour lines echo the approved topographic header artwork.
+@lru_cache(maxsize=16)
+def _header_contours(w):
+    """The same immutable header geometry, calculated once per viewport width."""
+    contours = []
     for band in range(13):
         pts = []
         for step in range(161):
@@ -250,6 +251,17 @@ def paint(app, w, h):
             x = w * 0.67 + xx * 0.94 - yy * 0.34
             y = 25 + xx * 0.34 + yy * 0.94
             pts.extend((x, y))
+        contours.append(tuple(pts))
+    return tuple(contours)
+
+
+def paint(app, w, h):
+    c = app.canvas
+    c.create_rectangle(0, 0, RAIL, h, fill=T.RAIL_BG, outline="")
+    c.create_line(RAIL, 0, RAIL, h, fill=T.HAIRLINE)
+    c.create_rectangle(RAIL, 0, w, 176, fill=T.PAGE_BG, outline="")
+    # Organic contour lines echo the approved topographic header artwork.
+    for pts in _header_contours(w):
         c.create_line(*pts, fill="#102E3B", smooth=True, width=0.65)
     paint_brand_mark(c)
     text(c, 68, 44, "SHANKTUARY", 18, bold=True)

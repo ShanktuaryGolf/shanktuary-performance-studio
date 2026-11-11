@@ -125,7 +125,8 @@ class ScaledCanvas(tk.Canvas):
         return result
 
     def _image(self, source):
-        if not source or self.ui_scale == 1:
+        if (not source or self.ui_scale == 1
+                or getattr(source, "_sps_device_scale", None) == self.ui_scale):
             return source
         key = (str(source), self.ui_scale)
         image = self._scaled_images.get(key)
@@ -138,6 +139,7 @@ class ScaledCanvas(tk.Canvas):
             self._scaled_images[key] = image
             while len(self._scaled_images) > 96:
                 self._scaled_images.popitem(last=False)
+        self._scaled_images.move_to_end(key)
         self._frame_images.append(image)
         return image
 
@@ -158,7 +160,23 @@ class ScaledCanvas(tk.Canvas):
         for name in ("image", "activeimage", "disabledimage"):
             if name in kw:
                 kw[name] = self._image(kw[name])
-        return super()._create(itemType, tuple(x*self.ui_scale for x in args), kw)
+        return self._create_physical(itemType, tuple(x*self.ui_scale for x in args), kw)
+
+    def _create_physical(self, kind, coords, options):
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None and retained.active:
+            return retained.create(kind, coords, options)
+        return super()._create(kind, coords, options)
+
+    def create_device_image(self, *physical_coords, **options):
+        """Already device-sized images still participate in Lab item reuse."""
+        return self._create_physical("image", physical_coords, options)
+
+    def retained_frame(self, key):
+        from .retained_canvas import RetainedCanvas
+        if not hasattr(self, "_retained_lab"):
+            self._retained_lab = RetainedCanvas(self)
+        return self._retained_lab.frame(key)
 
     def bbox(self, *args):
         box = super().bbox(*args)
@@ -166,14 +184,56 @@ class ScaledCanvas(tk.Canvas):
 
     def coords(self, *args):
         if len(args) > 1:
-            return super().coords(args[0], *(v*self.ui_scale for v in tk._flatten(args[1:])))
+            coords = tuple(v*self.ui_scale for v in tk._flatten(args[1:]))
+            retained = getattr(self, "_retained_lab", None)
+            if retained is not None:
+                return retained.set_coords(args[0], coords)
+            return super().coords(args[0], *coords)
         return [v/self.ui_scale for v in super().coords(*args)]
 
+    def itemconfigure(self, tagOrId, cnf=None, **kw):
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None and (kw or isinstance(cnf, dict)):
+            return retained.configure(tagOrId, dict(cnf or {}, **kw))
+        return super().itemconfigure(tagOrId, cnf, **kw)
+
+    itemconfig = itemconfigure
+
     def move(self, tagOrId, xAmount, yAmount):
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None:
+            return retained.move(tagOrId, xAmount*self.ui_scale, yAmount*self.ui_scale)
         return super().move(tagOrId, xAmount*self.ui_scale, yAmount*self.ui_scale)
 
     def delete(self, *args):
-        result = super().delete(*args)
+        retained = getattr(self, "_retained_lab", None)
         if "all" in args:
             self._frame_images.clear()
+            if retained is not None and retained.active:
+                return None  # Full painter describes replacements for retained items.
+        if retained is not None:
+            retained.note_delete(*args)  # Resolve tags before Tcl removes their items.
+        return super().delete(*args)
+
+    def find_all(self):
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None and retained.active:
+            return retained.current_items
+        return super().find_all()
+
+    def tag_raise(self, tagOrId, aboveThis=None):
+        result = super().tag_raise(tagOrId, aboveThis)
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None and retained.active:
+            retained.note_raise(tagOrId, aboveThis)
         return result
+
+    def tag_lower(self, tagOrId, belowThis=None):
+        result = super().tag_lower(tagOrId, belowThis)
+        retained = getattr(self, "_retained_lab", None)
+        if retained is not None and retained.active:
+            retained.note_lower(tagOrId, belowThis)
+        return result
+
+    lift = tkraise = tag_raise
+    lower = tag_lower

@@ -64,8 +64,21 @@ class DualWbbBackend(BoardBackend):
         self._left.close()
         self._right.close()
 
+    def disconnect_for_session(self) -> dict:
+        """Release exactly these two readers, reporting partial failure."""
+        self._clear_readings()
+        self._clear_observed_readings()
+        results = {}
+        for side, board in (("left", self._left), ("right", self._right)):
+            try:
+                results[side] = board.disconnect_for_session()
+            except Exception as exc:
+                results[side] = {"released": False, "error": str(exc)}
+        return {"released": all(r.get("released", False) for r in results.values()),
+                "powered_off": None, "boards": results}
+
     def shutdown(self) -> None:
-        """Power off both boards."""
+        """Request shutdown for both boards; power-off is not confirmed."""
         self._clear_readings()
         self._clear_observed_readings()
         self._left.shutdown()

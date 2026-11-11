@@ -64,9 +64,11 @@ def tick(app):
     app.lab_demo_timer = None
     if not active(app):
         return
-    elapsed = time.monotonic() - app.lab_demo_started
+    started = time.monotonic()
+    elapsed = started - app.lab_demo_started
     # Seed a short visible trace immediately, then animate a rolling window.
     app.lab_demo_frames = [demo_frame(max(0, elapsed + 4 - i * .05))
                            for i in reversed(range(81))]
     app.draw_screen()
-    app.lab_demo_timer = app.root.after(100, lambda: tick(app))
+    from .lab_pressure_view import frame_delay_ms
+    app.lab_demo_timer = app.root.after(frame_delay_ms(started), lambda: tick(app))

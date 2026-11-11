@@ -641,6 +641,7 @@ class PressureManager:
     _env_source_override = False
     _saved_source = "wbb"
     _saved_openfp_url = None
+    hardware_paused = False
     WIZARD_SAMPLE_MAX_AGE = 1.5
     WIZARD_RETRY_DELAY = 3.0
     WIZARD_MAX_RETRIES = 2
@@ -758,7 +759,8 @@ class PressureManager:
                     backend is not None
                     and getattr(type(backend), "SELF_RECONNECTS", False)
                     and getattr(backend, "is_running", False))
-                if (not self.is_simulator and not is_wiz_active and not self_managed
+                if (not ((self.hardware_paused or getattr(self, "_disconnect_in_progress", False))
+                         and self.pressure_source == "wbb") and not self.is_simulator and not is_wiz_active and not self_managed
                         and (not backend or not backend.is_open)):
                     now = time.time()
                     if now - self._last_reconnect_attempt >= 2.0:
@@ -774,7 +776,8 @@ class PressureManager:
                             # A UI action may have started assignment or replaced
                             # the backend since the snapshot. Never close it on
                             # the strength of that stale reconnect decision.
-                            if (not self.is_simulator and not wizard_now and not managed_now
+                            if (not ((self.hardware_paused or getattr(self, "_disconnect_in_progress", False))
+                         and self.pressure_source == "wbb") and not self.is_simulator and not wizard_now and not managed_now
                                     and (not current or not current.is_open)):
                                 try:
                                     self._set_simulator_unlocked(self.is_simulator)
@@ -809,71 +812,77 @@ class PressureManager:
                         else:
                             readings = []
                     for reading in readings:
-                        if not reading:
-                            continue
-                        self._latest_raw_reading = reading
-                        tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
+                        with self.lock:
+                            if self.backend is not backend:
+                                break
+                            if not reading:
+                                continue
+                            self._latest_raw_reading = reading
+                            tared = self.tare_offsets.apply(reading) if self.tare_offsets else reading
 
-                        # Alignment consumes genuine, fresh samples before
-                        # balance multipliers, never a retained display frame.
-                        self._advance_stance_alignment(tared, source_backend=backend)
+                            # Alignment consumes genuine, fresh samples before
+                            # balance multipliers, never a retained display frame.
+                            self._advance_stance_alignment(tared, source_backend=backend)
 
-                        # Apply 50/50 stance balance calibration multipliers
-                        if self.balance_multiplier != [1.0, 1.0]:
-                            mult_l, mult_r = self.balance_multiplier
-                            from src.hardware.pressure.base import SensorReading
-                            tared = SensorReading(
-                                top_left=tared.top_left * mult_l,
-                                bottom_left=tared.bottom_left * mult_l,
-                                top_right=tared.top_right * mult_r,
-                                bottom_right=tared.bottom_right * mult_r,
-                                timestamp=tared.timestamp
-                            )
-                        
-                        # When load is under threshold (< 1.0 kg), emit zero resting frame at center (0,0)
-                        if tared.total < 1.0:
-                            from src.processing.pressure.cop import CoPSample
-                            zero_cop = CoPSample(
-                                cop_x=0.0,
-                                cop_y=0.0,
-                                total_kg=0.0,
-                                pct_left=50.0,
-                                pct_right=50.0,
-                                pct_front=50.0,
-                                pct_back=50.0,
-                                # Sensor clock, like every loaded frame --
-                                # never wall clock (see board_is_streaming).
-                                timestamp=tared.timestamp,
-                                raw=tared,
-                                left_kg=0.0,
-                                right_kg=0.0,
-                            )
-                            frame = self.buffer.push(zero_cop, torque=0.0, phase="Address")
-                            with self.lock:
-                                self.latest_frame = frame
-                        else:
-                            cop = self.cop_calc.compute(tared) if self.cop_calc else None
-                            if cop:
-                                torque = self.torque_calc.update(cop) if self.torque_calc else 0.0
-                                phase = self.swing_det.update(cop).value if self.swing_det else "Address"
-                                frame = self.buffer.push(cop, torque=torque, phase=phase)
-                                # Drive the stance-width state machine while a
-                                # calibration is running.
-                                if self.stance_cal.state != StanceCalState.IDLE:
-                                    self.stance_cal.update(cop)
-                                    if self.stance_cal.state == StanceCalState.DONE:
-                                        w = self.stance_cal.stance_width_mm
-                                        if w is not None:
-                                            with self.lock:
-                                                self.stance_width_mm = round(w, 1)
-                                            self._save_calibration()
+                            # Apply 50/50 stance balance calibration multipliers
+                            if self.balance_multiplier != [1.0, 1.0]:
+                                mult_l, mult_r = self.balance_multiplier
+                                from src.hardware.pressure.base import SensorReading
+                                tared = SensorReading(
+                                    top_left=tared.top_left * mult_l,
+                                    bottom_left=tared.bottom_left * mult_l,
+                                    top_right=tared.top_right * mult_r,
+                                    bottom_right=tared.bottom_right * mult_r,
+                                    timestamp=tared.timestamp
+                                )
+
+                            # When load is under threshold (< 1.0 kg), emit zero resting frame at center (0,0)
+                            if tared.total < 1.0:
+                                from src.processing.pressure.cop import CoPSample
+                                zero_cop = CoPSample(
+                                    cop_x=0.0,
+                                    cop_y=0.0,
+                                    total_kg=0.0,
+                                    pct_left=50.0,
+                                    pct_right=50.0,
+                                    pct_front=50.0,
+                                    pct_back=50.0,
+                                    # Sensor clock, like every loaded frame --
+                                    # never wall clock (see board_is_streaming).
+                                    timestamp=tared.timestamp,
+                                    raw=tared,
+                                    left_kg=0.0,
+                                    right_kg=0.0,
+                                )
+                                frame = self.buffer.push(zero_cop, torque=0.0, phase="Address")
                                 with self.lock:
                                     self.latest_frame = frame
+                            else:
+                                cop = self.cop_calc.compute(tared) if self.cop_calc else None
+                                if cop:
+                                    torque = self.torque_calc.update(cop) if self.torque_calc else 0.0
+                                    phase = self.swing_det.update(cop).value if self.swing_det else "Address"
+                                    frame = self.buffer.push(cop, torque=torque, phase=phase)
+                                    # Drive the stance-width state machine while a
+                                    # calibration is running.
+                                    if self.stance_cal.state != StanceCalState.IDLE:
+                                        self.stance_cal.update(cop)
+                                        if self.stance_cal.state == StanceCalState.DONE:
+                                            w = self.stance_cal.stance_width_mm
+                                            if w is not None:
+                                                with self.lock:
+                                                    self.stance_width_mm = round(w, 1)
+                                                self._save_calibration()
+                                    with self.lock:
+                                        self.latest_frame = frame
 
+                        # Socket writes must never hold the hardware I/O lock.
                         now = time.time()
-                        if now - last_broadcast >= 0.033:  # ~30Hz broadcast rate for smooth UI rendering
-                            if self.latest_frame:
-                                obs_state.broadcast({"type": "pressure", "data": self.latest_frame})
+                        if now - last_broadcast >= 0.033:
+                            with self.lock:
+                                outgoing = self.latest_frame if self.backend is backend else None
+                            if outgoing:
+                                obs_state.broadcast({"type": "pressure", "data": outgoing})
                             last_broadcast = now
                 # Also run when read() returns None or no backend is open.
                 # A stopped stream must not leave a completed countdown active.
@@ -1373,6 +1382,8 @@ class PressureManager:
             self.backend = SimulatorBackend()
             try: self.backend.open()
             except Exception: pass
+        elif (self.hardware_paused or getattr(self, "_disconnect_in_progress", False)) and self.pressure_source == "wbb":
+            self.backend = None
         elif self.pressure_source == "openfp":
             self.backend = self._create_openfp_backend()
         else:
@@ -1395,6 +1406,137 @@ class PressureManager:
             except Exception:
                 self.backend = None
         return self.is_simulator
+
+    def disconnect_boards(self):
+        """Stop this app's readers/retries; preserve bonds and saved calibration.
+
+        This does not assert that the physical board has powered off. It is
+        session-only; explicit Resume (or restarting the app) enables reads.
+        Detach after in-flight processing settles, then close outside the
+        display lock: Windows may need seconds to settle an outstanding read.
+        """
+        with self.lock:
+            if getattr(self, "_disconnect_in_progress", False):
+                return dict(getattr(self, "_disconnect_result", None) or {
+                    "status": "busy", "message": "Wait for board connection work to finish."})
+            if self.is_simulator or self.pressure_source != "wbb":
+                return {"status": "unavailable", "message": "Select real Wii boards first."}
+            if self.hardware_paused:
+                return dict(self._disconnect_result)
+            self.hardware_paused = True  # set before detaching any reader
+            self._disconnect_in_progress = True
+            if self._alignment_active:
+                self._alignment_active = False
+                self._alignment_samples = []
+                self._alignment_status_msg = "Alignment stopped: boards disconnected"
+            wizard = self.assignment_wizard
+            if wizard and wizard.phase in ("waiting_left", "waiting_right"):
+                wizard.reset()
+            if self.stance_cal.state not in (StanceCalState.IDLE, StanceCalState.DONE):
+                self.stance_cal.reset()
+            readers = [self.backend, getattr(self, "_wiz_backend_a", None),
+                       getattr(self, "_wiz_backend_b", None)]
+            self.backend = None
+            self._wiz_backend_a = self._wiz_backend_b = None
+            self._wiz_health = {}
+            self.latest_frame = self._latest_raw_reading = None
+            self._disconnect_result = {
+                "status": "disconnecting", "paused": True, "powered_off": None,
+                "message": "Stopping board connections; power-off is not confirmed.",
+            }
+        # The loop checks backend identity again under the same lock before
+        # reading or processing. Detached readers can no longer be used.
+        results, seen = [], set()
+        for reader in readers:
+            if reader is None or id(reader) in seen:
+                continue
+            seen.add(id(reader))
+            try:
+                disconnect = getattr(type(reader), "disconnect_for_session", None)
+                if disconnect:
+                    results.append(disconnect(reader))
+                else:
+                    reader.close()
+                    results.append({"released": not reader.is_open})
+            except Exception as exc:
+                results.append({"released": False, "error": str(exc)})
+        released = all(r.get("released", False) for r in results)
+        with self.lock:
+            self._disconnect_in_progress = False
+            self._disconnect_result = {
+                "status": "disconnected" if released else "stopped_with_warning",
+                "paused": True, "powered_off": None, "boards": results,
+                "message": ("Board reads and retries stopped. Pairings kept. "
+                            "Power-off is not confirmed; switch boards off manually."
+                            if released else
+                            "Reads and retries stopped, but a handle could not be released. "
+                            "Pairings kept. Power-off is not confirmed."),
+            }
+            return dict(self._disconnect_result)
+
+    def resume_boards(self):
+        """Explicit reconnect; build readers off-lock, never pair or tare.
+
+        The pause remains latched while opening. Configuration changes during
+        a slow open discard the candidate instead of replacing a newer source.
+        """
+        with self.lock:
+            if getattr(self, "_disconnect_in_progress", False):
+                return {"status": "busy", "message": "Wait for board connection work to finish."}
+            if self.pressure_source != "wbb" or self.is_simulator:
+                return {"status": "unavailable", "message": "Select real Wii boards first."}
+            if not self.hardware_paused:
+                return {"status": "already_active", "message": "Board reads are already enabled."}
+            config = (self.board_mode, self.assigned_left, self.assigned_right)
+            self._disconnect_in_progress = True
+            self._disconnect_result = {
+                "status": "connecting", "paused": True, "powered_off": None,
+                "message": "Opening board connections. Pairings and calibration are unchanged.",
+            }
+            self._device_scan_cache = None
+        candidate, readers = None, []
+        try:
+            mode, left, right = config
+            if mode == "dual" and left and right:
+                from src.hardware.pressure.dual_wbb_backend import DualWbbBackend
+                readers.append(self._create_hardware_backend(left))
+                readers.append(self._create_hardware_backend(right))
+                if all(readers):
+                    candidate = DualWbbBackend(*readers)
+            else:
+                candidate = self._create_hardware_backend()
+                readers.append(candidate)
+        except Exception:
+            candidate = None
+        with self.lock:
+            unchanged = (
+                self.pressure_source == "wbb" and not self.is_simulator
+                and self.hardware_paused and self.backend is None
+                and config == (self.board_mode, self.assigned_left, self.assigned_right)
+            )
+            if unchanged:
+                self.backend = candidate
+                self.hardware_paused = False
+                self._disconnect_result = None
+                result = {"status": "resumed", "message": "Board reads enabled; turn boards on to reconnect."}
+            else:
+                self._disconnect_result = {
+                    "status": "cancelled", "paused": self.hardware_paused,
+                    "message": "Board settings changed while connecting. Resume again if needed.",
+                }
+                result = dict(self._disconnect_result)
+        # Incomplete or obsolete candidates must release all exact readers.
+        # Keep the busy guard raised until teardown completes.
+        if not unchanged or candidate is None:
+            for reader in readers:
+                if reader is not None:
+                    try:
+                        reader.close()
+                    except Exception:
+                        pass
+        with self.lock:
+            self._disconnect_in_progress = False
+        return result
 
     def set_simulator(self, enabled: bool):
         with self.lock:
@@ -1641,8 +1783,11 @@ class PressureManager:
 
     def start_assignment_wizard(self):
         with self.lock:
+            if (self.hardware_paused or getattr(self, "_disconnect_in_progress", False)) and not self.is_simulator:
+                return {"phase": "idle", "is_complete": False,
+                        "message": "Board reads are stopped. Select Resume boards first."}
             from src.hardware.pressure.connection import BoardAssignmentWizard
-            
+
             # Close existing backend so we don't hold exclusive handle on Board 1
             if self.backend:
                 try: self.backend.close()
@@ -1823,6 +1968,8 @@ class PressureManager:
             }
             devices = self.enumerate_boards()
             return {
+                "hardware_paused": self.hardware_paused,
+                "disconnect_result": getattr(self, "_disconnect_result", None),
                 "connected": self.backend.is_open if self.backend else False,
                 "mode": "simulator" if self.is_simulator else "hardware",
                 "source": self.pressure_source,
