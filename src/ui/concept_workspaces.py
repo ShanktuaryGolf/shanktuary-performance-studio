@@ -352,10 +352,8 @@ def draw_lab(app, avail_w, h, offset_x=0):
         trace = app.get_pressure_trace(app.current_shot) if app.current_shot else None
         latest = trace[-1] if trace else None
     else:
-        latest = getattr(manager, "latest_frame", None)
-        if not latest and app.current_shot:
-            trace = app.get_pressure_trace(app.current_shot)
-            latest = trace[-1] if trace else None
+        from .lab_pressure_view import sync_live_history
+        latest = sync_live_history(app, manager)
     with palette(app):
         c.create_rectangle(
             offset_x, 52, offset_x + avail_w, h, fill=theme.BG, outline=""
@@ -376,7 +374,7 @@ def draw_lab(app, avail_w, h, offset_x=0):
         elif reviewing:
             tag = "Historical shot trace · final sample" if latest else "Historical shot · pressure unavailable"
         else:
-            tag = "DEMO / SIMULATED" if demo else "Local board data"
+            tag = "DEMO / SIMULATED" if demo else "Local board data" if latest else "Live pressure unavailable"
         text(c, x0 + 4, top + 10, tag, 11, GOLD if demo and not reviewing else theme.TEXT_2)
         grid_top = top + 52
         metrics_y = bottom - 96
@@ -385,13 +383,16 @@ def draw_lab(app, avail_w, h, offset_x=0):
         middle = grid_top + (metrics_y - grid_top - 16) * 0.51
         panels = [
             (x0, grid_top, left_end, middle, "Centre of pressure trail"),
-            (right_start, grid_top, x1, middle, "Board-zone loads"),
+            (right_start, grid_top, x1, middle, "Estimated foot load"),
             (x0, middle + 14, left_end, metrics_y - 14, "Weight transfer"),
             (right_start, middle + 14, x1, metrics_y - 14, "Force curve"),
         ]
+        foot_title_item = None
         for px, py, qx, qy, title in panels:
             panel(c, px, py, qx, qy)
-            text(c, px + 18, py + 14, title, 18, bold=True)
+            title_item = text(c, px + 18, py + 14, title, 18, bold=True, tags="lab-panel-title")
+            if title == "Estimated foot load":
+                foot_title_item = title_item
         # The CoP's actual millimetre axes are important: the concept artwork
         # cannot replace this with an invented anatomical pressure measurement.
         if latest:
@@ -408,15 +409,22 @@ def draw_lab(app, avail_w, h, offset_x=0):
                 theme.TEXT_3,
                 anchor="center",
             )
+        title_box = c.bbox(foot_title_item) if foot_title_item is not None else None
+        caption_y = max(grid_top + 49, title_box[3] + 6 if title_box else 0)
+        caption_item = text(c, right_start + 18, caption_y,
+                            "Interpolated from four board zones · not plantar pressure", 9,
+                            theme.TEXT_3, width=half - 36, tags="lab-foot-caption")
+        caption_box = c.bbox(caption_item)
+        foot_top = max(grid_top + 70, caption_box[3] + 8 if caption_box else 0)
         fw = (half - 66) / 2
-        fh = middle - grid_top - 64
+        fh = middle - foot_top - 34
         if latest:
             app.draw_single_foot_heatmap(
-                right_start + 20, grid_top + 45, fw, fh, is_left=True, latest=latest
+                right_start + 20, foot_top, fw, fh, is_left=True, latest=latest
             )
             app.draw_single_foot_heatmap(
                 right_start + 46 + fw,
-                grid_top + 45,
+                foot_top,
                 fw,
                 fh,
                 is_left=False,
@@ -430,7 +438,7 @@ def draw_lab(app, avail_w, h, offset_x=0):
                 (
                     "No pressure captured for this shot"
                     if reviewing
-                    else "No board connected\nConnect boards in Setup or start Demo swing"
+                    else "No live pressure data\nConnect boards in Setup or start Demo swing"
                 ),
                 11,
                 theme.TEXT_3,
@@ -438,16 +446,23 @@ def draw_lab(app, avail_w, h, offset_x=0):
                 justify="center",
                 width=half - 44,
             )
-        app.draw_force_timeline_canvas(
-            x0 + 8, middle + 53, half - 16, metrics_y - middle - 77, series="transfer"
-        )
-        app.draw_force_timeline_canvas(
-            right_start + 8,
-            middle + 53,
-            half - 16,
-            metrics_y - middle - 77,
-            series="force",
-        )
+        text(c, right_start + 18, middle - 19,
+             "Color: low → high relative load · scaled to this frame", 8, theme.TEXT_3)
+        if latest or reviewing:
+            app.draw_force_timeline_canvas(
+                x0 + 8, middle + 65, half - 16, metrics_y - middle - 89, series="transfer"
+            )
+            app.draw_force_timeline_canvas(
+                right_start + 8,
+                middle + 65,
+                half - 16,
+                metrics_y - middle - 89,
+                series="force",
+            )
+        else:
+            for px, qx in ((x0, left_end), (right_start, x1)):
+                text(c, (px + qx) / 2, (middle + metrics_y) / 2,
+                     "Awaiting fresh pressure data", 11, theme.TEXT_3, anchor="center")
         panel(c, x0, metrics_y, x1, bottom)
         left = latest.get("pct_left") if latest else None
         right = latest.get("pct_right") if latest else None

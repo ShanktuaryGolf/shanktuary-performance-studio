@@ -3064,21 +3064,15 @@ class ShanktuaryApp:
 
     def poll_pressure_stream(self):
         try:
-            if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                pm = obs_server.pressure_manager
-                latest = pm.latest_frame
-                if latest:
-                    self.swing_lab_history.append(latest)
-                    if len(self.swing_lab_history) > 200:
-                        self.swing_lab_history.pop(0)
+            pm = getattr(obs_server, "pressure_manager", None)
+            from src.ui.lab_pressure_view import sync_live_history
+            sync_live_history(self, pm)
 
-                # Views that render live pressure state need the repaint:
-                # Swing Lab (8) and Setup (10). Without this the calibration
-                # countdown is drawn once and frozen. The step-on prompt shows
-                # live per-board weight, so it needs the repaint from ANY view.
+            # The Lab must expire stale content even when the manager disappears.
+            if pm:
                 self.tick_setup_flow()
-                if self.view_mode in (8, 10) or self.show_board_assign_modal:
-                    self.draw_screen()
+            if self.view_mode in (8, 10) or self.show_board_assign_modal:
+                self.draw_screen()
         except Exception:
             pass
         self.root.after(33, self.poll_pressure_stream)
@@ -8614,12 +8608,8 @@ class ShanktuaryApp:
             if trace:
                 latest = trace[-1]
         else:
-            if hasattr(obs_server, "pressure_manager") and obs_server.pressure_manager:
-                latest = obs_server.pressure_manager.latest_frame
-            if not latest and self.current_shot:
-                trace = self.get_pressure_trace(self.current_shot)
-                if trace:
-                    latest = trace[-1]
+            from src.ui.lab_pressure_view import sync_live_history
+            latest = sync_live_history(self, getattr(obs_server, "pressure_manager", None))
 
         phase_str = latest.get("phase", "Address").title() if latest else "Ready"
         total_kg = latest.get("total_kg", 0.0) if latest else 0.0
@@ -8801,58 +8791,9 @@ class ShanktuaryApp:
                                         bot_y - bot_y1 - 28, series="force")
 
     def draw_single_foot_heatmap(self, x1, y1, w, h, is_left=True, latest=None):
-        """Show the two recorded board zones on this side, not a foot map.
-
-        raw_cells contains [TL, TR, BL, BR] in kg. Dual-board backends may
-        combine physical cells into those zones, so neither toe/heel anatomy
-        nor extra per-foot sensors can be inferred from this four-value frame.
-        The legacy method name is retained for existing callers.
-        """
-        x2, y2 = x1 + w, y1 + h
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=theme.SURFACE, outline=theme.HAIRLINE, width=1)
-        side = "LEFT" if is_left else "RIGHT"
-        role = "LEAD" if is_left != self.is_left_handed else "TRAIL"
-        cx = (x1 + x2) / 2
-        self.canvas.create_text(cx, y1 + 14, text=f"{role} SIDE ({side})", fill=theme.TEXT_2, font=(theme.ui_font(), 8))
-        self.canvas.create_text(cx, y1 + 31, text="Board zones, not foot pressure", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
-
-        def measured(value):
-            if isinstance(value, bool):
-                return None
-            try:
-                value = float(value)
-            except (TypeError, ValueError):
-                return None
-            return value if math.isfinite(value) and value >= 0 else None
-
-        frame = latest if isinstance(latest, dict) else {}
-        raw = frame.get("raw_cells")
-        # Never infer absent cells from total load or a fixed anatomical split.
-        if not isinstance(raw, (list, tuple)) or len(raw) != 4:
-            raw = [None] * 4
-        zones = ((0, "Front (TL)"), (2, "Back (BL)")) if is_left else ((1, "Front (TR)"), (3, "Back (BR)"))
-        loads = [(label, measured(raw[index])) for index, label in zones]
-        row_h = max(0, (h - 88) / 2)
-        for row, (label, kg) in enumerate(loads):
-            yy = y1 + 48 + row * row_h
-            self.canvas.create_rectangle(x1 + 10, yy, x2 - 10, yy + row_h - 6, fill=theme.BG, outline=theme.HAIRLINE)
-            self.canvas.create_text(x1 + 20, yy + row_h / 2 - 3, text=label, fill=theme.TEXT_2, font=(theme.ui_font(), 8), anchor="w")
-            self.canvas.create_text(x2 - 20, yy + row_h / 2 - 3,
-                                    text=f"{kg:.1f} kg" if kg is not None else "--",
-                                    fill=theme.TEXT if kg is not None else theme.TEXT_3,
-                                    font=(theme.ui_font(), 11 if w < 200 else 13), anchor="e")
-        if all(kg is None for _, kg in loads):
-            self.canvas.create_text(cx, y2 - 34, text="Per-cell data unavailable", fill=theme.TEXT_3, font=(theme.ui_font(), 7))
-
-        # A reported side percentage remains useful even without raw cells.
-        total = measured(frame.get("pct_left" if is_left else "pct_right"))
-        if total is not None and total > 100:
-            total = None
-        self.canvas.create_rectangle(x1 + 10, y2 - 24, x2 - 10, y2 - 6, fill=theme.SURFACE, outline=theme.HAIRLINE)
-        self.canvas.create_text(cx, y2 - 15,
-                                text=f"Share of load: {total:.0f}%" if total is not None else "Share of load: --",
-                                fill=theme.TEXT_2 if total is not None else theme.TEXT_3,
-                                font=(theme.ui_font(), 8))
+        """Illustrate measured board-zone loads without claiming plantar sensing."""
+        from src.ui.foot_heatmap import draw_estimated_foot_heatmap
+        draw_estimated_foot_heatmap(self, x1, y1, w, h, is_left=is_left, latest=latest)
 
     def draw_cop_trajectory_canvas(self, x1, y1, w, h, latest=None):
         x2, y2 = x1 + w, y1 + h
@@ -8876,31 +8817,52 @@ class ShanktuaryApp:
         # Scale: 150mm maps to max_r
         scale = max_r / 150.0
 
-        # Draw Trail from history
-        trail, _stored = self.pressure_display_trail()
+        from src.ui.lab_pressure_view import (
+            cop_trail_segments,
+            fade_color,
+            finite_number,
+        )
 
-        if len(trail) > 1:
-            pts = []
-            for item in trail[-120:]:
-                tx = cx + int(item.get("cop_x", 0.0) * scale)
-                ty = cy - int(item.get("cop_y", 0.0) * scale)
-                pts.append((tx, ty, item.get("phase", "Address")))
-            
-            for i in range(len(pts) - 1):
-                p1, p2 = pts[i], pts[i + 1]
-                ph = p2[2]
-                seg_col = theme.ACCENT_TEXT if "ADDR" in ph.upper() else (theme.WARN if "BACK" in ph.upper() else (theme.DANGER if "IMPACT" in ph.upper() else theme.ACCENT_TEXT))
-                self.canvas.create_line(p1[0], p1[1], p2[0], p2[1], fill=seg_col, width=2)
-
-        # Current COP Bullseye Dot
-        cur_cop_x = latest.get("cop_x", 0.0) if latest else 0.0
-        cur_cop_y = latest.get("cop_y", 0.0) if latest else 0.0
-        dot_x = cx + int(cur_cop_x * scale)
-        dot_y = cy - int(cur_cop_y * scale)
-
-        self.canvas.create_oval(dot_x - 12, dot_y - 12, dot_x + 12, dot_y + 12, fill="", outline=theme.ACCENT_TEXT, width=2)
-        self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5, fill=theme.ACCENT_TEXT, outline=theme.TEXT)
-        self.canvas.create_text(dot_x + 14, dot_y, text=f"({cur_cop_x:+.0f}, {cur_cop_y:+.0f})", fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
+        trail, stored = self.pressure_display_trail()
+        reviewing = self.is_reviewing_past_shot()
+        demo = bool(getattr(self, "lab_demo_running", False))
+        # A just-landed shot must not turn into a ghost live trail when one
+        # current sample arrives or the board stops. Historical review is explicit.
+        stored = bool(stored and reviewing and not demo)
+        if not stored and not demo:
+            trail = self.swing_lab_history
+        reference = time.monotonic()
+        if demo:
+            # Lab preview uses elapsed+4 seconds, not the sensor monotonic clock.
+            started = getattr(self, "lab_demo_started", None)
+            reference = (time.monotonic() - started + 4 if started is not None
+                         else finite_number((latest or {}).get("timestamp")) or 0)
+        frame = latest if isinstance(latest, dict) else {}
+        load = finite_number(frame.get("total_kg"))
+        stamp = finite_number(frame.get("timestamp"))
+        cx_value, cy_value = finite_number(frame.get("cop_x")), finite_number(frame.get("cop_y"))
+        valid = (load is not None and load >= 1 and cx_value is not None and cy_value is not None
+                 and (stored or (stamp is not None and 0 <= reference - stamp <= 1.5)))
+        visible_trail = trail if stored or valid else []
+        for first, second, strength in cop_trail_segments(visible_trail, reference, stored=stored):
+            ph = str(second.get("phase", "Address")).upper()
+            phase_color = (theme.WARN if "BACK" in ph else theme.DANGER if "IMPACT" in ph else theme.ACCENT_TEXT)
+            color = fade_color(phase_color, theme.SURFACE, strength)
+            self.canvas.create_line(cx + finite_number(first["cop_x"]) * scale, cy - finite_number(first["cop_y"]) * scale,
+                                    cx + finite_number(second["cop_x"]) * scale, cy - finite_number(second["cop_y"]) * scale,
+                                    fill=color, width=1 + 1.6 * strength, capstyle="round", tags="cop-trail")
+        if not valid:
+            self.canvas.create_text(cx, cy + 28, text="No loaded pressure" if load is not None and load < 1
+                                    else "Awaiting fresh pressure", fill=theme.TEXT_3,
+                                    font=(theme.ui_font(), 8), tags="cop-unavailable")
+            return
+        dot_x, dot_y = cx + cx_value * scale, cy - cy_value * scale
+        self.canvas.create_oval(dot_x - 12, dot_y - 12, dot_x + 12, dot_y + 12,
+                                fill="", outline=theme.ACCENT_TEXT, width=2, tags="cop-current")
+        self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5,
+                                fill=theme.ACCENT_TEXT, outline=theme.TEXT, tags="cop-current")
+        self.canvas.create_text(dot_x + 14, dot_y, text=f"({cx_value:+.0f}, {cy_value:+.0f})",
+                                fill=theme.TEXT, font=(theme.ui_font(), 7, "bold"), anchor="w")
 
     def draw_force_timeline_canvas(self, x1, y1, w, h, series="transfer"):
         """Timeline curve for the swing.
@@ -8913,6 +8875,12 @@ class ShanktuaryApp:
         x2, y2 = x1 + w, y1 + h
 
         trail, _stored = self.pressure_display_trail()
+        if not self.is_reviewing_past_shot() and not getattr(self, "lab_demo_running", False):
+            from src.ui.lab_pressure_view import current_live_frame
+            # First live sample and stopped streams must not silently borrow
+            # the last shot's stored force curve under a live label.
+            trail = self.swing_lab_history if current_live_frame(getattr(obs_server, "pressure_manager", None)) else []
+            _stored = False
 
         gx1, gx2 = x1 + 46, x2 - 16
         gy1, gy2 = y1 + 22, y2 - 26

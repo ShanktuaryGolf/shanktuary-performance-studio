@@ -29,6 +29,11 @@ class Canvas:
     def create_oval(self, *coords, **options):
         return self._add("oval", *coords, **options)
 
+    def bbox(self, item):
+        # This recorder has no font engine. Match Tk's unavailable-geometry
+        # result so painters can use their explicit fallback layout.
+        return None
+
     def words(self):
         return [opt["text"] for _, _, opt in self.items if "text" in opt]
 

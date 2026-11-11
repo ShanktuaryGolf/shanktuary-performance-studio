@@ -263,28 +263,25 @@ class ShanktuaryDesktopApp(studio.ShanktuaryApp):
 
         try:
             pm = getattr(studio.obs_server, "pressure_manager", None)
+            from .lab_pressure_view import sync_live_history
+            latest = sync_live_history(self, pm)
             if pm:
-                latest = pm.latest_frame
-                if latest and latest is not getattr(
-                    self, "_last_concept_pressure_frame", None
-                ):
-                    self._last_concept_pressure_frame = latest
-                    self.swing_lab_history.append(latest)
-                    self.swing_lab_history[:] = self.swing_lab_history[-200:]
                 self.tick_setup_flow()
-                now = time.monotonic()
-                live = self.view_mode in (8, 12) and latest is not getattr(
-                    self, "_last_concept_painted_frame", None
-                )
-                interval = 0.1 if live else 0.25
-                if (
-                    live or self.view_mode == 10 or self.show_board_assign_modal
-                ) and now - getattr(
-                    self, "_last_concept_pressure_paint", 0
-                ) >= interval:
-                    self.draw_screen()
-                    self._last_concept_pressure_paint = time.monotonic()
-                    self._last_concept_painted_frame = latest
+            now = time.monotonic()
+            # Lab decay and stale-state transitions must repaint even
+            # when no new sample object arrives or the golfer stays still.
+            live = self.view_mode == 8 or (self.view_mode == 12 and latest is not getattr(
+                self, "_last_concept_painted_frame", None
+            ))
+            interval = 0.1 if live else 0.25
+            if (
+                live or self.view_mode == 10 or self.show_board_assign_modal
+            ) and now - getattr(
+                self, "_last_concept_pressure_paint", 0
+            ) >= interval:
+                self.draw_screen()
+                self._last_concept_pressure_paint = time.monotonic()
+                self._last_concept_painted_frame = latest
         except Exception:
             pass
         self.root.after(100, self.poll_pressure_stream)

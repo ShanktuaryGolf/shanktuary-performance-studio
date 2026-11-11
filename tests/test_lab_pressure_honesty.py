@@ -1,5 +1,6 @@
 """Lab must not substitute live frames or invent anatomical measurements."""
 
+import time
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -34,8 +35,9 @@ def lab_app(monkeypatch, trace=None, *, reviewing=True, demo=False):
     live = {
         "pct_left": 61, "pct_right": 39, "phase": "Address", "total_kg": 80,
         "cop_x": 17, "cop_y": 12, "force_bw": 1.2, "raw_cells": [10, 20, 30, 40],
+        "timestamp": time.monotonic(),
     }
-    monkeypatch.setattr(obs_server, "pressure_manager", SimpleNamespace(latest_frame=live, is_simulator=demo))
+    monkeypatch.setattr(obs_server, "pressure_manager", SimpleNamespace(latest_frame=live, is_simulator=demo, backend=SimpleNamespace(is_open=True)))
     app = ShanktuaryApp.__new__(ShanktuaryApp)
     app.canvas = Canvas()
     app.current_shot = {"id": "selected-shot", "pressure_trace": trace}
@@ -124,7 +126,8 @@ def test_real_frame_zone_mapping_and_kg_units_are_preserved(is_left, left_handed
     side = "LEFT" if is_left else "RIGHT"
     role = "LEAD" if is_left != left_handed else "TRAIL"
     assert f"{role} SIDE ({side})" in words
-    assert "Board zones, not foot pressure" in words
+    assert "Estimated foot load" in words
+    assert "Not plantar pressure" in words
     assert [word for word in words if word.endswith(" kg")] == (["10.0 kg", "30.0 kg"] if is_left else ["20.0 kg", "40.0 kg"])
     assert ("Front (TL)" if is_left else "Front (TR)") in words
     assert ("Back (BL)" if is_left else "Back (BR)") in words
@@ -148,7 +151,7 @@ def test_missing_frame_or_missing_side_share_does_not_default_to_half():
 
 @pytest.mark.parametrize("size", [(160, 160), (250, 270)])
 @pytest.mark.parametrize("raw", [None, [10, 20, 30, 40]])
-def test_board_zone_labels_fit_without_overlap_on_real_canvas(size, raw):
+def test_board_zone_labels_fit_without_overlap_on_real_canvas(size, raw, monkeypatch):
     import tkinter as tk
 
     from shanktuary_performance_studio import ShanktuaryApp
@@ -157,6 +160,8 @@ def test_board_zone_labels_fit_without_overlap_on_real_canvas(size, raw):
         root = tk.Tk()
     except tk.TclError:
         pytest.skip("graphical display required")
+    import theme
+    monkeypatch.setattr(theme, "_UI_FONT", theme._resolve_ui_font())
     width, height = size
     canvas = tk.Canvas(root, width=width, height=height)
     canvas.pack()
